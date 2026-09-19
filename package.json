@@ -1,0 +1,49 @@
+{
+  "name": "dsh-game-material-master",
+  "version": "0.1.0",
+  "description": "游戏素材大师：DSH 插件，包含八方向图生成、图片生成、序列帧生成三个游戏素材模块。火山方舟 Seedream 生图 + MiniMax 图生视频 + 本地抠绿幕合成。",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-api-gateway"
+      ]
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "license": "MIT",
+  "files": [
+    "lib",
+    "README.md",
+    "cordis.patch.yml"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/strip-client-export.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-typert-protocol": "*",
+    "@types/node": "^26.2.0",
+    "typescript": "^7.0.2",
+    "zod": "^4.4.3"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "game-assets",
+    "sprite-sheet",
+    "chroma-key",
+    "seedream",
+    "minimax"
+  ]
+}

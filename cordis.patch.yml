@@ -1,0 +1,6 @@
+# dsh-game-material-master bundle patch.
+# 用 `dsh plugin --profile web add <本包>` 安装时，profile 会自动把本包追加进
+# dsh.profile.bundles 并应用这一层，插件随即挂载，无需手工编辑 cordis.patch.yml。
+- insert:
+    - id: game-material-master
+      name: dsh-game-material-master

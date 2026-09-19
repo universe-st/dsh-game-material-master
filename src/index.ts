@@ -1,0 +1,994 @@
+/**
+* dsh-8dir-sprites —— 宿主半区。
+*
+* 一个 Typert 远程服务（"spriteStudio"）承担整条流水线的控制面：
+* 配置读写、项目 CRUD、生图 / 视频 / 抽帧 / 合成四个阶段的启动与状态查询、
+* 以及每一步的验收打标。
+*
+* 另外用 `ctx.webServer` 注册一条 prefix 路由，把项目目录里的图片和视频
+* 直接发给浏览器——否则界面每帧都要靠 RPC 传 base64，又慢又费内存。
+*/
+import { createReadStream } from "node:fs";
+import { mkdir, stat, writeFile } from "node:fs/promises";
+import { basename, extname, join } from "node:path";
+import { spawn } from "node:child_process";
+import { TypertRemoteService } from "@deepseek-ai/dsh-typert-protocol";
+import { ARK_MODEL_PRESETS, DEFAULT_CONFIG, ROW_ORDER_VERSION, MINIMAX_HOST_PRESETS, MINIMAX_MODEL_PRESETS, loadConfig, maskConfig, migrateLegacyDataRoot, projectsRoot, saveConfig } from "./config.js";
+import { DEFAULT_ROW_ORDER, DEFAULT_VIDEO_PROMPT, DIRECTION_KEYS, defaultImagePrompts, directionOf } from "./directions.js";
+import { checkFfmpeg } from "./media.js";
+import { testArk } from "./ark.js";
+import { capabilityOf, testMiniMax } from "./minimax.js";
+import { disposePipeline, ensurePoller, listJobs, pollVideosOnce, startAllImages, startCompose, startExtract, startImage, startRekey, startVideos, clearVideos } from "./pipeline.js";
+import { assetPath, createProject, deleteProject, listProjects, log, patchProject, projectDir, projectExists, readProject, } from "./store.js";
+import * as imagegen from "./imagegen.js";
+import * as seqgen from "./seqgen.js";
+import { MANIFEST, METHODS, SERVICE_NAME } from "./wire.js";
+/**
+ * 游戏素材大师 —— 宿主半区。
+ *
+ * 一个 Typert 远程服务（"gameStudio"）承载三个功能模块的控制面：
+ *   ① 八方向图生成  ② 图片生成  ③ 序列帧生成
+ * 三者共用同一套配置（API Key / 模型 / 抠像默认值），但各自独立存项目。
+ *
+ * 另外用 `ctx.webServer` 注册一条 prefix 路由，把三个模块的产物直接发给浏览器。
+ */
+export const name = "dsh-game-material-master";
+/**
+* `webServer` 必须声明成硬依赖：它要等真正 listen 成功之后才可用，
+* 而本插件的 `apply` 与它几乎同时发生——只用 `ctx.get()` 探测的话，
+* 大概率拿到 undefined，路由就永远不会注册（表现是资源请求一路 404）。
+* 声明 inject 后 cordis 会把本插件挂起，直到 webServer 就绪再 apply。
+*/
+export const inject = ["typert", "webServer"];
+const ROUTE_PREFIX = "/dsh-game-material-master";
+/**
+* 改动这些设置会让已经生成的整图失效，必须重新合成。
+* `workingLongEdge` / `cropInset` 不在其中——它们属于抽帧参数，另走 stale 标记。
+*/
+const COMPOSE_SETTINGS = [
+  "cellWidth",
+  "cellHeight",
+  "frameCount",
+  "pixelSize",
+  "autoCrop",
+  "fillRatio",
+  "bottomMargin",
+  "fitMode",
+  "rowOrder",
+  "keyLow",
+  "keyHigh",
+  "despill",
+  "bgTolerance",
+  "edgeShrink"
+];
+const PROJECT_ID_PATTERN = /^p[a-z0-9]{4,40}$/;
+const MIME_TYPES = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".gif": "image/gif",
+  ".bmp": "image/bmp",
+  ".mp4": "video/mp4",
+  ".webm": "video/webm",
+  ".json": "application/json; charset=utf-8"
+};
+function asString(value, fallback = "") {
+  return typeof value === "string" ? value : fallback;
+}
+function asRecord(value) {
+  return value !== null && typeof value === "object" ? value : {};
+}
+function clampInt(value, fallback, min, max) {
+  const n = typeof value === "number" ? value : Number.parseFloat(String(value ?? ""));
+  if (!Number.isFinite(n))
+    return fallback;
+  return Math.min(max, Math.max(min, Math.round(n)));
+}
+function clampFloat(value, fallback, min, max) {
+  const n = typeof value === "number" ? value : Number.parseFloat(String(value ?? ""));
+  if (!Number.isFinite(n))
+    return fallback;
+  return Math.min(max, Math.max(min, n));
+}
+/** 从 base64 头部嗅探图片类型，避免用户上传一个改了后缀的任意文件。 */
+function sniffImage(base64) {
+  let head;
+  try {
+    head = Buffer.from(base64.slice(0, 64), "base64");
+  }
+  catch {
+    return undefined;
+  }
+  if (head.length >= 8 && head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4e && head[3] === 0x47) {
+    return { ext: "png", mime: "image/png" };
+  }
+  if (head.length >= 3 && head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) {
+    return { ext: "jpg", mime: "image/jpeg" };
+  }
+  if (head.length >= 12 && head.toString("ascii", 0, 4) === "RIFF" && head.toString("ascii", 8, 12) === "WEBP") {
+    return { ext: "webp", mime: "image/webp" };
+  }
+  if (head.length >= 6 && head.toString("ascii", 0, 3) === "GIF") {
+    return { ext: "gif", mime: "image/gif" };
+  }
+  if (head.length >= 2 && head.toString("ascii", 0, 2) === "BM") {
+    return { ext: "bmp", mime: "image/bmp" };
+  }
+  return undefined;
+}
+function safeFileName(input) {
+  const base = basename(input).replace(/[^\w.\-()\u4e00-\u9fa5]+/g, "_");
+  return base === "" ? "source" : base.slice(0, 120);
+}
+export class GameStudioGateway extends TypertRemoteService {
+  ffmpegCache;
+  constructor(ctx) {
+    super(ctx, SERVICE_NAME);
+  }
+  // ── 配置 ────────────────────────────────────────────────────────────────
+  async configView() {
+    const config = await loadConfig();
+    return this.decorateConfig(config);
+  }
+  async decorateConfig(config) {
+    if (this.ffmpegCache === undefined)
+      this.ffmpegCache = await checkFfmpeg();
+    return {
+      ...maskConfig(config),
+      rowOrder: [...config.rowOrder],
+      defaults: { ...DEFAULT_CONFIG },
+      arkModels: ARK_MODEL_PRESETS,
+      minimaxModels: MINIMAX_MODEL_PRESETS,
+      minimaxHosts: MINIMAX_HOST_PRESETS,
+      // 分辨率档位与时长区间都跟着模型走，界面据此渲染控件。
+      minimaxCapabilities: capabilityOf(config.minimaxModel),
+      minimaxCapabilitiesByModel: Object.fromEntries(MINIMAX_MODEL_PRESETS.map((preset) => [preset.id, capabilityOf(preset.id)])),
+      directions: DIRECTION_KEYS.map((key) => {
+        const direction = directionOf(key);
+        return { key, label: direction?.label ?? key, refs: direction?.refs ?? [] };
+      }),
+      ffmpeg: this.ffmpegCache,
+      dataRoot: projectsRoot()
+    };
+  }
+  async getConfig() {
+    return this.configView();
+  }
+  /**
+  * 保存配置。
+  * 约定：`arkApiKey` / `minimaxApiKey` **只有用户确实改了才带**——不带就是保持原值，
+  * 带空串才是清除。这样界面就不必把明文 key 回填到输入框里。
+  */
+  async saveConfig(payload) {
+    const input = asRecord(payload);
+    const patch: any = {};
+    const directKeys = [
+      "arkBaseUrl",
+      "arkModel",
+      "arkSize",
+      "arkWatermark",
+      "arkTimeoutMs",
+      "minimaxBaseUrl",
+      "minimaxModel",
+      "minimaxDuration",
+      "minimaxResolution",
+      "minimaxPromptOptimizer",
+      "minimaxTimeoutMs",
+      "cellWidth",
+      "cellHeight",
+      "frameCount",
+      "fitMode",
+      "workingLongEdge",
+      "pixelSize",
+      "autoCrop",
+      "fillRatio",
+      "bottomMargin",
+      "cropInset",
+      "keyLow",
+      "keyHigh",
+      "despill",
+      "bgTolerance",
+      "edgeShrink",
+      "rowOrder",
+      "concurrency"
+    ];
+    for (const key of directKeys) {
+      if (input[key] !== undefined)
+        patch[key] = input[key];
+    }
+    if (typeof input.arkApiKey === "string")
+      patch.arkApiKey = input.arkApiKey.trim();
+    if (typeof input.minimaxApiKey === "string")
+      patch.minimaxApiKey = input.minimaxApiKey.trim();
+    if (input.clearArkApiKey === true)
+      patch.arkApiKey = "";
+    if (input.clearMinimaxApiKey === true)
+      patch.minimaxApiKey = "";
+    const saved = await saveConfig(patch);
+    this.ffmpegCache = undefined;
+    return this.decorateConfig(saved);
+  }
+  async testArk() {
+    const config = await loadConfig();
+    if (config.arkApiKey.trim() === "")
+      throw new Error("尚未配置火山方舟 API Key");
+    return testArk({
+      baseUrl: config.arkBaseUrl,
+      apiKey: config.arkApiKey,
+      model: config.arkModel,
+      timeoutMs: config.arkTimeoutMs
+    });
+  }
+  async testMinimax() {
+    const config = await loadConfig();
+    return testMiniMax({
+      baseUrl: config.minimaxBaseUrl,
+      apiKey: config.minimaxApiKey,
+      model: config.minimaxModel,
+      timeoutMs: config.minimaxTimeoutMs
+    });
+  }
+  // ── 项目 ────────────────────────────────────────────────────────────────
+  async listProjects() {
+    return { projects: await listProjects() };
+  }
+  async createProject(payload) {
+    const project = await createProject(asString(asRecord(payload).name, ""));
+    return { projectId: project.id };
+  }
+  async getProject(payload) {
+    const projectId = asString(asRecord(payload).projectId);
+    const project = await readProject(projectId);
+    if (project === undefined)
+      throw new Error(`项目不存在：${projectId}`);
+    return {
+      ...project,
+      jobs: listJobs(projectId),
+      assetBase: `${ROUTE_PREFIX}/assets/${projectId}/`
+    };
+  }
+  async deleteProject(payload) {
+    const projectId = asString(asRecord(payload).projectId);
+    await deleteProject(projectId);
+    return { ok: true };
+  }
+  async renameProject(payload) {
+    const input = asRecord(payload);
+    const projectId = asString(input.projectId);
+    const nextName = asString(input.name).trim();
+    if (nextName === "")
+      throw new Error("项目名不能为空");
+    await patchProject(projectId, (project) => {
+      project.name = nextName.slice(0, 80);
+    });
+    return { ok: true };
+  }
+  async uploadSource(payload) {
+    const input = asRecord(payload);
+    const projectId = asString(input.projectId);
+    if (!(await projectExists(projectId)))
+      throw new Error(`项目不存在：${projectId}`);
+    const base64 = asString(input.data).replace(/^data:[^;]+;base64,/, "");
+    if (base64 === "")
+      throw new Error("没有收到图片数据");
+    const bytes = Buffer.from(base64, "base64");
+    if (bytes.length === 0)
+      throw new Error("图片数据为空");
+    if (bytes.length > 30 * 1024 * 1024)
+      throw new Error("源图超过 30 MB，请先压缩后再上传");
+    const sniffed = sniffImage(base64);
+    if (sniffed === undefined)
+      throw new Error("无法识别的图片格式（支持 PNG / JPEG / WebP / GIF / BMP）");
+    const originalName = safeFileName(asString(input.name, `source.${sniffed.ext}`));
+    const stem = originalName.replace(/\.[^.]+$/, "") || "source";
+    const relative = `source/${stem}.${sniffed.ext}`;
+    await mkdir(join(projectDir(projectId), "source"), { recursive: true });
+    await writeFile(assetPath(projectId, relative), bytes);
+    await patchProject(projectId, (project) => {
+      project.source = { file: relative, name: originalName };
+      log(project, "info", `已上传源图：${originalName}（${(bytes.length / 1024).toFixed(0)} KB）`);
+    });
+    return { ok: true, file: relative, name: originalName };
+  }
+  async savePrompts(payload) {
+    const input = asRecord(payload);
+    const projectId = asString(input.projectId);
+    const images = input.images === undefined ? undefined : asRecord(input.images);
+    const video = typeof input.video === "string" ? input.video : undefined;
+    const perDirection = input.videoPerDirection === undefined ? undefined : asRecord(input.videoPerDirection);
+    const resetImages = input.resetImagesToDefault === true;
+    const resetVideo = input.resetVideoToDefault === true;
+    await patchProject(projectId, (project) => {
+      // 提示词模板升级后（例如这次把方位语义改对），老项目要能一键重新套用默认值。
+      if (resetImages)
+        project.prompts.images = defaultImagePrompts();
+      if (resetVideo) {
+        project.prompts.video = DEFAULT_VIDEO_PROMPT;
+        project.prompts.videoPerDirection = {};
+      }
+      if (images !== undefined) {
+        for (const key of DIRECTION_KEYS) {
+          if (typeof images[key] === "string" && images[key].trim() !== "") {
+            project.prompts.images[key] = images[key];
+          }
+        }
+      }
+      if (video !== undefined && video.trim() !== "")
+        project.prompts.video = video;
+      if (perDirection !== undefined) {
+        for (const key of DIRECTION_KEYS) {
+          const value = perDirection[key];
+          if (typeof value === "string" && value.trim() !== "")
+            project.prompts.videoPerDirection[key] = value;
+          else
+            delete project.prompts.videoPerDirection[key];
+        }
+      }
+    });
+    return { ok: true };
+  }
+  async saveSettings(payload) {
+    const input = asRecord(payload);
+    const projectId = asString(input.projectId);
+    const raw = asRecord(input.settings);
+    const changed = await patchProject(projectId, (project) => {
+      const before = { ...project.settings };
+      const current = project.settings;
+      project.settings = {
+        cellWidth: clampInt(raw.cellWidth, current.cellWidth, 16, 2048),
+        cellHeight: clampInt(raw.cellHeight, current.cellHeight, 16, 2048),
+        frameCount: clampInt(raw.frameCount, current.frameCount, 1, 64),
+        fitMode: raw.fitMode === "stretch" ? "stretch" : raw.fitMode === "contain" ? "contain" : current.fitMode,
+        workingLongEdge: clampInt(raw.workingLongEdge, current.workingLongEdge, 128, 2048),
+        pixelSize: clampInt(raw.pixelSize, current.pixelSize, 0, 32),
+        autoCrop: typeof raw.autoCrop === "boolean" ? raw.autoCrop : current.autoCrop,
+        fillRatio: clampFloat(raw.fillRatio, current.fillRatio, 0.5, 1),
+        bottomMargin: clampInt(raw.bottomMargin, current.bottomMargin, 0, 64),
+        cropInset: clampFloat(raw.cropInset, current.cropInset, 0, 0.2),
+        keyLow: clampInt(raw.keyLow, current.keyLow, 0, 255),
+        keyHigh: clampInt(raw.keyHigh, current.keyHigh, 1, 255),
+        despill: clampFloat(raw.despill, current.despill, 0, 1),
+        bgTolerance: clampInt(raw.bgTolerance, current.bgTolerance, 0, 160),
+        edgeShrink: clampInt(raw.edgeShrink, current.edgeShrink, 0, 8),
+        rowOrder: Array.isArray(raw.rowOrder) && raw.rowOrder.length > 0
+          ? raw.rowOrder.filter((key) => typeof key === "string" && directionOf(key) !== undefined)
+          : current.rowOrder.length > 0
+            ? current.rowOrder
+            : [...DEFAULT_ROW_ORDER],
+        rowOrderVersion: ROW_ORDER_VERSION,
+        concurrency: clampInt(raw.concurrency, current.concurrency, 1, 8)
+      };
+      if (project.settings.rowOrder.length === 0)
+        project.settings.rowOrder = [...DEFAULT_ROW_ORDER];
+      if (project.settings.keyHigh <= project.settings.keyLow)
+        project.settings.keyHigh = Math.min(255, project.settings.keyLow + 1);
+      const differs = (fields) => fields.some((field) => JSON.stringify(before[field]) !== JSON.stringify(project.settings[field]));
+      if (differs(["workingLongEdge", "cropInset"])) {
+        // 抽帧参数变了：raw.bin 已经作废，必须重抽，不能只重新合成。
+        for (const key of DIRECTION_KEYS) {
+          const node = project.frames[key];
+          if (node?.raw !== undefined)
+            node.stale = true;
+        }
+      }
+      return { compose: differs(COMPOSE_SETTINGS) };
+    });
+    // 改行序、格子尺寸、抠像参数……都会让已经生成的整图失效。这里自动重跑一次
+    // 合成，否则整图/预览会和设置对不上（按新行号去切旧图 → 取到错误的方向）。
+    if (changed.compose === true) {
+      const fresh = await readProject(projectId);
+      const hasFrames = fresh !== undefined && DIRECTION_KEYS.some((key) => fresh.frames[key]?.raw !== undefined);
+      if (hasFrames)
+        startCompose(projectId);
+    }
+    return { ok: true };
+  }
+  async setApproved(payload) {
+    const input = asRecord(payload);
+    const projectId = asString(input.projectId);
+    const stage = asString(input.stage);
+    const key = typeof input.key === "string" ? input.key : undefined;
+    const approved = input.approved === true;
+    await patchProject(projectId, (project) => {
+      if (stage === "images" && key !== undefined && project.images[key] !== undefined) {
+        project.images[key].approved = approved;
+      }
+      else if (stage === "images") {
+        for (const k of DIRECTION_KEYS)
+          project.images[k].approved = approved;
+      }
+      else if (stage === "videos" && key !== undefined && project.videos[key] !== undefined) {
+        project.videos[key].approved = approved;
+      }
+      else if (stage === "videos") {
+        for (const k of DIRECTION_KEYS)
+          if (project.videos[k].status === "ready")
+            project.videos[k].approved = approved;
+      }
+      else if (stage === "frames" && key !== undefined && project.frames[key] !== undefined) {
+        project.frames[key].approved = approved;
+      }
+      else if (stage === "frames") {
+        for (const k of DIRECTION_KEYS)
+          if (project.frames[k].status === "ready")
+            project.frames[k].approved = approved;
+      }
+      else if (stage === "sheet") {
+        project.sheet.approved = approved;
+      }
+    });
+    return { ok: true };
+  }
+  async revealProject(payload) {
+    const projectId = asString(asRecord(payload).projectId);
+    if (!(await projectExists(projectId)))
+      throw new Error(`项目不存在：${projectId}`);
+    const dir = projectDir(projectId);
+    const command = process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer" : "xdg-open";
+    try {
+      spawn(command, [dir], { detached: true, stdio: "ignore" }).unref();
+    }
+    catch (error) {
+      throw new Error(`无法打开目录：${error instanceof Error ? error.message : String(error)}`);
+    }
+    return { ok: true, dir };
+  }
+  // ── 流水线控制 ──────────────────────────────────────────────────────────
+  async runImage(payload) {
+    const input = asRecord(payload);
+    const projectId = asString(input.projectId);
+    const key = asString(input.key);
+    if (directionOf(key) === undefined)
+      throw new Error(`未知方向：${key}`);
+    return startImage(projectId, key, {
+      prompt: typeof input.prompt === "string" ? input.prompt : undefined
+    });
+  }
+  async runImages(payload) {
+    const input = asRecord(payload);
+    return startAllImages(asString(input.projectId), input.force === true);
+  }
+  async runVideos(payload) {
+    const input = asRecord(payload);
+    const projectId = asString(input.projectId);
+    const project = await readProject(projectId);
+    if (project === undefined)
+      throw new Error(`项目不存在：${projectId}`);
+    const keys = Array.isArray(input.keys) ? input.keys.filter((k) => directionOf(k) !== undefined) : undefined;
+    const candidates = keys ?? DIRECTION_KEYS;
+    if (!candidates.some((key) => project.images[key]?.file !== undefined)) {
+      throw new Error("还没有可用的绿幕图，请先在第 1 步生成绿幕图");
+    }
+    // 重复提交会把正在跑的任务覆盖成孤儿（钱照花、结果拿不到），
+    // 所以这里同步拦掉，并且让界面能直接看到原因而不是只在日志里。
+    const running = candidates.filter((key) => {
+      const node = project.videos[key];
+      return node?.status === "running" && typeof node.taskId === "string";
+    });
+    const pending = candidates.filter((key) => !running.includes(key));
+    if (pending.length === 0) {
+      throw new Error(`这些方向已经在生成中，请等它们跑完：${running.join("、")}`);
+    }
+    return startVideos(projectId, pending);
+  }
+  async pollVideos(payload) {
+    const projectId = asString(asRecord(payload).projectId);
+    await pollVideosOnce(projectId);
+    return { ok: true, jobs: listJobs(projectId) };
+  }
+  async clearVideos(payload) {
+    const input = asRecord(payload);
+    const keys = Array.isArray(input.keys) ? input.keys.filter((k) => directionOf(k) !== undefined) : undefined;
+    await clearVideos(asString(input.projectId), keys);
+    return { ok: true };
+  }
+  async runFrames(payload) {
+    const input = asRecord(payload);
+    const projectId = asString(input.projectId);
+    const project = await readProject(projectId);
+    if (project === undefined)
+      throw new Error(`项目不存在：${projectId}`);
+    const keys = Array.isArray(input.keys) ? input.keys.filter((k) => directionOf(k) !== undefined) : undefined;
+    const candidates = keys ?? DIRECTION_KEYS;
+    if (!candidates.some((key) => project.videos[key]?.file !== undefined)) {
+      throw new Error("还没有可抽帧的视频，请先在第 2 步生成视频");
+    }
+    return startExtract(projectId, keys);
+  }
+  async rekey(payload) {
+    const projectId = asString(asRecord(payload).projectId);
+    const project = await readProject(projectId);
+    if (project === undefined)
+      throw new Error(`项目不存在：${projectId}`);
+    if (!DIRECTION_KEYS.some((key) => project.frames[key]?.raw !== undefined)) {
+      throw new Error("还没有抽过帧，请先在第 3 步抽取序列帧");
+    }
+    return startRekey(projectId);
+  }
+  async compose(payload) {
+    const projectId = asString(asRecord(payload).projectId);
+    const project = await readProject(projectId);
+    if (project === undefined)
+      throw new Error(`项目不存在：${projectId}`);
+    if (!DIRECTION_KEYS.some((key) => project.frames[key]?.raw !== undefined)) {
+      throw new Error("还没有抽过帧，请先在第 3 步抽取序列帧");
+    }
+    return startCompose(projectId);
+  }
+  /** 方法表里声明的名字都要真实存在，这里做一次自检（仅开发期会失败）。 */
+  // ── 图片生成模块 ──────────────────────────────────────────────────────
+
+  async listImageJobs() {
+    return { jobs: await imagegen.listImageJobs() };
+  }
+
+  async createImageJob(payload) {
+    const job = await imagegen.createImageJob(asString(asRecord(payload).name, ""));
+    return { jobId: job.id };
+  }
+
+  async getImageJob(payload) {
+    const jobId = asString(asRecord(payload).jobId);
+    const job = await imagegen.readImageJob(jobId);
+    if (job === undefined) throw new Error(`任务不存在：${jobId}`);
+    return { ...job, assetBase: `${ROUTE_PREFIX}/image-assets/${jobId}/` };
+  }
+
+  async deleteImageJob(payload) {
+    await imagegen.deleteImageJob(asString(asRecord(payload).jobId));
+    return { ok: true };
+  }
+
+  async saveImageJob(payload) {
+    const input = asRecord(payload);
+    const jobId = asString(input.jobId);
+    const job = await imagegen.readImageJob(jobId);
+    if (job === undefined) throw new Error(`任务不存在：${jobId}`);
+    if (typeof input.name === "string" && input.name.trim() !== "") job.name = input.name.trim().slice(0, 80);
+    if (typeof input.prompt === "string") job.prompt = input.prompt;
+    if (typeof input.suffix === "string") job.suffix = input.suffix;
+    if (input.settings !== undefined) {
+      const raw = asRecord(input.settings);
+      job.settings.model = asString(raw.model, job.settings.model);
+      job.settings.size = asString(raw.size, job.settings.size);
+      job.settings.count = clampInt(raw.count, job.settings.count, 1, 8);
+      job.settings.watermark = raw.watermark === true;
+    }
+    if (input.keying !== undefined) applyKeying(job.keying, asRecord(input.keying));
+    await imagegen.writeImageJob(job);
+    return { ok: true };
+  }
+
+  async uploadImageRef(payload) {
+    const input = asRecord(payload);
+    await imagegen.addImageRef(asString(input.jobId), asString(input.name, "ref.png"), asString(input.data));
+    return { ok: true };
+  }
+
+  async removeImageRef(payload) {
+    const input = asRecord(payload);
+    await imagegen.removeImageRef(asString(input.jobId), asString(input.file));
+    return { ok: true };
+  }
+
+  async addImageItem(payload) {
+    const input = asRecord(payload);
+    await imagegen.addImageToJob(asString(input.jobId), asString(input.name, "image.png"), asString(input.data));
+    return { ok: true };
+  }
+
+  async removeImageItem(payload) {
+    const input = asRecord(payload);
+    await imagegen.removeImageItem(asString(input.jobId), clampInt(input.index, 0, 0, 9999));
+    return { ok: true };
+  }
+
+  async runImageJob(payload) {
+    const input = asRecord(payload);
+    const jobId = asString(input.jobId);
+    const job = await imagegen.readImageJob(jobId);
+    if (job === undefined) throw new Error(`任务不存在：${jobId}`);
+    if (job.prompt.trim() === "") throw new Error("提示词为空，请先填写");
+    const count = clampInt(input.count, job.settings.count, 1, 8);
+    if (count !== job.settings.count) {
+      job.settings.count = count;
+      await imagegen.writeImageJob(job);
+    }
+    let started = 0;
+    for (let i = 0; i < count; i++) {
+      if (kickImageItem(jobId, i)) started++;
+    }
+    if (started === 0) throw new Error("这些图片已经在生成中，请等它们跑完");
+    return { started: true, count: started };
+  }
+
+  async keyImageJob(payload) {
+    const jobId = asString(asRecord(payload).jobId);
+    const ok = kickImageKey(jobId);
+    return ok ? { started: true } : { started: false, reason: "抠像已在进行中" };
+  }
+
+  // ── 序列帧生成模块 ────────────────────────────────────────────────────
+
+  async listSequenceJobs() {
+    return { jobs: await seqgen.listSequenceJobs() };
+  }
+
+  async createSequenceJob(payload) {
+    const job = await seqgen.createSequenceJob(asString(asRecord(payload).name, ""));
+    return { jobId: job.id };
+  }
+
+  async getSequenceJob(payload) {
+    const jobId = asString(asRecord(payload).jobId);
+    const job = await seqgen.readSequenceJob(jobId);
+    if (job === undefined) throw new Error(`任务不存在：${jobId}`);
+    return { ...job, tasks: seqgen.listSequenceTasks(jobId), assetBase: `${ROUTE_PREFIX}/sequence-assets/${jobId}/` };
+  }
+
+  async deleteSequenceJob(payload) {
+    await seqgen.deleteSequenceJob(asString(asRecord(payload).jobId));
+    return { ok: true };
+  }
+
+  async saveSequenceJob(payload) {
+    const input = asRecord(payload);
+    const jobId = asString(input.jobId);
+    const job = await seqgen.readSequenceJob(jobId);
+    if (job === undefined) throw new Error(`任务不存在：${jobId}`);
+    if (typeof input.name === "string" && input.name.trim() !== "") job.name = input.name.trim().slice(0, 80);
+    if (input.mode === "frames" || input.mode === "reference") job.mode = input.mode;
+    if (typeof input.prompt === "string") job.prompt = input.prompt;
+    if (typeof input.suffix === "string") job.suffix = input.suffix;
+    if (input.settings !== undefined) {
+      const raw = asRecord(input.settings);
+      const before = { ...job.settings };
+      job.settings.model = asString(raw.model, job.settings.model);
+      job.settings.duration = clampInt(raw.duration, job.settings.duration, 1, 30);
+      job.settings.resolution = asString(raw.resolution, job.settings.resolution);
+      job.settings.promptOptimizer = raw.promptOptimizer !== false;
+      job.settings.frameCount = clampInt(raw.frameCount, job.settings.frameCount, 1, 64);
+      job.settings.cellWidth = clampInt(raw.cellWidth, job.settings.cellWidth, 16, 2048);
+      job.settings.cellHeight = clampInt(raw.cellHeight, job.settings.cellHeight, 16, 2048);
+      job.settings.longEdge = clampInt(raw.longEdge, job.settings.longEdge, 128, 2048);
+      job.settings.cropInset = clampFloat(raw.cropInset, job.settings.cropInset, 0, 0.2);
+      job.settings.pixelSize = clampInt(raw.pixelSize, job.settings.pixelSize, 0, 32);
+      // 抽帧参数变了，raw.bin 作废，必须重抽。
+      if (before.longEdge !== job.settings.longEdge || before.cropInset !== job.settings.cropInset) {
+        if (job.frames.raw !== undefined) job.frames.stale = true;
+      }
+    }
+    if (input.keying !== undefined) applyKeying(job.keying, asRecord(input.keying));
+    await seqgen.writeSequenceJob(job);
+    return { ok: true };
+  }
+
+  async uploadSequenceRef(payload) {
+    const input = asRecord(payload);
+    await seqgen.uploadSequenceRef(
+      asString(input.jobId),
+      asString(input.kind, "referenceImage") as seqgen.SequenceRefKind,
+      asString(input.name, "file"),
+      asString(input.data)
+    );
+    return { ok: true };
+  }
+
+  async removeSequenceRef(payload) {
+    const input = asRecord(payload);
+    await seqgen.removeSequenceRef(
+      asString(input.jobId),
+      asString(input.kind, "referenceImage") as seqgen.SequenceRefKind,
+      typeof input.file === "string" ? input.file : undefined
+    );
+    return { ok: true };
+  }
+
+  async runSequenceVideo(payload) {
+    const jobId = asString(asRecord(payload).jobId);
+    const job = await seqgen.readSequenceJob(jobId);
+    if (job === undefined) throw new Error(`任务不存在：${jobId}`);
+    if (job.video.status === "running" && typeof job.video.taskId === "string") {
+      throw new Error("视频已经在生成中，请等它跑完（重复提交会白花一次生成的钱）");
+    }
+    // 素材缺失同步报错，否则只会落进日志、界面上看着像「点了没反应」。
+    if (job.mode === "frames" && job.refs.firstFrame === undefined) {
+      throw new Error("首尾帧模式必须上传一张首帧图");
+    }
+    if (job.mode === "reference" && job.refs.referenceImages.length === 0 && job.refs.referenceVideos.length === 0) {
+      throw new Error("参考模式至少要上传一张参考图或一段参考视频");
+    }
+    if (job.frames.raw !== undefined && job.video.status === "empty") {
+      throw new Error("清空视频后才能重新生成");
+    }
+    return seqgen.startSequenceVideo(jobId);
+  }
+
+  async pollSequenceVideo(payload) {
+    await seqgen.pollSequenceOnce(asString(asRecord(payload).jobId));
+    return { ok: true };
+  }
+
+  async clearSequenceVideo(payload) {
+    const jobId = asString(asRecord(payload).jobId);
+    const job = await seqgen.readSequenceJob(jobId);
+    if (job === undefined) throw new Error(`任务不存在：${jobId}`);
+    job.video = { status: "empty" };
+    job.frames = { status: "empty", count: job.settings.frameCount, files: [], keyed: [] };
+    job.sheet = { status: "empty" };
+    await seqgen.writeSequenceJob(job);
+    return { ok: true };
+  }
+
+  async runSequenceFrames(payload) {
+    const input = asRecord(payload);
+    const jobId = asString(input.jobId);
+    const job = await seqgen.readSequenceJob(jobId);
+    if (job === undefined) throw new Error(`任务不存在：${jobId}`);
+    if (job.video.file === undefined) throw new Error("还没有可用视频，请先生成视频");
+    const count = input.count === undefined ? undefined : clampInt(input.count, job.settings.frameCount, 1, 64);
+    return seqgen.startSequenceFrames(jobId, count);
+  }
+
+  async keySequenceFrames(payload) {
+    const jobId = asString(asRecord(payload).jobId);
+    const job = await seqgen.readSequenceJob(jobId);
+    if (job === undefined) throw new Error(`任务不存在：${jobId}`);
+    if (job.frames.raw === undefined) throw new Error("还没有抽过帧，请先抽帧");
+    return seqgen.startSequenceKey(jobId);
+  }
+
+  async composeSequence(payload) {
+    const jobId = asString(asRecord(payload).jobId);
+    const job = await seqgen.readSequenceJob(jobId);
+    if (job === undefined) throw new Error(`任务不存在：${jobId}`);
+    if (job.frames.raw === undefined) throw new Error("还没有抽过帧，请先抽帧");
+    await seqgen.composeSequenceSheet(jobId);
+    return { started: true };
+  }
+
+  assertSurface() {
+    for (const spec of METHODS) {
+      if (typeof this[spec.method] !== "function") {
+        throw new Error(`gameStudio 缺少方法：${spec.method}`);
+      }
+    }
+  }
+}
+
+/**
+ * 把界面传来的抠像参数收敛进目标对象。
+ * 三个模块共用同一套参数名，所以收敛逻辑也共用。
+ */
+function applyKeying(target, raw): void {
+  target.keyLow = clampInt(raw.keyLow, target.keyLow, 0, 255);
+  target.keyHigh = clampInt(raw.keyHigh, target.keyHigh, 1, 255);
+  if (target.keyHigh <= target.keyLow) target.keyHigh = Math.min(255, target.keyLow + 1);
+  target.despill = clampFloat(raw.despill, target.despill, 0, 1);
+  target.bgTolerance = clampInt(raw.bgTolerance, target.bgTolerance, 0, 160);
+  target.edgeShrink = clampInt(raw.edgeShrink, target.edgeShrink, 0, 8);
+  if (typeof raw.enabled === "boolean") target.enabled = raw.enabled;
+}
+
+/**
+ * 图片模块的运行表：一张图一个槽位。
+ * 同一张图重复点「生成」会白花一次钱，所以这里和八方向模块一样做拒绝。
+ */
+const imageTasks = new Map<string, Set<string>>();
+
+function startedImageTask(jobId: string, key: string): boolean {
+  return imageTasks.get(jobId)?.has(key) === true;
+}
+
+function trackImageTask(jobId: string, key: string, run: () => Promise<unknown>): boolean {
+  if (startedImageTask(jobId, key)) return false;
+  const set = imageTasks.get(jobId) ?? new Set<string>();
+  imageTasks.set(jobId, set);
+  set.add(key);
+  void run()
+    .catch(() => undefined)
+    .finally(() => {
+      set.delete(key);
+      if (set.size === 0) imageTasks.delete(jobId);
+    });
+  return true;
+}
+
+function kickImageItem(jobId: string, index: number): boolean {
+  return trackImageTask(jobId, `image:${index}`, () => imagegen.generateImageItem(jobId, index));
+}
+
+function kickImageKey(jobId: string): boolean {
+  return trackImageTask(jobId, "image:key", () => imagegen.rekeyImageJob(jobId));
+}
+
+function disposeImageTasks(): void {
+  imageTasks.clear();
+}
+
+// ── 静态资源路由 ────────────────────────────────────────────────────────
+
+/** 各模块允许通过 HTTP 路由读取的子目录白名单。 */
+const SERVABLE_DIRS = new Set(["source", "images", "videos", "frames", "keyed", "preview", "out"]);
+const SERVABLE_IMAGE_DIRS = new Set(["refs", "out", "keyed"]);
+const SERVABLE_SEQUENCE_DIRS = new Set(["refs", "video-refs", "videos", "frames", "keyed", "out"]);
+
+type AssetScope = "assets" | "image-assets" | "sequence-assets";
+
+interface AssetTarget {
+  file: string;
+  dirs: Set<string>;
+}
+
+function resolveAssetTarget(scope: AssetScope, id: string, relative: string): AssetTarget | undefined {
+  if (scope === "assets") {
+    if (!PROJECT_ID_PATTERN.test(id)) return undefined;
+    return { file: assetPath(id, relative), dirs: SERVABLE_DIRS };
+  }
+  if (scope === "image-assets") {
+    if (!imagegen.isValidImageJobId(id)) return undefined;
+    return { file: imagegen.imageAssetPath(id, relative), dirs: SERVABLE_IMAGE_DIRS };
+  }
+  if (!seqgen.isValidSequenceJobId(id)) return undefined;
+  return { file: seqgen.sequenceAssetPath(id, relative), dirs: SERVABLE_SEQUENCE_DIRS };
+}
+
+function sendText(res, status: number, text: string): void {
+  res.writeHead(status, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" });
+  res.end(text);
+}
+
+/**
+ * 把三个模块的产物路径映射到磁盘文件：
+ *   /dsh-game-material-master/assets/<项目 id>/<相对路径>           八方向图
+ *   /dsh-game-material-master/image-assets/<任务 id>/<相对路径>      图片生成
+ *   /dsh-game-material-master/sequence-assets/<任务 id>/<相对路径>   序列帧生成
+ *
+ * 支持 Range：没有它浏览器里的 <video> 就不能拖动进度条，验收视频时会很难受。
+ */
+async function handleAsset(req, res): Promise<void> {
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    sendText(res, 405, "Method Not Allowed");
+    return;
+  }
+  const url = new URL(req.url ?? "/", "http://127.0.0.1");
+  const rest = decodeURIComponent(url.pathname.slice(ROUTE_PREFIX.length)).replace(/^\/+/, "");
+  const segments = rest.split("/").filter((segment) => segment !== "");
+  if (segments.length < 3) {
+    sendText(res, 404, "Not Found");
+    return;
+  }
+
+  const scope = segments[0] as AssetScope;
+  if (scope !== "assets" && scope !== "image-assets" && scope !== "sequence-assets") {
+    sendText(res, 404, "Not Found");
+    return;
+  }
+  const id = segments[1];
+  const relative = segments.slice(2).join("/");
+  if (relative.includes("..")) {
+    sendText(res, 400, "Bad Request");
+    return;
+  }
+
+  let target: AssetTarget | undefined;
+  try {
+    target = resolveAssetTarget(scope, id, relative);
+  } catch {
+    sendText(res, 400, "Bad Request");
+    return;
+  }
+  if (target === undefined) {
+    sendText(res, 400, "Bad Request");
+    return;
+  }
+  if (!target.dirs.has(relative.split("/")[0])) {
+    sendText(res, 403, "Forbidden");
+    return;
+  }
+
+  let info;
+  try {
+    info = await stat(target.file);
+  } catch {
+    sendText(res, 404, "Not Found");
+    return;
+  }
+  if (!info.isFile()) {
+    sendText(res, 404, "Not Found");
+    return;
+  }
+
+  const type = MIME_TYPES[extname(target.file).toLowerCase()] ?? "application/octet-stream";
+  const etag = `W/"${info.size.toString(16)}-${Math.floor(info.mtimeMs).toString(16)}"`;
+  const baseHeaders: Record<string, string> = {
+    "Content-Type": type,
+    ETag: etag,
+    "Last-Modified": new Date(info.mtimeMs).toUTCString(),
+    // 产物是不可变的（每次重跑都会换 mtime → 换 ETag），所以可以放心长缓存。
+    "Cache-Control": "private, max-age=300",
+    "Accept-Ranges": "bytes"
+  };
+
+  if (req.headers["if-none-match"] === etag) {
+    res.writeHead(304, baseHeaders);
+    res.end();
+    return;
+  }
+
+  const rangeHeader = req.headers.range;
+  if (typeof rangeHeader === "string") {
+    const match = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader.trim());
+    if (match !== null) {
+      const start = match[1] === "" ? Math.max(0, info.size - Number(match[2])) : Number(match[1]);
+      const end = match[1] === "" || match[2] === "" ? info.size - 1 : Math.min(info.size - 1, Number(match[2]));
+      if (Number.isFinite(start) && Number.isFinite(end) && start <= end && start < info.size) {
+        res.writeHead(206, {
+          ...baseHeaders,
+          "Content-Range": `bytes ${start}-${end}/${info.size}`,
+          "Content-Length": String(end - start + 1)
+        });
+        if (req.method === "HEAD") {
+          res.end();
+          return;
+        }
+        const stream = createReadStream(target.file, { start, end });
+        stream.on("error", () => res.destroy());
+        stream.pipe(res);
+        return;
+      }
+    }
+  }
+
+  res.writeHead(200, { ...baseHeaders, "Content-Length": String(info.size) });
+  if (req.method === "HEAD") {
+    res.end();
+    return;
+  }
+  const stream = createReadStream(target.file);
+  stream.on("error", () => res.destroy());
+  stream.pipe(res);
+}
+
+// ── cordis 插件体 ────────────────────────────────────────────────────────
+export function apply(ctx) {
+  // 旧版本的数据目录叫 8dir-sprites，插件改名后搬一次，已有项目无缝接上。
+  void migrateLegacyDataRoot()
+    .then((moved) => {
+      if (moved) process.stderr.write("[game-material-master] 已把旧数据目录 8dir-sprites 迁移到 game-material-master\n");
+    })
+    .catch(() => undefined);
+
+  const gateway = new GameStudioGateway(ctx);
+  gateway.assertSurface();
+  ctx.effect(() => ctx.typert.register(MANIFEST), "dsh-8dir-sprites: typert manifest");
+  const webServer = ctx.get("webServer");
+  if (webServer !== undefined) {
+    ctx.effect(() => webServer.register({ kind: "prefix", path: ROUTE_PREFIX, handler: handleAsset }), "dsh-8dir-sprites: asset route");
+  }
+  else {
+    // inject 已声明 webServer，正常路径下走不到这里；留一条 stderr 诊断，
+    // 因为 ctx.logger 的输出不会出现在启动日志里。
+    process.stderr.write("[dsh-8dir-sprites] webServer 服务不可用，图片预览路由未注册\n");
+  }
+  // 进程重启后，把上次没跑完的视频轮询接上。
+  void (async () => {
+    try {
+      for (const summary of await listProjects()) {
+        const project = await readProject(summary.id);
+        if (project === undefined)
+          continue;
+        if (DIRECTION_KEYS.some((key) => project.videos[key]?.status === "running")) {
+          ensurePoller(summary.id);
+        }
+      }
+    }
+    catch {
+      // 恢复轮询失败不影响插件本体。
+    }
+  })();
+  ctx.effect(() => () => {
+    disposePipeline();
+  }, "dsh-8dir-sprites: pipeline cleanup");
+}
