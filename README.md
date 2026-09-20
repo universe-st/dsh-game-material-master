@@ -134,6 +134,12 @@ Key 只写入本机 `<DSH_HOME>/game-material-master/config.json`，回传界面
 提示词要求**固定机位 / 固定背景 / 原地走三步**。八个任务并发提交，宿主后台每 15 秒轮询一次；
 **提交完可以离开页面**，插件重启后还会把没跑完的任务接上。
 
+某个方向不满意可以点**「重新生成」**：宿主会先作废这一段旧视频**和它抽出来的序列帧**
+（整图同样作废，需要重新抽帧再合成），然后重新提交——帧是从视频里抽的，不重抽就会
+把上一版动作混进整图。**其它方向不受影响**。工具栏的「生成全部视频」只提交还没完成的
+方向，已经成片的不会重跑；要是八个方向都已完成，它会直接告诉你该点哪个按钮而不是
+转一圈了事。
+
 ### 抽帧与合成
 
 `ffmpeg` 用 `fps = 帧数 / 视频时长` 按时长平均取样。抽帧抽到的是**工作尺寸**
@@ -242,9 +248,12 @@ Key 只写入本机 `<DSH_HOME>/game-material-master/config.json`，回传界面
 npm run build          # tsc → lib/，并剥掉浏览器束结尾的 export {}
 
 # 纯本地测试（不联网、不花钱）
-node scripts/verify-minimax.mjs    # MiniMax 协议层（60 项，含请求体逐字段断言）
+node scripts/verify-minimax.mjs    # MiniMax 协议层（85 项，含请求体逐字段断言）
 node scripts/verify-pipeline.mjs   # 抽帧/抠像/合成链路（30 项，含回归用例）
-node scripts/verify-host.mjs       # 宿主冒烟（161 项，真实 cordis + 真实 HTTP）
+node scripts/verify-host.mjs       # 宿主冒烟（187 项，真实 cordis + 真实 HTTP）
+node scripts/verify-client.mjs     # 浏览器半区契约（66 项：阶段 ctx 键必须被转发，且每个生成类调用点都带 loading 反馈）
+node scripts/verify-feedback.mjs   # 浏览器半区渲染（真加载 lib/client.js，断言遮罩真的出现 / 空闲时真的不出现）
+node scripts/verify-live-bundle.mjs # 运行中的宿主是否已在提供新束（走 /plugins/events 拿真实 graph，再按图里的 URL 取回）
 
 # 真实 API 端到端（会花钱）
 node scripts/e2e-modules.mjs                                  # 图片 + 序列帧两个新模块（约 2.9 元）
@@ -256,6 +265,56 @@ node scripts/retry-video.mjs <项目 id> <方向> [--soft]         # 单方向�
 
 `verify-pipeline.mjs` 里有两个针对实测踩过的坑的回归用例：
 **暖色渐变背景**（只认绿色的抠像会整片失效）与**软边缘渗漏**（局部容差放宽就会穿透）。
+
+`verify-host.mjs` 除了走一遍四阶段，还钉住了「单方向重新生成视频」这条路：宿主的
+`runVideos` 默认跳过已经 ready 的方向（防止重复提交把任务覆盖成无人认领的孤儿），
+所以「重新生成」必须显式带 `regenerate` 让宿主先作废旧视频与它的帧——少一个都不行，
+否则这次点击会被当成「已完成」过滤掉，界面转一圈就结束，失败原因只留在日志里
+（实测报错：「没有可提交的方向：请先生成绿幕图，或先清掉已完成的视频」）。
+这一段用**本地假网关**顶替 MiniMax：提交必然失败，但「有没有真的提交出去」一目了然，
+且不联网、不花钱。
+
+`verify-client.mjs` 盯的是浏览器半区的另一类坑：阶段渲染函数从 `ctx` 里解构哪些键，
+调用点就必须原样转发哪些键。漏传一个键**渲染完全看不出来**，只有点到那个按钮才会炸
+（实测：第 2 步漏传 `api` → 点「生成视频」报 `Cannot read properties of undefined
+(reading 'runVideos')`；第 3、4 步的 `runFrames` / `compose` 同样中招）。
+
+后半段还钉住了「每个生成类调用点都必须带 loading 反馈」：文本层面确认
+`start` / `run` / `kickAndWatch` 的实参里有 `{ key, label }`。
+
+`verify-feedback.mjs` 再往前一步——它把 `lib/client.js` **真的加载起来**（假
+`__ModuleLoader__` + 假 React），用桩项目数据渲染出元素树，断言遮罩真的长出来了：
+某个方向在跑时它的预览必须被 `SPR_ovl` 盖住、批量时还没轮到的方向也要盖住、
+空闲时**一个遮罩都不能有**。这类问题肉眼极难发现：不盖遮罩时界面看着完全正常，
+只是「点了没反应」，用户会以为按钮失效而反复点击——每次点击都是真实计费。
+
+`verify-live-bundle.mjs` 回答的是另一个问题：「我改完了，运行中的宿主到底有没有换新束？」
+自己拼 `/plugins/<id>/client.js` 一定 404（浏览器束是按模块图里带 rev 的 URL 提供的），
+所以它先连 `/plugins/events` 拿真实 graph，再按图里的 URL 取回束并检查新标记。
+
+### 调用接口时的反馈（loading）
+
+三个模块里每一次「会出素材」的调用（生图 / 生视频 / 抽帧 / 抠像 / 合成 / 上传）
+都必须让人一眼看见「正在跑」——否则按钮像是没生效，用户会反复点，而每次点击都是
+真金白银。反馈分两层：
+
+| 层 | 组件 | 用在哪 |
+|---|---|---|
+| 预览遮罩 | `LoadingOverlay` / `MediaBox` | 盖住缩略图、视频、序列条、整图、行走预览 |
+| 按钮与徽章 | `BusyBtn` / `BusyBadge` | 按钮变转圈并置灰防重复提交；工具栏显示当前在跑什么 |
+
+关键实现是 `usePendingTasks()` 这张按 key 记账的 pending 表，原因是**宿主把任务标成
+running 落在下一次 `getProject` 里**：
+
+- 点下去当场就把遮罩盖上（不等轮询回来），调用返回后还多留 700ms（`TASK_HOLD_MS`），
+  避免「图已经变旧了但还没盖上」的闪一下；
+- 判断条件是 `宿主状态 === "running" || tasks.has(key)`，两条路都能点亮遮罩；
+- 批量操作有专属 key（`image:*all` 等），这样**还没轮到的方向**也能一并盖住，
+  而不是只有正在跑的那一个变灰；
+- 卸载后不再 `setState`（长任务可能几分钟才回来）。
+
+`verify-client.mjs` 的文本契约与 `verify-feedback.mjs` 的真渲染断言一起保证：
+新增调用点时忘了传反馈，或者遮罩在空闲时误开，都会在本地测试里直接失败。
 
 ### 工程结构
 

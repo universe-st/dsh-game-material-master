@@ -3,9 +3,9 @@
  *
  *   node scripts/rerun-videos.mjs <项目 id> <方向,方向,...>
  *
- * 为什么需要专门的步骤：`runVideos` 会跳过已经 ready 的方向（防止重复提交把
- * 任务覆盖成孤儿），所以必须先 clear 掉再提交。清掉之后那几段视频的帧也一并
- * 作废，必须重新抽帧，最后再合成一次整图。
+ * `runVideos` 默认会跳过已经 ready 的方向（防止重复提交把任务覆盖成孤儿），
+ * 所以这里必须带 `regenerate: true`——宿主会先作废旧视频与其序列帧再提交。
+ * 清掉之后那几段视频的帧也一并作废，必须重新抽帧，最后再合成一次整图。
  */
 
 import { Context } from "@deepseek-ai/cordis";
@@ -52,12 +52,8 @@ console.log(`视频模型 ${config.minimaxModel} / ${config.minimaxResolution} /
 console.log(`重跑方向：${keys.join("、")}`);
 console.log(`预计花费：${keys.length} × ${config.minimaxDuration} 秒 × ${config.minimaxResolution === "2K" ? "0.8" : "0.5"} 元/秒\n`);
 
-// 1) 清掉旧视频与它们的帧（runVideos 会跳过 ready 的方向）
-await studio.clearVideos({ projectId, keys });
-console.log("已清空这几段旧视频与旧帧");
-
-// 2) 提交新视频
-const kicked = await studio.runVideos({ projectId, keys });
+// 1) 提交新视频：regenerate 让宿主先把旧视频与它们的帧作废再提交
+const kicked = await studio.runVideos({ projectId, keys, regenerate: true });
 console.log(`提交：${JSON.stringify(kicked)}`);
 if (kicked.started !== true) {
   console.error(`启动失败：${kicked.reason}`);
@@ -75,7 +71,7 @@ if (failed.length > 0) {
   process.exit(1);
 }
 
-// 3) 重抽帧（会顺带重新合成一次）
+// 2) 重抽帧（会顺带重新合成一次）
 console.log("\n重新抽帧…");
 const frames = await studio.runFrames({ projectId, keys });
 console.log(`提交：${JSON.stringify(frames)}`);
@@ -85,7 +81,7 @@ for (const key of keys) {
   console.log(`  ${key.padEnd(10)} ${node.status.padEnd(8)} ${node.frames?.length ?? 0} 帧 ${node.duration ? `${node.duration.toFixed(2)}s` : ""} ${node.error ?? ""}`);
 }
 
-// 4) 最终合成一次
+// 3) 最终合成一次
 console.log("\n合成整图…");
 await studio.compose({ projectId });
 for (let i = 0; i < 120; i++) {

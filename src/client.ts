@@ -250,6 +250,24 @@
 .SPR_stageHint{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.74);color:#333;font-size:13px;line-height:20px;font-family:inherit}
 .SPR_hud{position:absolute;left:10px;top:10px;display:flex;align-items:center;gap:8px;background:rgba(0,0,0,.62);color:#fff;border-radius:999px;padding:3px 12px;font-size:12px;line-height:18px;pointer-events:none;font-family:inherit}
 .SPR_hudDir{font-weight:600;letter-spacing:.5px}
+
+/* ── 调用接口时的视觉反馈 ───────────────────────────────────────────────
+   所有会「出素材」的远程调用（生图 / 生视频 / 抽帧 / 抠像 / 合成 / 上传）
+   都必须让人一眼看见「正在跑」。分两层：
+     1. LoadingOverlay —— 盖在预览图（缩略图 / 视频 / 整图 / 播放器）上的遮罩；
+     2. BusyBadge/SPR_btn[data-busy] —— 按钮与工具栏级别的轻量反馈。 */
+.SPR_ovl{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;background:rgba(16,18,22,.58);border-radius:8px;color:#fff;font-size:12px;line-height:16px;text-align:center;padding:8px;box-sizing:border-box;z-index:2;font-family:inherit;pointer-events:auto;backdrop-filter:blur(1px)}
+.SPR_ovlText{max-width:100%;word-break:break-word;text-shadow:0 1px 2px rgba(0,0,0,.5)}
+.SPR_ovlSub{font-size:10px;opacity:.78;text-shadow:0 1px 2px rgba(0,0,0,.5)}
+.SPR_spin{width:26px;height:26px;flex:none;border-radius:50%;border:2.5px solid rgba(255,255,255,.26);border-top-color:#fff;animation:SPR_spin .8s linear infinite}
+.SPR_spinSm{width:13px;height:13px;flex:none;border-radius:50%;border:2px solid color-mix(in srgb, currentColor 30%, transparent);border-top-color:currentColor;animation:SPR_spin .8s linear infinite}
+@keyframes SPR_spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion: reduce){.SPR_spin,.SPR_spinSm{animation-duration:2.4s}}
+.SPR_thumbBox{position:relative}
+.SPR_btn[data-busy=true]{display:inline-flex;align-items:center;gap:6px;cursor:progress}
+.SPR_busyBadge{display:inline-flex;align-items:center;gap:6px;font-size:11px;line-height:16px;padding:2px 8px;border-radius:999px;background:color-mix(in srgb, var(--dsw-alias-state-business-primary) 14%, transparent);color:var(--dsw-alias-state-business-primary);white-space:nowrap;flex:none}
+.SPR_busyBadge .SPR_spinSm{border-color:color-mix(in srgb, currentColor 26%, transparent);border-top-color:currentColor}
+.SPR_drop[data-busy=true]{border-color:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-state-business-primary)}
 `;
 
     // ── 小工具 ───────────────────────────────────────────────────────────
@@ -285,7 +303,7 @@
       return h(Chip, { kind: info.kind, text: info.text });
     }
 
-    function Btn({ children, onClick, disabled, primary, on, danger, title }) {
+    function Btn({ children, onClick, disabled, primary, on, danger, title, busy }) {
       return h(
         "button",
         {
@@ -296,7 +314,9 @@
           title,
           "data-primary": primary === true ? "true" : undefined,
           "data-on": on === true ? "true" : undefined,
-          "data-danger": danger === true ? "true" : undefined
+          "data-danger": danger === true ? "true" : undefined,
+          "data-busy": busy === true ? "true" : undefined,
+          "aria-busy": busy === true ? "true" : undefined
         },
         children
       );
@@ -364,6 +384,133 @@
       return `${base}${relative}${suffix}`;
     }
 
+    // ── 「正在调用接口」的视觉反馈 ───────────────────────────────────────
+    /**
+     * 点一次按钮 = 一次远程调用。调用期间界面必须看得见「在跑」，
+     * 所以把「哪一个操作正在跑」抽成一个按 key 记账的 pending 表：
+     *
+     *   const tasks = usePendingTasks();
+     *   await tasks.run(`image:${key}`, "正在生成…", () => api.runImage(…));
+     *   tasks.has(`image:${key}`)   // 盖遮罩用
+     *
+     * 两个要点：
+     * 1. 遮罩在**调用返回后仍多留一会儿**（HOLD_MS）。宿主把任务标成 running 是
+     *    落在下一次 getProject 里的，如果调用一返回就撤遮罩，会有一次「图已经
+     *    变旧了但还没盖上」的闪烁。多留 700ms 足够让下一次轮询把 running 状态刷进来。
+     * 2. 卸载后不再 setState（长任务可能几分钟才回来）。
+     */
+    const TASK_HOLD_MS = 700;
+
+    function usePendingTasks() {
+      // React 经由 require 拿到，是 any，不能写泛型实参（TS2347）。
+      const [map, setMap] = React.useState({});
+      const aliveRef = React.useRef(true);
+      const timersRef = React.useRef([]);
+
+      React.useEffect(() => {
+        aliveRef.current = true;
+        const timers = timersRef.current;
+        return () => {
+          aliveRef.current = false;
+          for (const id of timers) clearTimeout(id);
+          timers.length = 0;
+        };
+      }, []);
+
+      const release = React.useCallback((key) => {
+        const id = setTimeout(() => {
+          if (!aliveRef.current) return;
+          setMap((current) => {
+            if (current[key] === undefined) return current;
+            const next = { ...current };
+            delete next[key];
+            return next;
+          });
+        }, TASK_HOLD_MS);
+        timersRef.current.push(id);
+      }, []);
+
+      const run = React.useCallback(
+        (key, label, fn) => {
+          if (!aliveRef.current) return Promise.resolve(undefined);
+          setMap((current) => (current[key] === label ? current : { ...current, [key]: label }));
+          return Promise.resolve()
+            .then(fn)
+            .then(
+              (value) => {
+                release(key);
+                return value;
+              },
+              (error) => {
+                release(key);
+                throw error;
+              }
+            );
+        },
+        [release]
+      );
+
+      const has = React.useCallback((key) => map[key] !== undefined, [map]);
+      const label = React.useCallback((key) => map[key], [map]);
+      const any = React.useCallback((prefix) => Object.keys(map).some((key) => key.startsWith(prefix)), [map]);
+      const keys = React.useCallback((prefix) => Object.keys(map).filter((key) => key.startsWith(prefix)), [map]);
+      const active = Object.keys(map).length > 0;
+      // 第一条 pending 的文案，用作「总有一个在跑」时的兜底显示。
+      const firstLabel = Object.values(map)[0];
+
+      return { map, run, has, label, any, keys, active, firstLabel };
+    }
+
+    /**
+     * 盖在预览区上的 loading 遮罩。父元素必须是 position:relative
+     * （`.SPR_thumbBox` 或 `.SPR_stage`）。
+     */
+    function LoadingOverlay({ show, text, sub }) {
+      if (show !== true) return null;
+      return h(
+        "div",
+        { className: "SPR_ovl", role: "status", "aria-live": "polite", "aria-busy": "true" },
+        h("span", { className: "SPR_spin" }),
+        h("span", { className: "SPR_ovlText" }, text ?? "处理中…"),
+        sub === undefined || sub === null ? null : h("span", { className: "SPR_ovlSub" }, sub)
+      );
+    }
+
+    /**
+     * 一张图 / 一段视频的预览位：内容 + 可选遮罩。
+     * 原来各阶段的 `<img className="SPR_thumb">` 直接放在节点卡片里，
+     * 现在统一包一层定位容器，遮罩才能正好盖住预览区。
+     */
+    function MediaBox({ overlay, text, className, children }) {
+      return h(
+        "div",
+        { className: cls("SPR_thumbBox", className) },
+        h("div", { style: { visibility: overlay === true ? "hidden" : undefined } }, children),
+        h(LoadingOverlay, { show: overlay === true, text: text ?? "正在生成…" })
+      );
+    }
+
+    /** 按钮级别的「正在跑」：转圈 + 文案，并把按钮本身置灰防重复点击。 */
+    function BusyBtn({ busy, busyText, children, onClick, ...rest }) {
+      return h(
+        Btn,
+        { ...rest, onClick, disabled: busy === true || rest.disabled === true, busy: busy === true },
+        busy === true ? h("span", { className: "SPR_spinSm" }) : null,
+        busy === true ? busyText ?? "处理中…" : children
+      );
+    }
+
+    /** 工具栏上的状态徽章：有任务在跑时显示，同时兼作按钮区的位置占位。 */
+    function BusyBadge({ show, text }) {
+      if (show !== true) return null;
+      return h(
+        "span",
+        { className: "SPR_busyBadge", role: "status", "aria-live": "polite" },
+        h("span", { className: "SPR_spinSm" }),
+        text ?? "正在处理…"
+      );
+    }
+
     // ── 侧栏图标 ─────────────────────────────────────────────────────────
     function StudioGlyph(props) {
       const size = props?.size ?? 18;
@@ -400,9 +547,13 @@
       const [sourceBusy, setSourceBusy] = React.useState(false);
       const [dropOver, setDropOver] = React.useState(false);
       const fileInputRef = React.useRef(null);
+      // 「正在调用接口」的记账表：宿主侧任务状态还没落盘时，遮罩靠它撑住。
+      const tasks = usePendingTasks();
 
       const busy = project !== null && ((project.jobs?.length ?? 0) > 0 ||
         DIRECTION_KEYS.some((key) => project.videos?.[key]?.status === "running"));
+      // 轮询条件也要算上正在跑的这一次调用，否则点完按钮到 running 落盘之间不会刷新。
+      const polling = busy || tasks.active;
 
       const refreshProjects = React.useCallback(async () => {
         if (api === undefined) return;
@@ -461,12 +612,12 @@
 
       // 有任务在跑时轮询；跑完自动停。
       React.useEffect(() => {
-        if (!busy || projectId === null) return undefined;
+        if (!polling || projectId === null) return undefined;
         const timer = setInterval(() => {
           void loadProject(projectId);
         }, 2500);
         return () => clearInterval(timer);
-      }, [busy, projectId, loadProject]);
+      }, [polling, projectId, loadProject]);
 
       // 视频阶段即便宿主侧在轮询，界面也要定期刷新任务状态。
       React.useEffect(() => {
@@ -573,9 +724,16 @@
        * 启动一个后台任务。
        * `started: false` 表示宿主拒绝了这次启动（例如同一任务已在跑）——
        * 这不算错误，但必须让用户看见原因，否则点按钮像是没反应。
+       *
+       * 第三个参数是「正在调用接口」的反馈：给了就按 key 记账，
+       * 界面据此盖 loading 遮罩 / 把按钮变成转圈。
        */
-      const start = async (fn, done) => {
-        const result = await withApi(fn, done);
+      const start = async (fn, done, feedback?: any) => {
+        const invoke = () => withApi(fn, done);
+        const result =
+          feedback === undefined
+            ? await invoke()
+            : await tasks.run(feedback.key, feedback.label, invoke);
         if (result !== null && typeof result === "object" && result.started === false) {
           setNotice({ kind: "info", text: result.reason ?? "任务没有启动" });
         }
@@ -717,19 +875,40 @@
                           savePrompts,
                           start,
                           setNotice,
-                          loadProject
+                          loadProject,
+                          tasks
                         })
                       : null,
                     stage === "videos"
-                      ? renderVideoStage({ project, videoPromptDraft, setVideoPromptDraft, savePrompts, start, setNotice, loadProject })
+                      ? renderVideoStage({
+                          project,
+                          api,
+                          videoPromptDraft,
+                          setVideoPromptDraft,
+                          savePrompts,
+                          start,
+                          setNotice,
+                          loadProject,
+                          tasks
+                        })
                       : null,
                     stage === "frames"
-                      ? renderFrameStage({ project, start, setNotice, loadProject, settingsDraft, saveSettings })
+                      ? renderFrameStage({ project, api, start, setNotice, loadProject, settingsDraft, saveSettings, tasks })
                       : null,
                     stage === "sheet"
-                      ? renderSheetStage({ project, settingsDraft, setSettingsDraft, saveSettings, start, setNotice, loadProject })
+                      ? renderSheetStage({
+                          project,
+                          api,
+                          settingsDraft,
+                          setSettingsDraft,
+                          saveSettings,
+                          start,
+                          setNotice,
+                          loadProject,
+                          tasks
+                        })
                       : null,
-                    stage === "preview" ? h(WalkPreview, { project }) : null
+                    stage === "preview" ? h(WalkPreview, { project, tasks }) : null
                   ),
                   h(
                     "div",
@@ -819,9 +998,20 @@
     }
 
     // ── 阶段 1：八方向绿幕图 ─────────────────────────────────────────────
+    /** 阶段①的 pending key：单方向、批量、整批重新生成、重置提示词。 */
+    const KEY_IMG_ONE = (key) => `image:${key}`;
+    const KEY_IMG_ALL = "image:*all";
+    const KEY_IMG_REGENERATE = "image:*regenerate";
+    const KEY_PROMPT_RESET = "prompt:*reset";
+
     function renderImageStage(ctx) {
-      const { project, api, promptDraft, setPromptDraft, promptOpen, setPromptOpen, savePrompts, start, setNotice } = ctx;
+      const { project, api, promptDraft, setPromptDraft, promptOpen, setPromptOpen, savePrompts, start, setNotice, tasks } = ctx;
       const allApproved = DIRECTION_KEYS.every((key) => project.images?.[key]?.approved);
+      // 「一键生成全部」/「全部重新生成」提交后，八个方向都可能要重出图，
+      // 在宿主状态回来之前先整体盖住，别让用户以为按钮没生效。
+      const batch = tasks.has(KEY_IMG_ALL) || tasks.has(KEY_IMG_REGENERATE);
+      const batchLabel = tasks.label(KEY_IMG_REGENERATE) ?? tasks.label(KEY_IMG_ALL) ?? "正在生成绿幕图…";
+      const resetting = tasks.has(KEY_PROMPT_RESET);
 
       return h(
         React.Fragment,
@@ -830,40 +1020,60 @@
           "div",
           { className: "SPR_toolbar" },
           h(
-            Btn,
+            BusyBtn,
             {
               primary: true,
+              busy: tasks.has(KEY_IMG_ALL),
+              busyText: "正在提交全部方向…",
               disabled: project.source === null,
-              onClick: () => void start(() => api.runImages({ projectId: project.id }), { reload: true })
+              onClick: () =>
+                void start(() => api.runImages({ projectId: project.id }), { reload: true }, {
+                  key: KEY_IMG_ALL,
+                  label: "正在提交全部方向…"
+                })
             },
             "一键生成全部（跳过已通过的）"
           ),
           h(
-            Btn,
-            { onClick: () => void start(() => api.runImages({ projectId: project.id, force: true }), { reload: true }) },
+            BusyBtn,
+            {
+              busy: tasks.has(KEY_IMG_REGENERATE),
+              busyText: "正在提交全部重做…",
+              onClick: () =>
+                void start(() => api.runImages({ projectId: project.id, force: true }), { reload: true }, {
+                  key: KEY_IMG_REGENERATE,
+                  label: "正在提交全部重做…"
+                })
+            },
             "全部重新生成"
           ),
           h(
             Btn,
             {
               on: allApproved,
+              disabled: batch,
               onClick: () => void start(() => api.setApproved({ projectId: project.id, stage: "images", approved: !allApproved }), { reload: true })
             },
             allApproved ? "取消全部通过" : "全部标记通过"
           ),
           h(
-            Btn,
+            BusyBtn,
             {
+              busy: resetting,
+              busyText: "正在重置…",
+              disabled: batch,
               onClick: () => {
                 if (typeof window !== "undefined" && !window.confirm("把八个方向的生图提示词和视频提示词都重置为当前默认模板？你手改过的内容会丢失。")) return;
                 void start(
                   () => api.savePrompts({ projectId: project.id, resetImagesToDefault: true, resetVideoToDefault: true }),
-                  { reload: true, notice: "提示词已重置为默认模板", noticeKind: "ok" }
+                  { reload: true, notice: "提示词已重置为默认模板", noticeKind: "ok" },
+                  { key: KEY_PROMPT_RESET, label: "正在重置提示词…" }
                 );
               }
             },
             "重置提示词为默认"
           ),
+          h(BusyBadge, { show: batch, text: batchLabel }),
           project.source === null ? h("span", { className: "SPR_refRow" }, "请先上传源图") : null
         ),
         h(
@@ -874,26 +1084,38 @@
             const draft = promptDraft[direction.key] ?? project.prompts?.images?.[direction.key] ?? "";
             const dirty = draft !== (project.prompts?.images?.[direction.key] ?? "");
             const open = promptOpen[direction.key] === true;
+            // 这个方向在跑：宿主已标 running，或刚点了按钮、状态还没轮询回来。
+            const taskKey = KEY_IMG_ONE(direction.key);
+            // 批量提交时，**还没轮到的方向也要盖住**——否则旧图看着像「点了没反应」。
+            const waiting = batch && node?.status !== "running" && !tasks.has(taskKey);
+            const nodeBusy = node?.status === "running" || tasks.has(taskKey) || waiting;
+            const withPromptKey = `${taskKey}:prompt`;
+            const overlayText = tasks.label(taskKey) ?? (waiting ? batchLabel : "正在生成…");
             return h(
               "div",
-              { key: direction.key, className: "SPR_node", "data-stale": node?.stale === true ? "true" : "false" },
+              { key: direction.key, className: "SPR_node", "data-stale": node?.stale === true ? "true" : "false", "data-busy": nodeBusy ? "true" : undefined },
               h(
                 "div",
                 { className: "SPR_nodeTop" },
                 h("span", { className: "SPR_nodeTitle" }, direction.label),
-                h(StatusChip, { node })
+                nodeBusy ? h(Chip, { kind: "running", text: "生成中" }) : h(StatusChip, { node })
               ),
               node?.file !== undefined
-                ? h("img", {
-                    className: "SPR_thumb",
-                    src: assetUrl(project, node.file, node.updatedAt ?? project.updatedAt),
-                    alt: direction.label
-                  })
+                ? h(
+                    MediaBox,
+                    { overlay: nodeBusy, text: overlayText },
+                    h("img", {
+                      className: "SPR_thumb",
+                      src: assetUrl(project, node.file, node.updatedAt ?? project.updatedAt),
+                      alt: direction.label
+                    })
+                  )
                 : h(
                     "div",
                     { className: "SPR_thumbEmpty" },
-                    node?.status === "running" ? "正在生成…" : `参考：${direction.refs.join(" + ")}`
+                    nodeBusy ? "正在生成…" : `参考：${direction.refs.join(" + ")}`
                   ),
+              nodeBusy ? h(BusyBadge, { show: true, text: overlayText }) : null,
               node?.error !== undefined ? h("p", { className: "SPR_error" }, node.error) : null,
               node?.status === "ready" && node.elapsedMs !== undefined
                 ? h("span", { className: "SPR_refRow" }, `用时 ${(node.elapsedMs / 1000).toFixed(1)} 秒 · ${node.model ?? ""}`)
@@ -928,12 +1150,15 @@
                         dirty ? "保存改动" : "已保存"
                       ),
                       h(
-                        Btn,
+                        BusyBtn,
                         {
+                          busy: tasks.has(withPromptKey),
+                          busyText: "正在提交…",
                           onClick: () =>
                             void start(
                               () => api.runImage({ projectId: project.id, key: direction.key, prompt: draft }),
-                              { reload: true }
+                              { reload: true },
+                              { key: withPromptKey, label: `正在用这段提示词生成「${direction.label}」…` }
                             )
                         },
                         "用这段提示词生成"
@@ -945,8 +1170,17 @@
                 "div",
                 { className: "SPR_btnRow" },
                 h(
-                  Btn,
-                  { primary: node?.file === undefined, onClick: () => void start(() => api.runImage({ projectId: project.id, key: direction.key }), { reload: true }) },
+                  BusyBtn,
+                  {
+                    primary: node?.file === undefined,
+                    busy: tasks.has(taskKey),
+                    busyText: "正在提交…",
+                    onClick: () =>
+                      void start(() => api.runImage({ projectId: project.id, key: direction.key }), { reload: true }, {
+                        key: taskKey,
+                        label: `正在生成「${direction.label}」…`
+                      })
+                  },
                   node?.file === undefined ? "生成" : "重新生成"
                 ),
                 h(
@@ -973,12 +1207,20 @@
     }
 
     // ── 阶段 2：视频 ─────────────────────────────────────────────────────
+    const KEY_VIDEO_ONE = (key) => `video:${key}`;
+    const KEY_VIDEO_ALL = "video:*all";
+    const KEY_VIDEO_POLL = "video:*poll";
+
     function renderVideoStage(ctx) {
-      const { project, videoPromptDraft, setVideoPromptDraft, savePrompts, start, setNotice, api } = ctx;
+      const { project, videoPromptDraft, setVideoPromptDraft, savePrompts, start, setNotice, api, tasks } = ctx;
       const readyImages = DIRECTION_KEYS.filter((key) => project.images?.[key]?.file !== undefined);
       const promptDirty = videoPromptDraft !== (project.prompts?.video ?? "");
       const running = DIRECTION_KEYS.filter((key) => project.videos?.[key]?.status === "running");
       const allApproved = DIRECTION_KEYS.every((key) => project.videos?.[key]?.approved);
+      const submitting = tasks.any("video:*");
+      // 批量提交视频时八个方向都会重新出片，提交阶段先把预览整体盖住。
+      const allBusy = tasks.has(KEY_VIDEO_ALL);
+      const allLabel = tasks.label(KEY_VIDEO_ALL) ?? "正在提交 8 个方向的视频任务…";
 
       return h(
         React.Fragment,
@@ -994,19 +1236,38 @@
           { className: "SPR_toolbar" },
           h(Btn, { disabled: !promptDirty, onClick: () => void savePrompts({ video: videoPromptDraft }) }, promptDirty ? "保存视频提示词" : "视频提示词已保存"),
           h(
-            Btn,
+            BusyBtn,
             {
               primary: true,
-              disabled: readyImages.length === 0,
-              onClick: () => void start(() => api.runVideos({ projectId: project.id }), { reload: true })
+              busy: tasks.has(KEY_VIDEO_ALL),
+              busyText: "正在提交 8 个方向…",
+              disabled: readyImages.length === 0 || submitting,
+              onClick: () =>
+                void start(() => api.runVideos({ projectId: project.id }), { reload: true }, {
+                  key: KEY_VIDEO_ALL,
+                  label: "正在提交全部方向…"
+                })
             },
             `生成全部视频（${readyImages.length}/8 张绿幕图就绪）`
           ),
-          h(Btn, { onClick: () => void start(() => api.pollVideos({ projectId: project.id }), { reload: true }) }, "立即刷新进度"),
+          h(
+            BusyBtn,
+            {
+              busy: tasks.has(KEY_VIDEO_POLL),
+              busyText: "正在查询…",
+              onClick: () =>
+                void start(() => api.pollVideos({ projectId: project.id }), { reload: true }, {
+                  key: KEY_VIDEO_POLL,
+                  label: "正在查询远端视频进度…"
+                })
+            },
+            "立即刷新进度"
+          ),
           h(
             Btn,
             {
               on: allApproved,
+              disabled: submitting,
               onClick: () => void start(() => api.setApproved({ projectId: project.id, stage: "videos", approved: !allApproved }), { reload: true })
             },
             allApproved ? "取消全部通过" : "全部标记通过"
@@ -1015,6 +1276,7 @@
             Btn,
             {
               danger: true,
+              disabled: submitting,
               onClick: () => {
                 if (typeof window !== "undefined" && !window.confirm("清空所有视频与已抽的帧？绿幕图会保留。")) return;
                 void start(() => api.clearVideos({ projectId: project.id }), { reload: true, notice: "已清空视频与序列帧", noticeKind: "ok" });
@@ -1030,36 +1292,68 @@
           DIRECTIONS.map((direction) => {
             const video = project.videos?.[direction.key];
             const image = project.images?.[direction.key];
+            const taskKey = KEY_VIDEO_ONE(direction.key);
+            const nodeBusy = video?.status === "running" || tasks.has(taskKey);
+            const waiting = allBusy && video?.status !== "running" && !tasks.has(taskKey);
+            const overlayText = tasks.label(taskKey) ?? (waiting ? allLabel : "正在生成视频…");
             return h(
               "div",
-              { key: direction.key, className: "SPR_node" },
+              { key: direction.key, className: "SPR_node", "data-busy": nodeBusy ? "true" : undefined },
               h(
                 "div",
                 { className: "SPR_nodeTop" },
                 h("span", { className: "SPR_nodeTitle" }, direction.label),
-                h(StatusChip, { node: video })
+                nodeBusy ? h(Chip, { kind: "running", text: "生成中" }) : h(StatusChip, { node: video })
               ),
               video?.file !== undefined
-                ? h("video", {
-                    className: "SPR_video",
-                    src: assetUrl(project, video.file, video.updatedAt ?? project.updatedAt),
-                    controls: true,
-                    preload: "metadata"
-                  })
+                ? h(
+                    MediaBox,
+                    { overlay: nodeBusy || waiting, text: overlayText },
+                    h("video", {
+                      className: "SPR_video",
+                      src: assetUrl(project, video.file, video.updatedAt ?? project.updatedAt),
+                      controls: true,
+                      preload: "metadata"
+                    })
+                  )
                 : image?.file !== undefined
-                  ? h("img", { className: "SPR_thumb", src: assetUrl(project, image.file, image.updatedAt), alt: direction.label })
+                  ? h(
+                      MediaBox,
+                      { overlay: nodeBusy || waiting, text: overlayText },
+                      h("img", { className: "SPR_thumb", src: assetUrl(project, image.file, image.updatedAt), alt: direction.label })
+                    )
                   : h("div", { className: "SPR_thumbEmpty" }, "还没有绿幕图"),
+              nodeBusy || waiting ? h(BusyBadge, { show: true, text: overlayText }) : null,
               video?.remoteStatus !== undefined ? h("span", { className: "SPR_refRow" }, `远端状态：${video.remoteStatus}`) : null,
               video?.error !== undefined ? h("p", { className: "SPR_error" }, video.error) : null,
               h(
                 "div",
                 { className: "SPR_btnRow" },
                 h(
-                  Btn,
+                  BusyBtn,
                   {
                     primary: video?.file === undefined && image?.file !== undefined,
+                    busy: tasks.has(taskKey),
+                    busyText: "正在提交…",
                     disabled: image?.file === undefined,
-                    onClick: () => void start(() => api.runVideos({ projectId: project.id, keys: [direction.key] }), { reload: true })
+                    onClick: () =>
+                      void start(
+                        () =>
+                          api.runVideos({
+                            projectId: project.id,
+                            keys: [direction.key],
+                            // 已经有成片时，这一次点击是「重新生成」：必须显式告诉宿主
+                            // 作废旧视频与它抽出来的帧再提交。不带这个标记时宿主会把
+                            // ready 的方向当成「已完成」跳过，界面只看到转一圈就结束，
+                            // 真正的失败原因只留在日志里。
+                            regenerate: video?.file !== undefined
+                          }),
+                        { reload: true },
+                        {
+                          key: taskKey,
+                          label: `正在生成「${direction.label}」视频…`
+                        }
+                      )
                   },
                   video?.file === undefined ? "生成视频" : "重新生成"
                 ),
@@ -1087,11 +1381,15 @@
     }
 
     // ── 阶段 3：抽帧 ─────────────────────────────────────────────────────
+    const KEY_FRAMES_ONE = (key) => `frames:${key}`;
+    const KEY_FRAMES_ALL = "frames:*all";
+
     function renderFrameStage(ctx) {
-      const { project, start, api, settingsDraft, saveSettings } = ctx;
+      const { project, start, api, settingsDraft, saveSettings, tasks } = ctx;
       const readyVideos = DIRECTION_KEYS.filter((key) => project.videos?.[key]?.file !== undefined);
       const allApproved = DIRECTION_KEYS.every((key) => project.frames?.[key]?.approved);
       const draft = settingsDraft ?? project.settings ?? {};
+      const extracting = tasks.any("frames:*");
 
       return h(
         React.Fragment,
@@ -1140,11 +1438,17 @@
           "div",
           { className: "SPR_toolbar" },
           h(
-            Btn,
+            BusyBtn,
             {
               primary: true,
-              disabled: readyVideos.length === 0,
-              onClick: () => void start(() => api.runFrames({ projectId: project.id }), { reload: true })
+              busy: tasks.has(KEY_FRAMES_ALL),
+              busyText: "正在抽取全部序列帧…",
+              disabled: readyVideos.length === 0 || extracting,
+              onClick: () =>
+                void start(() => api.runFrames({ projectId: project.id }), { reload: true }, {
+                  key: KEY_FRAMES_ALL,
+                  label: "正在抽取全部序列帧…"
+                })
             },
             `提取全部序列帧（${readyVideos.length}/8 段视频就绪）`
           ),
@@ -1152,28 +1456,43 @@
             Btn,
             {
               on: allApproved,
+              disabled: extracting,
               onClick: () => void start(() => api.setApproved({ projectId: project.id, stage: "frames", approved: !allApproved }), { reload: true })
             },
             allApproved ? "取消全部通过" : "全部标记通过"
-          )
+          ),
+          h(BusyBadge, { show: extracting, text: tasks.label(KEY_FRAMES_ALL) ?? "正在抽帧…" })
         ),
         h(
           "div",
           { className: "SPR_grid" },
           DIRECTIONS.map((direction) => {
             const node = project.frames?.[direction.key];
+            const taskKey = KEY_FRAMES_ONE(direction.key);
+            const nodeBusy = node?.status === "running" || tasks.has(taskKey);
+            const waiting = node?.status !== "running" && tasks.has(KEY_FRAMES_ALL);
+            const overlayText = tasks.label(taskKey) ?? (waiting ? tasks.label(KEY_FRAMES_ALL) : undefined) ?? "正在抽取序列帧…";
             return h(
               "div",
-              { key: direction.key, className: "SPR_node" },
+              { key: direction.key, className: "SPR_node", "data-busy": nodeBusy || waiting ? "true" : undefined },
               h(
                 "div",
                 { className: "SPR_nodeTop" },
                 h("span", { className: "SPR_nodeTitle" }, direction.label),
-                h(StatusChip, { node })
+                nodeBusy ? h(Chip, { kind: "running", text: "抽帧中" }) : h(StatusChip, { node })
               ),
               node?.strip !== undefined
-                ? h("img", { className: "SPR_thumb", src: assetUrl(project, node.strip, node.updatedAt), alt: `${direction.label} 序列帧` })
-                : h("div", { className: "SPR_thumbEmpty" }, "尚未抽帧"),
+                ? h(
+                    MediaBox,
+                    { overlay: nodeBusy || waiting, text: overlayText },
+                    h("img", { className: "SPR_thumb", src: assetUrl(project, node.strip, node.updatedAt), alt: `${direction.label} 序列帧` })
+                  )
+                : h(
+                    "div",
+                    { className: "SPR_thumbEmpty" },
+                    nodeBusy || waiting ? "正在抽帧…" : "尚未抽帧"
+                  ),
+              nodeBusy || waiting ? h(BusyBadge, { show: true, text: overlayText }) : null,
               node?.duration !== undefined
                 ? h("span", { className: "SPR_refRow" }, `${node.frames?.length ?? 0} 帧 · 视频 ${node.duration.toFixed(2)} 秒`)
                 : null,
@@ -1182,11 +1501,17 @@
                 "div",
                 { className: "SPR_btnRow" },
                 h(
-                  Btn,
+                  BusyBtn,
                   {
                     primary: node?.status !== "ready",
+                    busy: tasks.has(taskKey),
+                    busyText: "正在抽帧…",
                     disabled: project.videos?.[direction.key]?.file === undefined,
-                    onClick: () => void start(() => api.runFrames({ projectId: project.id, keys: [direction.key] }), { reload: true })
+                    onClick: () =>
+                      void start(() => api.runFrames({ projectId: project.id, keys: [direction.key] }), { reload: true }, {
+                        key: taskKey,
+                        label: `正在抽取「${direction.label}」序列帧…`
+                      })
                   },
                   node?.status === "ready" ? "重新抽帧" : "抽取"
                 ),
@@ -1214,11 +1539,18 @@
     }
 
     // ── 阶段 4：合成整图 ─────────────────────────────────────────────────
+    const KEY_SHEET_COMPOSE = "sheet:compose";
+    const KEY_SHEET_REKEY = "sheet:rekey";
+    const KEY_SHEET_SAVE = "sheet:save";
+
     function renderSheetStage(ctx) {
-      const { project, settingsDraft, setSettingsDraft, saveSettings, start, api } = ctx;
+      const { project, settingsDraft, setSettingsDraft, saveSettings, start, api, tasks } = ctx;
       const draft = settingsDraft ?? project.settings ?? {};
       const rowOrder = Array.isArray(draft.rowOrder) && draft.rowOrder.length > 0 ? draft.rowOrder : DIRECTION_KEYS;
       const framesReady = DIRECTION_KEYS.filter((key) => project.frames?.[key]?.status === "ready").length;
+      // 合成整图是本地 CPU 重活，宿主侧会标 running；重抠像同样走这个状态。
+      const composing = project.sheet?.status === "running" || tasks.has(KEY_SHEET_COMPOSE) || tasks.has(KEY_SHEET_REKEY);
+      const composeLabel = tasks.label(KEY_SHEET_REKEY) ?? tasks.label(KEY_SHEET_COMPOSE) ?? "正在抠绿幕并合成整图…";
 
       const moveRow = (index, delta) => {
         const next = [...rowOrder];
@@ -1339,41 +1671,62 @@
           "div",
           { className: "SPR_toolbar" },
           h(
-            Btn,
+            BusyBtn,
             {
-              onClick: () => void saveSettings({
-                keyLow: draft.keyLow,
-                keyHigh: draft.keyHigh,
-                despill: draft.despill,
-                bgTolerance: draft.bgTolerance,
-                edgeShrink: draft.edgeShrink,
-                pixelSize: draft.pixelSize,
-                autoCrop: draft.autoCrop !== false,
-                fillRatio: draft.fillRatio,
-                bottomMargin: draft.bottomMargin,
-                cellWidth: draft.cellWidth,
-                cellHeight: draft.cellHeight
-              })
+              busy: tasks.has(KEY_SHEET_SAVE),
+              busyText: "正在保存并合成…",
+              disabled: framesReady === 0 || composing,
+              onClick: () =>
+                void start(
+                  () => saveSettings({
+                    keyLow: draft.keyLow,
+                    keyHigh: draft.keyHigh,
+                    despill: draft.despill,
+                    bgTolerance: draft.bgTolerance,
+                    edgeShrink: draft.edgeShrink,
+                    pixelSize: draft.pixelSize,
+                    autoCrop: draft.autoCrop !== false,
+                    fillRatio: draft.fillRatio,
+                    bottomMargin: draft.bottomMargin,
+                    cellWidth: draft.cellWidth,
+                    cellHeight: draft.cellHeight
+                  }),
+                  { reload: true },
+                  { key: KEY_SHEET_SAVE, label: "正在保存并重新合成…" }
+                )
             },
             "保存并重新合成"
           ),
           h(
-            Btn,
+            BusyBtn,
             {
-              disabled: framesReady === 0,
-              onClick: () => void start(() => api.rekey({ projectId: project.id }), { reload: true })
+              busy: tasks.has(KEY_SHEET_REKEY),
+              busyText: "正在重跑抠像…",
+              disabled: framesReady === 0 || composing,
+              onClick: () =>
+                void start(() => api.rekey({ projectId: project.id }), { reload: true }, {
+                  key: KEY_SHEET_REKEY,
+                  label: "正在重跑抠像并重新合成…"
+                })
             },
             "只重跑抠像并重新合成"
           ),
           h(
-            Btn,
+            BusyBtn,
             {
               primary: true,
-              disabled: framesReady === 0,
-              onClick: () => void start(() => api.compose({ projectId: project.id }), { reload: true })
+              busy: tasks.has(KEY_SHEET_COMPOSE),
+              busyText: "正在合成整图…",
+              disabled: framesReady === 0 || composing,
+              onClick: () =>
+                void start(() => api.compose({ projectId: project.id }), { reload: true }, {
+                  key: KEY_SHEET_COMPOSE,
+                  label: "正在抠绿幕并合成整图…"
+                })
             },
             `合成整图（${framesReady}/8 组帧就绪）`
           ),
+          h(BusyBadge, { show: composing, text: composeLabel }),
           project.sheet?.file !== undefined
             ? h(
                 "a",
@@ -1381,7 +1734,9 @@
                   className: "SPR_btn",
                   href: assetUrl(project, project.sheet.file, project.sheet.generatedAt),
                   download: `${project.name}-8dir.png`,
-                  style: { textDecoration: "none" }
+                  style: { textDecoration: "none" },
+                  "aria-disabled": composing ? "true" : undefined,
+                  onClick: composing ? (event) => event.preventDefault() : undefined
                 },
                 "下载整图"
               )
@@ -1390,7 +1745,7 @@
             Btn,
             {
               on: project.sheet?.approved === true,
-              disabled: project.sheet?.status !== "ready",
+              disabled: project.sheet?.status !== "ready" || composing,
               onClick: () =>
                 void start(() =>
                   api.setApproved({ projectId: project.id, stage: "sheet", approved: project.sheet?.approved !== true }), { reload: true })
@@ -1412,8 +1767,8 @@
                 { key: `${key}-${index}`, className: "SPR_rowOrderItem" },
                 h("span", { className: "SPR_rowOrderIdx" }, String(index + 1)),
                 h("span", { className: "SPR_rowOrderName" }, LABEL_OF[key] ?? key),
-                h("button", { type: "button", className: "SPR_miniBtn", disabled: index === 0, onClick: () => moveRow(index, -1) }, "↑"),
-                h("button", { type: "button", className: "SPR_miniBtn", disabled: index === rowOrder.length - 1, onClick: () => moveRow(index, 1) }, "↓")
+                h("button", { type: "button", className: "SPR_miniBtn", disabled: index === 0 || composing, onClick: () => moveRow(index, -1) }, "↑"),
+                h("button", { type: "button", className: "SPR_miniBtn", disabled: index === rowOrder.length - 1 || composing, onClick: () => moveRow(index, 1) }, "↓")
               )
             )
           ),
@@ -1431,15 +1786,22 @@
                   ),
                   h(
                     "div",
-                    { className: "SPR_sheetWrap" },
+                    { className: "SPR_sheetWrap", style: { position: "relative" } },
                     h("img", {
                       className: "SPR_sheet",
                       src: assetUrl(project, project.sheet.file, project.sheet.generatedAt),
-                      alt: "整图"
-                    })
+                      alt: "整图",
+                      style: { visibility: composing ? "hidden" : undefined }
+                    }),
+                    h(LoadingOverlay, { show: composing, text: composeLabel, sub: "本地抠像 + 合成，不上传" })
                   )
                 )
-              : h("p", { className: "SPR_empty" }, framesReady === 0 ? "请先完成第 3 步的抽帧" : "还没有合成整图")
+              : h(
+                  "div",
+                  { style: { position: "relative", minHeight: 160 } },
+                  h("p", { className: "SPR_empty" }, composing ? "正在生成第一张整图…" : framesReady === 0 ? "请先完成第 3 步的抽帧" : "还没有合成整图"),
+                  h(LoadingOverlay, { show: composing, text: composeLabel })
+                )
           )
         )
       );
@@ -1457,6 +1819,7 @@
      */
     function WalkPreview(props) {
       const project = props.project;
+      const tasks = props.tasks;
       const canvasRef = React.useRef(null);
       const boxRef = React.useRef(null);
       const imgRef = React.useRef(null);
@@ -1495,6 +1858,14 @@
       const rowKey = rowOrder.join(",");
       // 整图的行序和当前设置对不上 → 说明刚改过、正在重新合成
       const orderStale = sheetOrder !== null && sheetOrder.join(",") !== settingsOrder.join(",");
+      // 整图正在重新合成 / 正在换新图：预览上的画面已经不是当前设置的了。
+      const rebuilding =
+        sheet?.status === "running" ||
+        tasks?.has(KEY_SHEET_COMPOSE) === true ||
+        tasks?.has(KEY_SHEET_REKEY) === true ||
+        tasks?.has(KEY_SHEET_SAVE) === true;
+      const rebuildingText = tasks?.label(KEY_SHEET_REKEY) ?? tasks?.label(KEY_SHEET_COMPOSE) ?? "正在重新合成整图…";
+      const [sheetLoaded, setSheetLoaded] = React.useState(false);
 
       liveRef.current.scale = scale;
       liveRef.current.speed = speed;
@@ -1503,6 +1874,7 @@
 
       // 整图加载（带版本号，重新合成后自动换新图）
       React.useEffect(() => {
+        setSheetLoaded(false);
         if (sheetUrl === null) {
           imgRef.current = null;
           return undefined;
@@ -1510,7 +1882,9 @@
         let cancelled = false;
         const image = new Image();
         image.onload = () => {
-          if (!cancelled) imgRef.current = image;
+          if (cancelled) return;
+          imgRef.current = image;
+          setSheetLoaded(true);
         };
         image.src = sheetUrl;
         return () => {
@@ -1707,6 +2081,10 @@
           },
           h("canvas", { ref: canvasRef, className: "SPR_canvas", width: STAGE_W, height: STAGE_H }),
           focused ? null : h("div", { className: "SPR_stageHint" }, "点击这里，然后用 WASD 或 ↑↓←→ 操控角色"),
+          h(LoadingOverlay, {
+            show: rebuilding || (ready && !sheetLoaded),
+            text: rebuilding ? rebuildingText : "正在载入整图…"
+          }),
           h(
             "div",
             { className: "SPR_hud" },
@@ -1755,6 +2133,7 @@
           {
             className: "SPR_drop",
             "data-over": over ? "true" : "false",
+            "data-busy": busy === true ? "true" : undefined,
             onDragOver: (event) => {
               event.preventDefault();
               setOver(true);
@@ -1766,12 +2145,19 @@
               handle(event.dataTransfer?.files);
             }
           },
-          busy ? "正在上传…" : label
+          busy === true
+            ? h(
+                "span",
+                { style: { display: "inline-flex", alignItems: "center", gap: 7, justifyContent: "center" } },
+                h("span", { className: "SPR_spinSm" }),
+                "正在上传…"
+              )
+            : label
         ),
         h(
           "div",
           { className: "SPR_toolbar" },
-          h(Btn, { onClick: () => inputRef.current?.click(), disabled: busy === true }, "选择文件"),
+          h(BusyBtn, { onClick: () => inputRef.current?.click(), busy: busy === true, busyText: "正在上传…" }, "选择文件"),
           h("input", {
             ref: inputRef,
             type: "file",
@@ -1826,6 +2212,13 @@
     }
 
     // ── 模块②：图片生成 ─────────────────────────────────────────────────
+    /** 模块②的 pending key：整批生成、单张重生成、抠像、上传、新建任务。 */
+    const K_IMG_JOB = "img:job";
+    const K_IMG_ITEM = (index) => `img:item:${index}`;
+    const K_IMG_KEY = "img:key";
+    const K_IMG_UPLOAD = "img:upload";
+    const K_IMG_CREATE = "img:create";
+
     function ImageModule(props) {
       const api = props.api;
       const [jobs, setJobs] = React.useState([]);
@@ -1838,8 +2231,10 @@
       const [settingsDraft, setSettingsDraft] = React.useState({});
       const [keyingDraft, setKeyingDraft] = React.useState({});
       const globalConfig = useGlobalConfig(api);
+      // 「正在调用接口」的记账表（上传走自己的 uploading 状态，不在这里）。
+      const tasks = usePendingTasks();
 
-      const busy = job !== null && (job.items ?? []).some((item) => item.status === "running");
+      const busy = (job !== null && (job.items ?? []).some((item) => item.status === "running")) || tasks.active;
 
       const refresh = React.useCallback(async () => {
         try {
@@ -1883,17 +2278,25 @@
         return () => clearInterval(timer);
       }, [busy, jobId, load]);
 
-      const run = async (fn, okText = undefined) => {
-        try {
-          const value = await fn();
-          if (okText !== undefined) setNotice({ kind: "ok", text: okText });
-          if (jobId !== null) await load(jobId);
-          await refresh();
-          return value;
-        } catch (error) {
-          setNotice({ kind: "error", text: msg(error) });
-          return undefined;
-        }
+      /**
+       * 跑一次远程调用。`feedback`（可选）给出 pending 的 key 与文案，
+       * 界面据此在对应预览上盖 loading、把按钮变成转圈。
+       */
+      const run = async (fn, okText = undefined, feedback = undefined) => {
+        const invoke = async () => {
+          try {
+            const value = await fn();
+            if (okText !== undefined) setNotice({ kind: "ok", text: okText });
+            if (jobId !== null) await load(jobId);
+            await refresh();
+            return value;
+          } catch (error) {
+            setNotice({ kind: "error", text: msg(error) });
+            return undefined;
+          }
+        };
+        if (feedback === undefined) return invoke();
+        return tasks.run(feedback.key, feedback.label, invoke);
       };
 
       const create = () =>
@@ -1901,7 +2304,7 @@
           const created = await api.createImageJob({ name: `图片 ${new Date().toLocaleString("zh-CN", { hour12: false })}` });
           await refresh();
           setJobId(created.jobId);
-        }, "已新建图片任务");
+        }, "已新建图片任务", { key: K_IMG_CREATE, label: "正在新建任务…" });
 
       const saveJob = (patch) => run(() => api.saveImageJob({ jobId: job.id, ...patch }), "已保存");
 
@@ -1918,18 +2321,21 @@
 
       const upload = async (files, kind) => {
         setUploading(true);
-        try {
-          for (const file of files) {
-            const data = await readFileBase64(file);
-            if (kind === "ref") await api.uploadImageRef({ jobId: job.id, name: file.name, data });
-            else await api.addImageItem({ jobId: job.id, name: file.name, data });
+        // 上传本身也要有反馈：走同一个 tasks 表，key 固定成上传中的那批。
+        await tasks.run(K_IMG_UPLOAD, `正在上传 ${files.length} 个文件…`, async () => {
+          try {
+            for (const file of files) {
+              const data = await readFileBase64(file);
+              if (kind === "ref") await api.uploadImageRef({ jobId: job.id, name: file.name, data });
+              else await api.addImageItem({ jobId: job.id, name: file.name, data });
+            }
+            await load(job.id);
+          } catch (error) {
+            setNotice({ kind: "error", text: msg(error) });
+          } finally {
+            setUploading(false);
           }
-          await load(job.id);
-        } catch (error) {
-          setNotice({ kind: "error", text: msg(error) });
-        } finally {
-          setUploading(false);
-        }
+        });
       };
 
       return h(
@@ -1956,8 +2362,9 @@
             h(
               "div",
               { className: "SPR_toolbar" },
-              h(Btn, { onClick: create, primary: true }, "新建任务"),
-              job !== null ? h(Btn, { onClick: del, danger: true }, "删除任务") : null
+              h(BusyBtn, { onClick: create, primary: true, busy: tasks.has(K_IMG_CREATE), busyText: "正在新建…" }, "新建任务"),
+              job !== null ? h(Btn, { onClick: del, danger: true }, "删除任务") : null,
+              h(BusyBadge, { show: tasks.active, text: tasks.label(K_IMG_JOB) ?? tasks.label(K_IMG_KEY) ?? tasks.label(K_IMG_UPLOAD) ?? tasks.firstLabel ?? "正在调用接口…" })
             ),
             job === null
               ? h("p", { className: "SPR_empty" }, "请选择或新建一个图片任务")
@@ -2004,11 +2411,18 @@
                       "div",
                       { className: "SPR_toolbar" },
                       h(
-                        Btn,
+                        BusyBtn,
                         {
                           primary: true,
-                          disabled: promptDraft.trim() === "",
-                          onClick: () => void run(() => api.runImageJob({ jobId: job.id }), `已开始生成 ${settingsDraft.count ?? 1} 张`)
+                          busy: tasks.has(K_IMG_JOB),
+                          busyText: `正在生成 ${settingsDraft.count ?? 1} 张…`,
+                          disabled: promptDraft.trim() === "" || tasks.has(K_IMG_JOB),
+                          onClick: () =>
+                            void run(
+                              () => api.runImageJob({ jobId: job.id }),
+                              `已开始生成 ${settingsDraft.count ?? 1} 张`,
+                              { key: K_IMG_JOB, label: `正在生成 ${settingsDraft.count ?? 1} 张图片…` }
+                            )
                         },
                         `生成 ${settingsDraft.count ?? 1} 张`
                       ),
@@ -2020,7 +2434,7 @@
                     { className: "SPR_card" },
                     h("div", { className: "SPR_cardHead" }, h("h3", null, "② 参考图（可留空）")),
                     h("p", { className: "SPR_hint" }, "最多 10 张。有参考图时走图生图；引用多张时可在提示词里写「图一」「图二」。" ),
-                    h(UploadBox, { label: "把参考图拖到这里", accept: "image/*", multiple: true, busy: uploading, onFiles: (files) => void upload(files, "ref") }),
+                    h(UploadBox, { label: "把参考图拖到这里", accept: "image/*", multiple: true, busy: uploading || tasks.has(K_IMG_UPLOAD), onFiles: (files) => void upload(files, "ref") }),
                     (job.refs ?? []).length === 0
                       ? null
                       : h(
@@ -2060,10 +2474,23 @@
                         h("option", { value: "off" }, "不抠像"),
                         h("option", { value: "on" }, "自动抠绿幕输出 PNG")
                       ),
-                      h(Btn, { onClick: () => void run(() => api.keyImageJob({ jobId: job.id }), "已开始抠像") }, "按当前参数重新抠像")
+                      h(
+                        BusyBtn,
+                        {
+                          busy: tasks.has(K_IMG_KEY),
+                          busyText: "正在抠像…",
+                          onClick: () =>
+                            void run(() => api.keyImageJob({ jobId: job.id }), "已开始抠像", {
+                              key: K_IMG_KEY,
+                              label: "正在抠绿幕…"
+                            })
+                        },
+                        "按当前参数重新抠像"
+                      )
                     ),
                     h(KeyingFields, { draft: keyingDraft, onChange: (patch) => { const next = { ...keyingDraft, ...patch }; setKeyingDraft(next); void saveJob({ keying: patch }); } }),
-                    h(UploadBox, { label: "上传一张已有图片，直接抠成透明 PNG", accept: "image/*", multiple: false, busy: uploading, onFiles: (files) => void upload(files, "item") })
+                    h(UploadBox, { label: "上传一张已有图片，直接抠成透明 PNG", accept: "image/*", multiple: false, busy: uploading || tasks.has(K_IMG_UPLOAD), onFiles: (files) => void upload(files, "item") }),
+                    tasks.has(K_IMG_UPLOAD) ? h(BusyBadge, { show: true, text: tasks.label(K_IMG_UPLOAD) }) : null
                   ),
                   h(
                     "div",
@@ -2074,22 +2501,36 @@
                       : h(
                           "div",
                           { className: "SPR_grid" },
-                          (job.items ?? []).map((item, index) =>
-                            h(
+                          (job.items ?? []).map((item, index) => {
+                            const itemKey = K_IMG_ITEM(index);
+                            const itemBusy = item.status === "running" || tasks.has(itemKey);
+                            // 整批生成时，还没轮到的那些也要盖住（否则旧图看着像「没反应」）
+                            const waiting = item.status !== "running" && tasks.has(K_IMG_JOB);
+                            const keyingNow = item.status !== "running" && tasks.has(K_IMG_KEY);
+                            const overlay = itemBusy || keyingNow || waiting;
+                            const overlayText =
+                              tasks.label(itemKey) ??
+                              (keyingNow ? "正在抠绿幕…" : waiting ? tasks.label(K_IMG_JOB) ?? "正在生成…" : "正在生成…");
+                            return h(
                               "div",
-                              { key: index, className: "SPR_node" },
+                              { key: index, className: "SPR_node", "data-busy": overlay ? "true" : undefined },
                               h(
                                 "div",
                                 { className: "SPR_nodeTop" },
                                 h("span", { className: "SPR_nodeTitle" }, `第 ${index + 1} 张`),
-                                h(StatusChip, { node: item }),
+                                overlay ? h(Chip, { kind: "running", text: "生成中" }) : h(StatusChip, { node: item }),
                                 item.source === "uploaded" ? h(Chip, { kind: "empty", text: "上传" }) : null
                               ),
-                              item.keyedFile !== undefined
-                                ? h("img", { className: "SPR_thumb", src: `${job.assetBase}${item.keyedFile}?v=${item.updatedAt}`, alt: "抠像结果" })
-                                : item.file !== undefined
-                                  ? h("img", { className: "SPR_thumb", src: `${job.assetBase}${item.file}?v=${item.updatedAt}`, alt: "生成结果" })
-                                  : h("div", { className: "SPR_thumbEmpty" }, item.status === "running" ? "生成中…" : "等待生成"),
+                              h(
+                                MediaBox,
+                                { overlay, text: overlayText },
+                                item.keyedFile !== undefined
+                                  ? h("img", { className: "SPR_thumb", src: `${job.assetBase}${item.keyedFile}?v=${item.updatedAt}`, alt: "抠像结果" })
+                                  : item.file !== undefined
+                                    ? h("img", { className: "SPR_thumb", src: `${job.assetBase}${item.file}?v=${item.updatedAt}`, alt: "生成结果" })
+                                    : h("div", { className: "SPR_thumbEmpty" }, overlay ? "生成中…" : "等待生成")
+                              ),
+                              overlay ? h(BusyBadge, { show: true, text: overlayText }) : null,
                               item.backgroundFraction !== undefined
                                 ? h("span", { className: "SPR_refRow" }, `背景占比 ${(item.backgroundFraction * 100).toFixed(0)}%`)
                                 : null,
@@ -2101,12 +2542,24 @@
                                   ? h("a", { className: "SPR_btn", href: `${job.assetBase}${item.keyedFile}`, download: `keyed-${index + 1}.png`, style: { textDecoration: "none" } }, "下载 PNG")
                                   : null,
                                 item.source === "generated"
-                                  ? h(Btn, { onClick: () => void run(() => api.runImageJob({ jobId: job.id, count: index + 1 }), "已重新生成") }, "重新生成")
+                                  ? h(
+                                      BusyBtn,
+                                      {
+                                        busy: tasks.has(itemKey),
+                                        busyText: "正在提交…",
+                                        onClick: () =>
+                                          void run(() => api.runImageJob({ jobId: job.id, count: index + 1 }), "已重新生成", {
+                                            key: itemKey,
+                                            label: `正在重新生成第 ${index + 1} 张…`
+                                          })
+                                      },
+                                      "重新生成"
+                                    )
                                   : null,
-                                h(Btn, { danger: true, onClick: () => void run(() => api.removeImageItem({ jobId: job.id, index }), "已删除") }, "删除")
+                                h(Btn, { danger: true, disabled: overlay, onClick: () => void run(() => api.removeImageItem({ jobId: job.id, index }), "已删除") }, "删除")
                               )
-                            )
-                          )
+                            );
+                          })
                         )
                   ),
                   renderJobLog(job)
@@ -2117,6 +2570,15 @@
     }
 
     // ── 模块③：序列帧生成 ───────────────────────────────────────────────
+    /** 模块③的 pending key：视频、抽帧、抠像、合成、上传、新建任务。 */
+    const K_SEQ_VIDEO = "seq:video";
+    const K_SEQ_FRAMES = "seq:frames";
+    const K_SEQ_KEY = "seq:key";
+    const K_SEQ_COMPOSE = "seq:compose";
+    const K_SEQ_UPLOAD = "seq:upload";
+    const K_SEQ_CREATE = "seq:create";
+    const K_SEQ_POLL = "seq:poll";
+
     function SequenceModule(props) {
       const api = props.api;
       const [jobs, setJobs] = React.useState([]);
@@ -2129,6 +2591,8 @@
       const [settingsDraft, setSettingsDraft] = React.useState({});
       const [keyingDraft, setKeyingDraft] = React.useState({});
       const globalConfig = useGlobalConfig(api);
+      // 「正在调用接口」的记账表：宿主状态没落盘时，遮罩靠它撑住。
+      const tasks = usePendingTasks();
 
       // 时长与分辨率档位跟着全局模型走（优云智算版 H3 多 1080P、可到 30 秒）。
       const modelCaps = globalConfig?.minimaxCapabilities ?? {
@@ -2145,8 +2609,9 @@
       // 视频、抽帧、抠像/合成任一在跑就保持轮询。
       // 抽帧是后台任务，只刷新一次会一直停在「还没有序列帧」上（实测踩过）。
       const running =
-        job !== null &&
-        (job.video?.status === "running" || job.frames?.status === "running" || job.sheet?.status === "running");
+        (job !== null &&
+          (job.video?.status === "running" || job.frames?.status === "running" || job.sheet?.status === "running")) ||
+        tasks.active;
 
       const refresh = React.useCallback(async () => {
         try {
@@ -2195,17 +2660,25 @@
         return () => clearInterval(timer);
       }, [running, jobId, load]);
 
-      const run = async (fn, okText = undefined) => {
-        try {
-          const value = await fn();
-          if (okText !== undefined) setNotice({ kind: "ok", text: okText });
-          if (jobId !== null) await load(jobId);
-          await refresh();
-          return value;
-        } catch (error) {
-          setNotice({ kind: "error", text: msg(error) });
-          return undefined;
-        }
+      /**
+       * 跑一次远程调用。`feedback`（可选）给出 pending 的 key 与文案，
+       * 界面据此在对应预览上盖 loading、把按钮变成转圈。
+       */
+      const run = async (fn, okText = undefined, feedback = undefined) => {
+        const invoke = async () => {
+          try {
+            const value = await fn();
+            if (okText !== undefined) setNotice({ kind: "ok", text: okText });
+            if (jobId !== null) await load(jobId);
+            await refresh();
+            return value;
+          } catch (error) {
+            setNotice({ kind: "error", text: msg(error) });
+            return undefined;
+          }
+        };
+        if (feedback === undefined) return invoke();
+        return tasks.run(feedback.key, feedback.label, invoke);
       };
 
       /**
@@ -2214,9 +2687,9 @@
        * 一直停在上一次的结果上（实测：抽帧完成后界面仍显示「还没有序列帧」）。
        * 所以启动后再补几次刷新，直到宿主把 running / ready 写进任务。
        */
-      const kickAndWatch = async (fn, okText = undefined) => {
+      const kickAndWatch = async (fn, okText = undefined, feedback = undefined) => {
         const id = job.id;
-        const value = await run(fn, okText);
+        const value = await run(fn, okText, feedback);
         for (const delay of [1200, 3000, 5500, 9000]) {
           setTimeout(() => {
             if (jobIdRef.current === id) void load(id);
@@ -2230,7 +2703,7 @@
           const created = await api.createSequenceJob({ name: `序列帧 ${new Date().toLocaleString("zh-CN", { hour12: false })}` });
           await refresh();
           setJobId(created.jobId);
-        }, "已新建序列帧任务");
+        }, "已新建序列帧任务", { key: K_SEQ_CREATE, label: "正在新建任务…" });
 
       const saveJob = (patch) => run(() => api.saveSequenceJob({ jobId: job.id, ...patch }), undefined);
 
@@ -2247,17 +2720,19 @@
 
       const uploadRef = async (files, kind) => {
         setUploading(true);
-        try {
-          for (const file of files) {
-            const data = await readFileBase64(file);
-            await api.uploadSequenceRef({ jobId: job.id, kind, name: file.name, data });
+        await tasks.run(K_SEQ_UPLOAD, `正在上传 ${files.length} 个文件…`, async () => {
+          try {
+            for (const file of files) {
+              const data = await readFileBase64(file);
+              await api.uploadSequenceRef({ jobId: job.id, kind, name: file.name, data });
+            }
+            await load(job.id);
+          } catch (error) {
+            setNotice({ kind: "error", text: msg(error) });
+          } finally {
+            setUploading(false);
           }
-          await load(job.id);
-        } catch (error) {
-          setNotice({ kind: "error", text: msg(error) });
-        } finally {
-          setUploading(false);
-        }
+        });
       };
 
       const frameUrls = React.useMemo(() => {
@@ -2265,6 +2740,16 @@
         const list = (job.frames?.keyed ?? []).length > 0 ? job.frames.keyed : job.frames?.files ?? [];
         return list.map((file) => `${job.assetBase}${file}?v=${job.frames?.updatedAt ?? job.updatedAt}`);
       }, [job]);
+
+      // ── 「正在调用接口」的派生状态 ──────────────────────────────────────
+      // 三段各有一块要盖遮罩的预览区：视频、序列帧/条图、合成结果。
+      const videoBusy = job?.video?.status === "running" || tasks.has(K_SEQ_VIDEO);
+      const videoText = tasks.label(K_SEQ_VIDEO) ?? "视频生成中…（H3 通常 1~6 分钟，可以离开本页）";
+      const framesBusy = job?.frames?.status === "running" || tasks.has(K_SEQ_FRAMES);
+      const framesText = tasks.label(K_SEQ_FRAMES) ?? "正在抽帧…";
+      const composing =
+        job?.sheet?.status === "running" || tasks.has(K_SEQ_KEY) || tasks.has(K_SEQ_COMPOSE);
+      const composeText = tasks.label(K_SEQ_KEY) ?? tasks.label(K_SEQ_COMPOSE) ?? "正在抠像并合成条图…";
 
       return h(
         React.Fragment,
@@ -2290,8 +2775,9 @@
             h(
               "div",
               { className: "SPR_toolbar" },
-              h(Btn, { onClick: create, primary: true }, "新建任务"),
-              job !== null ? h(Btn, { onClick: del, danger: true }, "删除任务") : null
+              h(BusyBtn, { onClick: create, primary: true, busy: tasks.has(K_SEQ_CREATE), busyText: "正在新建…" }, "新建任务"),
+              job !== null ? h(Btn, { onClick: del, danger: true }, "删除任务") : null,
+              h(BusyBadge, { show: tasks.active, text: tasks.firstLabel ?? "正在调用接口…" })
             ),
             job === null
               ? h("p", { className: "SPR_empty" }, "请选择或新建一个序列帧任务")
@@ -2326,7 +2812,7 @@
                           h(RefRow, { job, frame: job.refs.firstFrame, kind: "firstFrame", api, reload: load, setNotice }),
                           h("span", { className: "SPR_fieldLabel" }, "尾帧图（选填）"),
                           h(RefRow, { job, frame: job.refs.lastFrame, kind: "lastFrame", api, reload: load, setNotice }),
-                          h(UploadBox, { label: "把首帧图拖到这里", accept: "image/*", busy: uploading, onFiles: (files) => void uploadRef(files, "firstFrame") })
+                          h(UploadBox, { label: "把首帧图拖到这里", accept: "image/*", busy: uploading || tasks.has(K_SEQ_UPLOAD), onFiles: (files) => void uploadRef(files, "firstFrame") })
                         )
                       : h(
                           React.Fragment,
@@ -2344,7 +2830,7 @@
                               )
                             )
                           ),
-                          h(UploadBox, { label: "把参考图拖到这里", accept: "image/*", multiple: true, busy: uploading, onFiles: (files) => void uploadRef(files, "referenceImage") }),
+                          h(UploadBox, { label: "把参考图拖到这里", accept: "image/*", multiple: true, busy: uploading || tasks.has(K_SEQ_UPLOAD), onFiles: (files) => void uploadRef(files, "referenceImage") }),
                           h("span", { className: "SPR_fieldLabel" }, `参考视频（${(job.refs.referenceVideos ?? []).length}/3，每段 2~15 秒，单文件 ≤ 40MB）`),
                           h(
                             "div",
@@ -2353,7 +2839,7 @@
                               h(Btn, { key: ref.file, danger: true, onClick: () => void run(() => api.removeSequenceRef({ jobId: job.id, kind: "referenceVideo", file: ref.file }), "已移除") }, `移除 ${ref.name}`)
                             )
                           ),
-                          h(UploadBox, { label: "把参考视频拖到这里", accept: "video/*", multiple: true, busy: uploading, onFiles: (files) => void uploadRef(files, "referenceVideo") })
+                          h(UploadBox, { label: "把参考视频拖到这里", accept: "video/*", multiple: true, busy: uploading || tasks.has(K_SEQ_UPLOAD), onFiles: (files) => void uploadRef(files, "referenceVideo") })
                         )
                   ),
                   h(
@@ -2394,26 +2880,57 @@
                       "div",
                       { className: "SPR_toolbar" },
                       h(
-                        Btn,
+                        BusyBtn,
                         {
                           primary: true,
-                          disabled: promptDraft.trim() === "",
-                          onClick: () => void kickAndWatch(() => api.runSequenceVideo({ jobId: job.id }), "已提交视频任务，可离开本页")
+                          busy: tasks.has(K_SEQ_VIDEO),
+                          busyText: "正在提交视频任务…",
+                          disabled: promptDraft.trim() === "" || tasks.has(K_SEQ_VIDEO),
+                          onClick: () =>
+                            void kickAndWatch(() => api.runSequenceVideo({ jobId: job.id }), "已提交视频任务，可离开本页", {
+                              key: K_SEQ_VIDEO,
+                              label: "正在提交视频任务…"
+                            })
                         },
                         job.video?.status === "ready" ? "重新生成视频" : "生成视频"
                       ),
-                      h(Btn, { onClick: () => void run(() => api.pollSequenceVideo({ jobId: job.id })) }, "立即刷新进度"),
-                      h(Btn, { danger: true, onClick: () => void run(() => api.clearSequenceVideo({ jobId: job.id }), "已清空视频与帧") }, "清空视频重来"),
+                      h(
+                        BusyBtn,
+                        {
+                          busy: tasks.has(K_SEQ_POLL),
+                          busyText: "正在查询…",
+                          onClick: () =>
+                            void kickAndWatch(
+                              () => run(() => api.pollSequenceVideo({ jobId: job.id })),
+                              undefined,
+                              { key: K_SEQ_POLL, label: "正在查询远端进度…" }
+                            )
+                        },
+                        "立即刷新进度"
+                      ),
+                      h(Btn, { danger: true, disabled: videoBusy, onClick: () => void run(() => api.clearSequenceVideo({ jobId: job.id }), "已清空视频与帧") }, "清空视频重来"),
                       h("span", { className: "SPR_refRow" }, "H3 768P 按 0.5 元/秒刊例计费")
                     ),
                     h(
                       "div",
                       { className: "SPR_toolbar" },
-                      h("span", { className: "SPR_refRow" }, `状态：${job.video?.status ?? "empty"} ${job.video?.remoteStatus ?? ""} ${job.video?.error ?? ""}`)
+                      h("span", { className: "SPR_refRow" }, `状态：${job.video?.status ?? "empty"} ${job.video?.remoteStatus ?? ""} ${job.video?.error ?? ""}`),
+                      h(BusyBadge, { show: videoBusy, text: videoText })
                     ),
-                    job.video?.file !== undefined
-                      ? h("video", { className: "SPR_video", src: `${job.assetBase}${job.video.file}?v=${job.video.updatedAt}`, controls: true, preload: "metadata" })
-                      : null
+                    h(
+                      "div",
+                      { style: { position: "relative", minHeight: job.video?.file === undefined ? 90 : undefined } },
+                      job.video?.file !== undefined
+                        ? h(
+                            MediaBox,
+                            { overlay: videoBusy, text: videoText },
+                            h("video", { className: "SPR_video", src: `${job.assetBase}${job.video.file}?v=${job.video.updatedAt}`, controls: true, preload: "metadata" })
+                          )
+                        : videoBusy
+                          ? h("div", { className: "SPR_thumbEmpty", style: { minHeight: 90 } }, videoText)
+                          : null,
+                      job.video?.file === undefined ? h(LoadingOverlay, { show: videoBusy, text: videoText }) : null
+                    )
                   ),
                   h(
                     "div",
@@ -2431,8 +2948,23 @@
                     h(
                       "div",
                       { className: "SPR_toolbar" },
-                      h(Btn, { primary: true, disabled: job.video?.file === undefined, onClick: () => void kickAndWatch(() => api.runSequenceFrames({ jobId: job.id }), "已开始抽帧") }, `按当前张数抽帧（${settingsDraft.frameCount ?? 8} 张）`),
+                      h(
+                        BusyBtn,
+                        {
+                          primary: true,
+                          busy: tasks.has(K_SEQ_FRAMES),
+                          busyText: "正在抽帧…",
+                          disabled: job.video?.file === undefined || framesBusy,
+                          onClick: () =>
+                            void kickAndWatch(() => api.runSequenceFrames({ jobId: job.id }), "已开始抽帧", {
+                              key: K_SEQ_FRAMES,
+                              label: "正在抽帧…"
+                            })
+                        },
+                        `按当前张数抽帧（${settingsDraft.frameCount ?? 8} 张）`
+                      ),
                       job.frames?.stale === true ? h(Chip, { kind: "stale", text: "参数已变，需重抽" }) : null,
+                      h(BusyBadge, { show: framesBusy, text: framesText }),
                       h("span", { className: "SPR_refRow" }, job.frames?.duration !== undefined ? `视频时长 ${job.frames.duration.toFixed(2)} 秒 · ${job.frames.files.length} 帧` : "")
                     )
                   ),
@@ -2444,17 +2976,53 @@
                     h(
                       "div",
                       { className: "SPR_toolbar" },
-                      h(Btn, { onClick: () => void kickAndWatch(() => api.keySequenceFrames({ jobId: job.id }), "已开始重新抠像") }, "重新抠像"),
-                      h(Btn, { onClick: () => void kickAndWatch(() => api.composeSequence({ jobId: job.id }), "已合成") }, "合成横向条图"),
+                      h(
+                        BusyBtn,
+                        {
+                          busy: tasks.has(K_SEQ_KEY),
+                          busyText: "正在重新抠像…",
+                          disabled: framesBusy,
+                          onClick: () =>
+                            void kickAndWatch(() => api.keySequenceFrames({ jobId: job.id }), "已开始重新抠像", {
+                              key: K_SEQ_KEY,
+                              label: "正在重新抠像…"
+                            })
+                        },
+                        "重新抠像"
+                      ),
+                      h(
+                        BusyBtn,
+                        {
+                          busy: tasks.has(K_SEQ_COMPOSE),
+                          busyText: "正在合成条图…",
+                          disabled: framesBusy,
+                          onClick: () =>
+                            void kickAndWatch(() => api.composeSequence({ jobId: job.id }), "已合成", {
+                              key: K_SEQ_COMPOSE,
+                              label: "正在合成横向条图…"
+                            })
+                        },
+                        "合成横向条图"
+                      ),
                       job.sheet?.file !== undefined
                         ? h("a", { className: "SPR_btn", href: `${job.assetBase}${job.sheet.file}?v=${job.sheet.updatedAt}`, download: `${job.name}-strip.png`, style: { textDecoration: "none" } }, "下载条图")
                         : null
                     ),
-                    frameUrls.length === 0
-                      ? h("p", { className: "SPR_empty" }, "还没有序列帧")
-                      : h(SequencePlayer, { urls: frameUrls }),
+                    h(
+                      "div",
+                      { style: { position: "relative" } },
+                      frameUrls.length === 0
+                        ? h("p", { className: "SPR_empty" }, framesBusy ? "正在处理序列帧…" : "还没有序列帧")
+                        : h(SequencePlayer, { urls: frameUrls }),
+                      h(LoadingOverlay, { show: framesBusy, text: framesText })
+                    ),
                     job.sheet?.file !== undefined
-                      ? h("div", { className: "SPR_sheetWrap" }, h("img", { className: "SPR_sheet", src: `${job.assetBase}${job.sheet.file}?v=${job.sheet.updatedAt}`, alt: "序列帧条图" }))
+                      ? h(
+                          "div",
+                          { className: "SPR_sheetWrap", style: { position: "relative" } },
+                          h("img", { className: "SPR_sheet", src: `${job.assetBase}${job.sheet.file}?v=${job.sheet.updatedAt}`, alt: "序列帧条图", style: { visibility: composing ? "hidden" : undefined } }),
+                          h(LoadingOverlay, { show: composing, text: composeText })
+                        )
                       : null,
                     frameUrls.length === 0
                       ? null
@@ -2789,8 +3357,10 @@
             "div",
             { className: "SPR_toolbar" },
             h(
-              Btn,
+              BusyBtn,
               {
+                busy: testing === "ark",
+                busyText: "正在生成测试图…",
                 disabled: testing !== null || !config.arkApiKeySet,
                 onClick: async () => {
                   setTesting("ark");
@@ -2798,7 +3368,7 @@
                   setTesting(null);
                 }
               },
-              testing === "ark" ? "正在生成测试图…" : "测试连接（会真实生成 1 张 1K 小图，产生少量费用）"
+              "测试连接（会真实生成 1 张 1K 小图，产生少量费用）"
             )
           )
         ),
@@ -2920,8 +3490,10 @@
             "div",
             { className: "SPR_toolbar" },
             h(
-              Btn,
+              BusyBtn,
               {
+                busy: testing === "minimax",
+                busyText: "正在校验…",
                 disabled: testing !== null || !config.minimaxApiKeySet,
                 onClick: async () => {
                   setTesting("minimax");
@@ -2929,7 +3501,7 @@
                   setTesting(null);
                 }
               },
-              testing === "minimax" ? "正在校验…" : "测试连接（只校验 Key，不产生费用）"
+              "测试连接（只校验 Key，不产生费用）"
             )
           )
         ),
@@ -3179,6 +3751,9 @@
     bundleModule.exports.apply = apply;
     bundleModule.exports.inject = inject;
     bundleModule.exports.GAME_STUDIO_PANEL_ID = "gameStudio";
+    // 仅测试用把手：三个模块组件在工厂闭包里，脚本要能拿出来单独渲染
+    // （见 scripts/verify-feedback.mjs）。运行时没有任何调用点。
+    bundleModule.exports.__test = { StudioPanel, ImageModule, SequenceModule, usePendingTasks, LoadingOverlay, MediaBox, BusyBtn, BusyBadge, CSS };
     return bundleModule.exports;
   }
 });

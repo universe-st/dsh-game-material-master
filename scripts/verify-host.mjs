@@ -337,7 +337,12 @@ async function main() {
   for (let i = 0; i < 40; i++) {
     await sleep(500);
     const snapshot = await studio.getProject({ projectId });
-    if (snapshot.images.front.status === "error" || snapshot.images.front.status === "ready") {
+    // 节点状态是任务体自己写的，运行表要等 kick 的 finally 才清空——两者之间
+    // 有一个很短的窗口，等到「收敛 + 运行表为空」才算这次任务真的结束。
+    if (
+      (snapshot.images.front.status === "error" || snapshot.images.front.status === "ready") &&
+      (snapshot.jobs ?? []).length === 0
+    ) {
       settled = snapshot;
       break;
     }
@@ -454,7 +459,17 @@ async function main() {
   for (let i = 0; i < 40; i++) {
     await sleep(500);
     const snapshot = await studio.getProject({ projectId });
-    if (Object.values(snapshot.frames).every((node) => node.status !== "running")) {
+    // 抽帧把节点标成 ready 之后还会接着抠像、写预览带，最后才合成整图，
+    // 所以「没有 running」只是中间态：必须等到抠像帧已经写完再判收敛，
+    // 否则后续断言会在中间态上闪失败（实测在机器有负载时必现）。
+    const keyedReady = seeded.every(
+      (key) => snapshot.frames[key]?.frames?.length > 0 && snapshot.frames[key]?.keyed?.length === snapshot.frames[key]?.frames?.length
+    );
+    if (
+      keyedReady &&
+      Object.values(snapshot.frames).every((node) => node.status !== "running") &&
+      (snapshot.sheet.status === "ready" || snapshot.sheet.status === "error")
+    ) {
       framesSettled = snapshot;
       break;
     }
@@ -589,6 +604,100 @@ async function main() {
   await studio.saveSettings({ projectId, settings: { workingLongEdge: 320 } });
   const afterExtract = await studio.getProject({ projectId });
   check("改抽帧工作尺寸后标记为需重新抽帧", afterExtract.frames.front.stale === true && beforeExtract === false, String(afterExtract.frames.front.stale));
+
+  // ── 9b. 单方向「重新生成」视频 ─────────────────────────────────────────
+  // 实测 bug：点某个方向的「重新生成」，界面转一圈之后失败，日志里只有
+  // 「没有可提交的方向：请先生成绿幕图，或先清掉已完成的视频」。原因是宿主把
+  // ready 的方向一律当成「已提交」过滤掉，而客户端并没有先清空——于是这次点击
+  // 既没作废旧视频，也没真的提交新任务。
+  // 这里用本地假网关顶替 MiniMax：提交必然失败，但「有没有真的去提交」一目了然。
+  console.log("9b) 单方向重新生成视频（本地假网关，不联网）");
+  await writeFile(join(projectRoot, "images", "front.png"), png);
+  await patchProject(projectId, (project) => {
+    project.images.front = { status: "ready", file: "images/front.png", approved: true };
+  });
+
+  const fakeGateway = createServer((req, res) => {
+    req.resume();
+    res.writeHead(401, { "content-type": "application/json" });
+    res.end(JSON.stringify({ base_resp: { status_code: 1004, status_msg: "invalid api key (verify)" } }));
+  });
+  await new Promise((resolve) => fakeGateway.listen(0, "127.0.0.1", resolve));
+  const gatewayPort = fakeGateway.address().port;
+  await studio.saveConfig({
+    minimaxApiKey: "fake-key-for-verification",
+    minimaxBaseUrl: `http://127.0.0.1:${gatewayPort}`
+  });
+
+  try {
+    // 批量提交带 regenerate 会把八段视频全重跑一遍（真金白银），必须直接拒绝。
+    await expectThrow("批量带 regenerate 被拒绝", () => studio.runVideos({ projectId, regenerate: true }), "必须指定方向");
+
+    const regenKick = await studio.runVideos({ projectId, keys: ["front"], regenerate: true });
+    check("单方向重新生成被接受", regenKick.started === true, JSON.stringify(regenKick));
+
+    // 作废发生在 RPC 返回之前，所以这里可以直接断言，不需要等异步任务。
+    const afterKick = await studio.getProject({ projectId });
+    check(
+      "旧视频被作废（不再被当成已完成）",
+      afterKick.videos.front.status !== "ready" && afterKick.videos.front.file === undefined,
+      `${afterKick.videos.front.status} ${afterKick.videos.front.file ?? "(无文件)"}`
+    );
+    check(
+      "旧序列帧一并作废（否则整图会混进上一版动作的帧）",
+      afterKick.frames.front.status === "empty" && afterKick.frames.front.frames.length === 0 && afterKick.frames.front.raw === undefined,
+      `${afterKick.frames.front.status} / ${afterKick.frames.front.frames.length} 帧 / raw=${afterKick.frames.front.raw ?? "(无)"}`
+    );
+    check("整图一并作废", afterKick.sheet.status === "empty", afterKick.sheet.status);
+    // 只作废被点名的方向：别的方向的成片与帧不能跟着一起被清掉。
+    check(
+      "未点名的方向不受影响",
+      afterKick.videos.back.status === "ready" && afterKick.frames.back.status === "ready",
+      `${afterKick.videos.back.status} / ${afterKick.frames.back.status}`
+    );
+    check("作废动作写进了运行日志", afterKick.log.some((e) => /重新生成：已作废/.test(e.message)));
+
+    let regen = null;
+    for (let i = 0; i < 40; i++) {
+      await sleep(500);
+      const snapshot = await studio.getProject({ projectId });
+      // 提交前宿主会先写一条「提交「南 · 正对镜头」视频任务」的日志，
+      // 拿到它 + 节点收敛，才算这一次点击真的走到了远端。
+      const submitted = snapshot.log.some((e) => /提交「南 · 正对镜头」视频任务/.test(e.message));
+      const node = snapshot.videos.front;
+      if (submitted && (node.status === "error" || node.status === "ready")) {
+        regen = snapshot;
+        break;
+      }
+    }
+    // 关键回归：这一方向必须真的被重新提交出去。修复前它连提交都不会发生，
+    // 只有日志里那句「没有可提交的方向」。
+    check(
+      "真的重新提交了视频任务",
+      regen !== null,
+      regen === null ? "超时未收敛" : `${regen.videos.front.status} ${regen.videos.front.remoteStatus ?? ""}`
+    );
+    check(
+      "不再出现「没有可提交的方向」",
+      regen !== null && !regen.log.some((e) => e.message.includes("没有可提交的方向"))
+    );
+    check(
+      "假网关的 401 落到节点上（错误可读）",
+      regen?.videos.front.status === "error" && /提交视频任务失败/.test(regen?.videos.front.error ?? ""),
+      `${regen?.videos.front.status} ${regen?.videos.front.error ?? ""}`.slice(0, 110)
+    );
+
+    // 已经完成的方向默认不重复提交：不作废、也不重跑，而是直接给出可读原因，
+    // 而不是转一圈之后只在日志里留一句失败。
+    await patchProject(projectId, (project) => {
+      project.videos.front = { status: "ready", file: "videos/front.mp4", approved: false };
+      project.videos.back = { status: "ready", file: "videos/back.mp4", approved: false };
+    });
+    await expectThrow("已完成的方向默认不重跑，并给出可读原因", () => studio.runVideos({ projectId, keys: ["front"] }), "都已经生成完成");
+  } finally {
+    await new Promise((resolve) => fakeGateway.close(resolve));
+    await studio.saveConfig({ minimaxBaseUrl: "https://api.minimaxi.com", clearMinimaxApiKey: true });
+  }
 
   // ── 10. 图片生成模块（本地链路，不调 API）────────────────────────────
   console.log("10) 图片生成模块");
@@ -777,7 +886,13 @@ async function main() {
   for (let i = 0; i < 60; i++) {
     await sleep(500);
     const snapshot = await studio.getSequenceJob({ jobId: seqId });
-    if (snapshot.frames.status !== "running" && snapshot.sheet.status !== "running" && snapshot.frames.status !== "empty") {
+    // 抽帧完成后还会接着抠像与合成条图，`sheet` 在条图开始前仍是 empty——
+    // 必须等它落到终态（ready / error），否则会在中间态上提前判定收敛。
+    const framesDone =
+      snapshot.frames.status === "ready" &&
+      snapshot.frames.files.length > 0 &&
+      snapshot.frames.keyed.length === snapshot.frames.files.length;
+    if (framesDone && (snapshot.sheet.status === "ready" || snapshot.sheet.status === "error")) {
       seqSettled = snapshot;
       break;
     }
