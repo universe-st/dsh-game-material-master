@@ -620,6 +620,15 @@ async function main() {
   check("参考图已记录", imageJob.refs.length === 1, `${imageJob.refs.length} 张`);
   check("图片任务带 assetBase", imageJob.assetBase.endsWith(`/image-assets/${imageId}/`), imageJob.assetBase);
 
+  // 生图模型是全局设置：客户端塞一个过期的模型 id，也必须被纠正回全局值。
+  await studio.saveImageJob({ jobId: imageId, settings: { model: "some-stale-model", size: "2K" } });
+  imageJob = await studio.getImageJob({ jobId: imageId });
+  check(
+    "图片任务的模型跟随全局设置",
+    imageJob.settings.model === (await studio.getConfig()).arkModel,
+    `${imageJob.settings.model} vs ${(await studio.getConfig()).arkModel}`
+  );
+
   // 上传一张已有图片直接做抠像——这是「支持绿幕抠图生成 png」的主路径
   await studio.addImageItem({ jobId: imageId, name: "green.png", data: greenPng.toString("base64") });
   await studio.saveImageJob({
@@ -691,6 +700,28 @@ async function main() {
   let seqJob = await studio.getSequenceJob({ jobId: seqId });
   check("首帧图已记录", seqJob.refs.firstFrame?.file !== undefined, seqJob.refs.firstFrame?.file ?? "");
   check("模式与参数已保存", seqJob.mode === "frames" && seqJob.settings.frameCount === 4, `${seqJob.mode} ${seqJob.settings.frameCount}`);
+
+  // 视频模型同样是全局设置：任务里不允许留一份会打错网关的旧模型副本
+  // （实测过的坑：任务存官方 H3 + 全局切优云智算 → cp.compshare.cn/v2/... 404）。
+  await studio.saveSequenceJob({ jobId: seqId, settings: { model: "MiniMax-H3", resolution: "480P" } });
+  seqJob = await studio.getSequenceJob({ jobId: seqId });
+  check(
+    "序列帧任务的模型跟随全局设置",
+    seqJob.settings.model === (await studio.getConfig()).minimaxModel,
+    `${seqJob.settings.model} vs ${(await studio.getConfig()).minimaxModel}`
+  );
+  check("序列帧分辨率跟着当前模型收敛", seqJob.settings.resolution === "2K", seqJob.settings.resolution);
+
+  // 切到优云智算版后，同一个任务再保存就应换成优云智算的模型与档位。
+  await studio.saveConfig({ minimaxModel: compshareId });
+  await studio.saveSequenceJob({ jobId: seqId, settings: { model: "MiniMax-H3", duration: 20, resolution: "1080P" } });
+  const cpSeqJob = await studio.getSequenceJob({ jobId: seqId });
+  check(
+    "切到优云智算后任务跟着换模型与档位",
+    cpSeqJob.settings.model === compshareId && cpSeqJob.settings.duration === 20 && cpSeqJob.settings.resolution === "1080P",
+    JSON.stringify(cpSeqJob.settings)
+  );
+  await studio.saveConfig({ minimaxModel: "MiniMax-H3", minimaxBaseUrl: "https://api.minimaxi.com" });
 
   // 参考模式必须至少有一张参考图/一段参考视频
   await studio.saveSequenceJob({ jobId: seqId, mode: "reference" });

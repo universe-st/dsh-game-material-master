@@ -321,6 +321,41 @@
       );
     }
 
+    /**
+     * 全局模型设置。生图模型 / 视频模型都是插件级设置（设置 → 游戏素材大师），
+     * 各功能模块只跟随、不各自留一份副本——否则切换模型后旧任务会打到错误网关
+     * （实测：任务里存官方 H3 + 全局已切优云智算 → cp.compshare.cn/v2/... 404）。
+     */
+    function useGlobalConfig(api) {
+      const [value, setValue] = React.useState(null);
+      React.useEffect(() => {
+        let alive = true;
+        void (async () => {
+          try {
+            const next = await api.getConfig();
+            if (alive) setValue(next);
+          } catch {
+            /* 取不到就退回任务里记录的值 */
+          }
+        })();
+        return () => {
+          alive = false;
+        };
+      }, [api]);
+      return value;
+    }
+
+    /** 只读展示当前生效的全局模型：模型只在设置里改，模块内不允许覆盖。 */
+    function GlobalModelField({ label, value }) {
+      return h(
+        "label",
+        { className: "SPR_field" },
+        h("span", { className: "SPR_fieldLabel" }, label),
+        h("input", { className: "SPR_input", value: value ?? "", readOnly: true, disabled: true }),
+        h("span", { className: "SPR_fieldLabel" }, "跟随即「设置 → 游戏素材大师」")
+      );
+    }
+
     function assetUrl(project, relative, version) {
       if (project === null || relative === undefined || relative === null) return undefined;
       const base = project.assetBase ?? "";
@@ -1801,6 +1836,7 @@
       const [suffixDraft, setSuffixDraft] = React.useState("");
       const [settingsDraft, setSettingsDraft] = React.useState({});
       const [keyingDraft, setKeyingDraft] = React.useState({});
+      const globalConfig = useGlobalConfig(api);
 
       const busy = job !== null && (job.items ?? []).some((item) => item.status === "running");
 
@@ -1954,12 +1990,7 @@
                     h(
                       "div",
                       { className: "SPR_fields" },
-                      h(
-                        "label",
-                        { className: "SPR_field" },
-                        h("span", { className: "SPR_fieldLabel" }, "生图模型"),
-                        h("input", { className: "SPR_input", value: settingsDraft.model ?? "", onChange: (event) => setSettingsDraft({ ...settingsDraft, model: event.target.value }), onBlur: () => void saveJob({ settings: settingsDraft }) })
-                      ),
+                      h(GlobalModelField, { label: "生图模型", value: globalConfig?.arkModel ?? settingsDraft.model }),
                       h(
                         "label",
                         { className: "SPR_field" },
@@ -2096,8 +2127,25 @@
       const [suffixDraft, setSuffixDraft] = React.useState("");
       const [settingsDraft, setSettingsDraft] = React.useState({});
       const [keyingDraft, setKeyingDraft] = React.useState({});
+      const globalConfig = useGlobalConfig(api);
 
-      const running = job !== null && job.video?.status === "running";
+      // 时长与分辨率档位跟着全局模型走（优云智算版 H3 多 1080P、可到 30 秒）。
+      const modelCaps = globalConfig?.minimaxCapabilities ?? {
+        protocol: "v2",
+        resolutions: ["768P", "2K", "1080P", "480P"],
+        durationMin: 1,
+        durationMax: 30
+      };
+      const effectiveModel = globalConfig?.minimaxModel ?? settingsDraft.model ?? "";
+      const effectiveResolution = modelCaps.resolutions.includes(settingsDraft.resolution)
+        ? settingsDraft.resolution
+        : modelCaps.resolutions[0];
+
+      // 视频、抽帧、抠像/合成任一在跑就保持轮询。
+      // 抽帧是后台任务，只刷新一次会一直停在「还没有序列帧」上（实测踩过）。
+      const running =
+        job !== null &&
+        (job.video?.status === "running" || job.frames?.status === "running" || job.sheet?.status === "running");
 
       const refresh = React.useCallback(async () => {
         try {
@@ -2123,6 +2171,11 @@
           setNotice({ kind: "error", text: msg(error) });
         }
       }, [api]);
+
+      const jobIdRef = React.useRef(null);
+      React.useEffect(() => {
+        jobIdRef.current = jobId;
+      }, [jobId]);
 
       React.useEffect(() => {
         void (async () => {
@@ -2152,6 +2205,23 @@
           setNotice({ kind: "error", text: msg(error) });
           return undefined;
         }
+      };
+
+      /**
+       * 启动一个宿主侧「后台任务」（提交视频 / 抽帧 / 抠像 / 合成）。
+       * 这些 RPC 是异步启动的——返回时任务状态可能还没落盘，只刷新一次就会
+       * 一直停在上一次的结果上（实测：抽帧完成后界面仍显示「还没有序列帧」）。
+       * 所以启动后再补几次刷新，直到宿主把 running / ready 写进任务。
+       */
+      const kickAndWatch = async (fn, okText = undefined) => {
+        const id = job.id;
+        const value = await run(fn, okText);
+        for (const delay of [1200, 3000, 5500, 9000]) {
+          setTimeout(() => {
+            if (jobIdRef.current === id) void load(id);
+          }, delay);
+        }
+        return value;
       };
 
       const create = () =>
@@ -2306,24 +2376,16 @@
                     h(
                       "div",
                       { className: "SPR_fields" },
-                      h(
-                        "label",
-                        { className: "SPR_field" },
-                        h("span", { className: "SPR_fieldLabel" }, "视频模型"),
-                        h("input", { className: "SPR_input", value: settingsDraft.model ?? "", onChange: (event) => setSettingsDraft({ ...settingsDraft, model: event.target.value }), onBlur: () => void saveJob({ settings: settingsDraft }) })
-                      ),
-                      h(NumField, { label: "时长（秒）", value: settingsDraft.duration ?? 5, min: 1, max: 30, onChange: (v) => { setSettingsDraft({ ...settingsDraft, duration: v }); void saveJob({ settings: { ...settingsDraft, duration: v } }); } }),
+                      h(GlobalModelField, { label: "视频模型", value: effectiveModel }),
+                      h(NumField, { label: `时长（秒，${modelCaps.durationMin}~${modelCaps.durationMax}）`, value: settingsDraft.duration ?? 5, min: modelCaps.durationMin, max: modelCaps.durationMax, onChange: (v) => { setSettingsDraft({ ...settingsDraft, duration: v }); void saveJob({ settings: { ...settingsDraft, duration: v } }); } }),
                       h(
                         "label",
                         { className: "SPR_field" },
                         h("span", { className: "SPR_fieldLabel" }, "分辨率"),
                         h(
                           "select",
-                          { className: "SPR_input", value: settingsDraft.resolution ?? "768P", onChange: (event) => { setSettingsDraft({ ...settingsDraft, resolution: event.target.value }); void saveJob({ settings: { ...settingsDraft, resolution: event.target.value } }); } },
-                          h("option", { value: "768P" }, "768P"),
-                          h("option", { value: "2K" }, "2K"),
-                          h("option", { value: "1080P" }, "1080P"),
-                          h("option", { value: "480P" }, "480P")
+                          { className: "SPR_input", value: effectiveResolution, onChange: (event) => { setSettingsDraft({ ...settingsDraft, resolution: event.target.value }); void saveJob({ settings: { ...settingsDraft, resolution: event.target.value } }); } },
+                          modelCaps.resolutions.map((value) => h("option", { key: value, value }, value))
                         )
                       )
                     ),
@@ -2335,7 +2397,7 @@
                         {
                           primary: true,
                           disabled: promptDraft.trim() === "",
-                          onClick: () => void run(() => api.runSequenceVideo({ jobId: job.id }), "已提交视频任务，可离开本页")
+                          onClick: () => void kickAndWatch(() => api.runSequenceVideo({ jobId: job.id }), "已提交视频任务，可离开本页")
                         },
                         job.video?.status === "ready" ? "重新生成视频" : "生成视频"
                       ),
@@ -2368,7 +2430,7 @@
                     h(
                       "div",
                       { className: "SPR_toolbar" },
-                      h(Btn, { primary: true, disabled: job.video?.file === undefined, onClick: () => void run(() => api.runSequenceFrames({ jobId: job.id }), "已开始抽帧") }, `按当前张数抽帧（${settingsDraft.frameCount ?? 8} 张）`),
+                      h(Btn, { primary: true, disabled: job.video?.file === undefined, onClick: () => void kickAndWatch(() => api.runSequenceFrames({ jobId: job.id }), "已开始抽帧") }, `按当前张数抽帧（${settingsDraft.frameCount ?? 8} 张）`),
                       job.frames?.stale === true ? h(Chip, { kind: "stale", text: "参数已变，需重抽" }) : null,
                       h("span", { className: "SPR_refRow" }, job.frames?.duration !== undefined ? `视频时长 ${job.frames.duration.toFixed(2)} 秒 · ${job.frames.files.length} 帧` : "")
                     )
@@ -2381,8 +2443,8 @@
                     h(
                       "div",
                       { className: "SPR_toolbar" },
-                      h(Btn, { onClick: () => void run(() => api.keySequenceFrames({ jobId: job.id }), "已开始重新抠像") }, "重新抠像"),
-                      h(Btn, { onClick: () => void run(() => api.composeSequence({ jobId: job.id }), "已合成") }, "合成横向条图"),
+                      h(Btn, { onClick: () => void kickAndWatch(() => api.keySequenceFrames({ jobId: job.id }), "已开始重新抠像") }, "重新抠像"),
+                      h(Btn, { onClick: () => void kickAndWatch(() => api.composeSequence({ jobId: job.id }), "已合成") }, "合成横向条图"),
                       job.sheet?.file !== undefined
                         ? h("a", { className: "SPR_btn", href: `${job.assetBase}${job.sheet.file}?v=${job.sheet.updatedAt}`, download: `${job.name}-strip.png`, style: { textDecoration: "none" } }, "下载条图")
                         : null

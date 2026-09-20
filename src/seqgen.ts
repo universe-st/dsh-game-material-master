@@ -22,7 +22,7 @@ import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { basename, join, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import { loadConfig, sequenceJobsRoot } from "./config.js";
-import { downloadVideo, queryVideo, retrieveFile, submitVideo } from "./minimax.js";
+import { downloadVideo, normalizeDuration, normalizeResolution, queryVideo, retrieveFile, submitVideo } from "./minimax.js";
 import { extractFrames, fileSize, mimeOf, toJpegDataUri } from "./media.js";
 import { composeSheet, keyGreen, type SheetRow } from "./chroma.js";
 import { encodePng } from "./png.js";
@@ -403,6 +403,14 @@ async function submitSequenceVideo(jobId: string): Promise<void> {
   const config = await loadConfig();
   if (config.minimaxApiKey.trim() === "") throw new Error("尚未配置 MiniMax API Key");
 
+  // 模型是全局设置（设置 → 游戏素材大师 → 视频模型），任务只跟随、不覆盖：
+  // 任务的模型快照一旦和当前网关/Key 对不上（例如官方 H3 + 优云智算网关），
+  // 就会打出 cp.compshare.cn/v2/... 这种 404。这里以全局配置为准并回写任务。
+  const model = config.minimaxModel;
+  job.settings.model = model;
+  job.settings.duration = normalizeDuration(model, job.settings.duration);
+  job.settings.resolution = normalizeResolution(model, job.settings.resolution);
+
   const built = buildSequencePrompt(job);
   if ("error" in built) throw new Error(built.error);
 
@@ -436,7 +444,7 @@ async function submitSequenceVideo(jobId: string): Promise<void> {
     const taskId = await submitVideo({
       baseUrl: config.minimaxBaseUrl,
       apiKey: config.minimaxApiKey,
-      model: job.settings.model || config.minimaxModel,
+      model,
       timeoutMs: config.minimaxTimeoutMs,
       prompt: built.prompt,
       firstFrameImage,

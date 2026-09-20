@@ -22,6 +22,8 @@ import {
   COMP_SHARE_MODEL_ID,
   capabilityOf,
   isCompshareModel,
+  normalizeDuration,
+  normalizeResolution,
   pathPrefixOf,
   testMiniMax
 } from "./minimax.js";
@@ -564,7 +566,8 @@ export class GameStudioGateway extends TypertRemoteService {
     if (typeof input.suffix === "string") job.suffix = input.suffix;
     if (input.settings !== undefined) {
       const raw = asRecord(input.settings);
-      job.settings.model = asString(raw.model, job.settings.model);
+      // 生图模型是全局设置（设置 → 游戏素材大师 → 生图模型），任务里不保留可覆盖的副本。
+      job.settings.model = (await loadConfig()).arkModel;
       job.settings.size = asString(raw.size, job.settings.size);
       job.settings.count = clampInt(raw.count, job.settings.count, 1, 8);
       job.settings.watermark = raw.watermark === true;
@@ -658,9 +661,12 @@ export class GameStudioGateway extends TypertRemoteService {
     if (input.settings !== undefined) {
       const raw = asRecord(input.settings);
       const before = { ...job.settings };
-      job.settings.model = asString(raw.model, job.settings.model);
-      job.settings.duration = clampInt(raw.duration, job.settings.duration, 1, 30);
-      job.settings.resolution = asString(raw.resolution, job.settings.resolution);
+      // 视频模型是全局设置（含优云智算版），任务里不保留可覆盖的副本；
+      // 时长/分辨率也跟着当前模型收敛，避免存下当前模型不支持的档位。
+      const model = (await loadConfig()).minimaxModel;
+      job.settings.model = model;
+      job.settings.duration = normalizeDuration(model, clampInt(raw.duration, job.settings.duration, 1, 30));
+      job.settings.resolution = normalizeResolution(model, asString(raw.resolution, job.settings.resolution));
       job.settings.promptOptimizer = raw.promptOptimizer !== false;
       job.settings.frameCount = clampInt(raw.frameCount, job.settings.frameCount, 1, 64);
       job.settings.cellWidth = clampInt(raw.cellWidth, job.settings.cellWidth, 16, 2048);
