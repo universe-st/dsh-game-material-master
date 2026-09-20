@@ -243,6 +243,29 @@ check("parts 带 url / placed / score", view.parts.every((part) => "url" in part
 check("review.unmatched 是数组", Array.isArray(view.review.unmatched));
 check("带运行日志", Array.isArray(view.log));
 
+// 工具返回值必须是**无损 JSON**：对象里出现 `undefined` 时，序列化会静默丢键，
+// 宿主判定「不是无损 JSON」直接让整个调用报错（实测 game_material_status /
+// game_material_wait / getRigJob 全挂在这上面）。这里递归扫一遍。
+{
+  const undefinedPaths = [];
+  const walk = (value, path) => {
+    if (value === undefined) {
+      undefinedPaths.push(path);
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach((item, index) => walk(item, `${path}[${index}]`));
+      return;
+    }
+    if (value !== null && typeof value === "object") {
+      for (const [key, item] of Object.entries(value)) walk(item, `${path}.${key}`);
+    }
+  };
+  walk(view, "view");
+  check("视图里没有 undefined（工具返回值必须无损）", undefinedPaths.length === 0, undefinedPaths.slice(0, 6).join("、"));
+  check("视图可以无损往返 JSON", JSON.stringify(JSON.parse(JSON.stringify(view))) === JSON.stringify(view));
+}
+
 // 这是最容易漏的一类 bug（实测踩过两次）：
 //   · 客户端声明了远程方法却忘了挂到 api 上 → 一点就 “is not a function”；
 //   · 客户端按派生字段写，网关却返回原始任务 → 按钮一直是灰的、图片 404。

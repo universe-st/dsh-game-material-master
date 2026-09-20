@@ -539,6 +539,28 @@ function normalizeRigJob(raw: any): RigJob {
  * `origin` 为空时返回**相对路径**（浏览器直接用）；工具侧传 origin，
  * 拿到的是可以直接贴给用户的绝对 URL。
  */
+/**
+ * 递归丢掉 `undefined` 属性。
+ *
+ * 工具返回值必须是**无损 JSON**：`undefined` 一旦出现在对象里，序列化时会静默
+ * 丢掉那个键，宿主据此判定「结果不是无损 JSON」并直接让整个工具调用报错
+ * （实测表现是 `game_material_status` / `game_material_wait` / `getRigJob`
+ * 全部返回 `value is not lossless JSON`）。视图里有大量可选字段，逐个写
+ * `?? null` 太容易漏，统一在出口处清一遍。
+ */
+function lossless<T>(value: T): T {
+  if (Array.isArray(value)) return value.map((item) => lossless(item)) as unknown as T;
+  if (value !== null && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+      if (item === undefined) continue;
+      out[key] = lossless(item);
+    }
+    return out as unknown as T;
+  }
+  return value;
+}
+
 export function rigSnapshot(job: RigJob, origin = "") {
   const assetBase = `${origin}/dsh-game-material-master/rig-assets/${job.id}/`;
   const url = (relative: string | undefined): string | undefined =>
@@ -621,7 +643,7 @@ export function rigSnapshot(job: RigJob, origin = "") {
     }
   ];
 
-  return {
+  return lossless({
     module: "rig" as const,
     id: job.id,
     name: job.name,
@@ -682,7 +704,7 @@ export function rigSnapshot(job: RigJob, origin = "") {
     },
     runningTasks: listRigTasks(job.id),
     log: job.log
-  };
+  });
 }
 
 // ── 素材上传 ────────────────────────────────────────────────────────────
@@ -1069,14 +1091,42 @@ export async function segmentSheet(jobId: string): Promise<void> {
   const claimed = new Set(uploaded.map((part) => part.name));
 
   await mkdir(join(rigJobDir(jobId), "parts"), { recursive: true });
+  // 归属格子按**重叠面积最大**，不能按质心。
+  // 实测踩过：裙摆那一大块跨了上下两格，质心恰好落到下一格，于是它被命名成
+  // `right-lower-arm`（748×825 的「小臂」），骨骼层级当场就错了。
+  // 按重叠面积归属时，块落在哪一格由它的大部分面积决定，大块不会再被质心带偏。
   const byCell = new Map<number, typeof components>();
   for (const component of components) {
-    const column = Math.min(columns - 1, Math.max(0, Math.floor(component.centroidX / cellWidth)));
-    const row = Math.min(rows - 1, Math.max(0, Math.floor(component.centroidY / cellHeight)));
-    const index = row * columns + column;
-    const list = byCell.get(index) ?? [];
+    const toCell = (x: number, y: number) => {
+      const column = Math.min(columns - 1, Math.max(0, Math.floor(x / cellWidth)));
+      const row = Math.min(rows - 1, Math.max(0, Math.floor(y / cellHeight)));
+      return row * columns + column;
+    };
+    let bestIndex = toCell(component.centroidX, component.centroidY);
+    let bestOverlap = -1;
+    const seen = new Set<number>();
+    for (const [cornerX, cornerY] of [
+      [component.x, component.y],
+      [component.x + component.width, component.y],
+      [component.x, component.y + component.height],
+      [component.x + component.width, component.y + component.height]
+    ]) {
+      const index = toCell(cornerX, cornerY);
+      if (seen.has(index)) continue;
+      seen.add(index);
+      const column = index % columns;
+      const row = Math.floor(index / columns);
+      const overlapX = Math.max(0, Math.min(component.x + component.width, (column + 1) * cellWidth) - Math.max(component.x, column * cellWidth));
+      const overlapY = Math.max(0, Math.min(component.y + component.height, (row + 1) * cellHeight) - Math.max(component.y, row * cellHeight));
+      const overlap = overlapX * overlapY;
+      if (overlap > bestOverlap) {
+        bestOverlap = overlap;
+        bestIndex = index;
+      }
+    }
+    const list = byCell.get(bestIndex) ?? [];
     list.push(component);
-    byCell.set(index, list);
+    byCell.set(bestIndex, list);
   }
 
   // 网格模式下**一个格子就是一个部件**：把落在同一格里的所有连通域合并成一个
@@ -1309,17 +1359,47 @@ export async function solveRigLayout(jobId: string, names?: string[]): Promise<v
     // 而是拆件图里的角色和参考图根本不是同一个（实测生图模型会把角色换成另一个：
     // 原图是穿深蓝连衣裙的女仆，拆件图给的却是白短裤 + 光腿的一具裸身）。
     // 这种情况下再怎么调匹配都是白费力气，必须直说，并给出真正能走通的两条路。
+    // 结构合理性检查：这些名字本身就带着人体结构信息，装配结果必须自洽。
+    // 分数高不代表摆得对——实测有一版「头」落在画面下半部分、裙摆放到了最上面，
+    // 平均相似度却还有 0.48，纯靠分数根本发现不了。人形的基本约束（头在最上面、
+    // 脚在最下面）是免费的强信号，违反它就直接判定自动定位不可信。
+    const verticalOrderProblem = (() => {
+      const centerYOf = (name: string): number | undefined => {
+        const item = fresh.layout.items[name];
+        if (item === undefined || item.matched !== true || partHidden(fresh, name)) return undefined;
+        return item.y + item.height / 2;
+      };
+      const headY = centerYOf("head");
+      const footY = centerYOf("left-foot") ?? centerYOf("right-foot");
+      const legY = centerYOf("left-upper-leg") ?? centerYOf("right-upper-leg");
+      if (headY === undefined) return undefined;
+      if (footY !== undefined && headY > footY) return "「头」被摆到了「脚」的下面";
+      if (legY !== undefined && headY > legY) return "「头」被摆到了「大腿」的下面";
+      return undefined;
+    })();
+
     const matchedScores = Object.values(solved.placements).map((item) => item.score);
     const meanScore = matchedScores.length > 0 ? matchedScores.reduce((sum, value) => sum + value, 0) / matchedScores.length : 0;
     fresh.layout.meanScore = Number(meanScore.toFixed(4));
     const weak = solved.failed.length > 0 ? `这些部件没匹配上，需要人工摆放：${solved.failed.join("、")}` : undefined;
-    if (meanScore < 0.45 && matchedScores.length > 0) {
+    if (meanScore < 0.32 && matchedScores.length > 0) {
+      // 阈值定在 0.32：实测「拆件图是同一个角色」时均值约 0.38（而且受服装
+      // 裁片影响本身就不会很高），「角色被换成另一个」时约 0.28 且个别部件
+      // 直接匹配不上。低于 0.32 基本可以判定是后者，再调参数没有意义。
       const hint =
-        `整批部件的平均相似度只有 ${meanScore.toFixed(2)}，说明拆件图里的角色很可能与参考图不是同一个` +
-        `（生图模型经常在「拆件」时把角色换成另一个：换掉服装、发型甚至体型）。` +
-        `这种情况调匹配参数没有意义，建议：① 用「部件 PNG」上传框传自己的部件（文件名即部件名）；` +
-        `② 或换一个更强的生图模型（设置 → 游戏素材大师 → 生图模型）重新生成拆件图；` +
+        `整批部件的平均相似度只有 ${meanScore.toFixed(2)}，自动定位不可信。常见原因：` +
+        `① 拆件图里的角色与参考图不是同一个（生图模型在「拆件」时换掉服装 / 发型 / 体型）；` +
+        `② 部件是按「服装裁片」拆的（裙摆、袖子、领子），外观本来就只覆盖参考图的一小块。` +
+        `建议：① 用「部件 PNG」上传框传自己的部件（文件名即部件名，完全绕开生图）；` +
+        `② 或换更强的生图模型（设置 → 游戏素材大师 → 生图模型，实测 Seedream 5.0 Pro 明显更守角色设定）重新拆件；` +
         `③ 也可以在下面的合成图上手工拖到正确位置。`;
+      appendJobLog(fresh.log, "warn", hint);
+      fresh.layout.error = weak === undefined ? hint : `${weak}；另外，${hint}`;
+    } else if (verticalOrderProblem !== undefined) {
+      const hint =
+        `自动定位结果明显不合理：${verticalOrderProblem}。这通常意味着拆件图里的部件与参考图对不上` +
+        `（部件可能是重新绘制的服装裁片，或角色被换过），继续相信自动结果反而更费时间。` +
+        `建议：① 直接用「部件 PNG」上传框传自己的部件（文件名即部件名）；② 在下面的合成图上手工拖到正确位置。`;
       appendJobLog(fresh.log, "warn", hint);
       fresh.layout.error = weak === undefined ? hint : `${weak}；另外，${hint}`;
     } else {
@@ -1404,6 +1484,11 @@ export async function renderLayoutImages(jobId: string): Promise<void> {
   fresh.layout.composite = "layout/composite.png";
   fresh.layout.comparison = "layout/comparison.png";
   await writeRigJob(fresh);
+}
+
+/** 部件是否被用户隐藏。 */
+function partHidden(job: RigJob, name: string): boolean {
+  return job.parts.find((part) => part.name === name)?.hidden === true;
 }
 
 /** 按绘制顺序（z 升序）列出已经摆放好的部件。 */
