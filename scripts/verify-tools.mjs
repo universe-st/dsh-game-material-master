@@ -326,7 +326,7 @@ async function main() {
   console.log("\n7) 深链接契约");
   check("查询参数名一致", links.OPEN_QUERY_KEY === "dsh-gmm", links.OPEN_QUERY_KEY);
   check("面板 id 与客户端一致", links.PANEL_KEY === "gameStudio", links.PANEL_KEY);
-  check("模块名与界面一致", links.STUDIO_MODULES.join(",") === "sprite,image,sequence", links.STUDIO_MODULES.join(","));
+  check("模块名与界面一致", links.STUDIO_MODULES.join(",") === "sprite,image,sequence,rig", links.STUDIO_MODULES.join(","));
 
   const link = links.buildOpenLink({ module: "sprite", projectId, stage: "videos" }, "http://127.0.0.1:43120");
   check(

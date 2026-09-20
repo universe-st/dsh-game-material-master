@@ -61,6 +61,11 @@ export function sequenceJobsRoot(): string {
   return join(dataRoot(), "sequence-jobs");
 }
 
+/** 骨骼动画生成模块的任务根。 */
+export function rigJobsRoot(): string {
+  return join(dataRoot(), "rig-jobs");
+}
+
 /**
  * 旧版本把数据放在 `8dir-sprites/`。第一次以新名字启动时整体搬过去，
  * 让已有项目和配置无缝接上——只搬一次，之后两个目录互不影响。

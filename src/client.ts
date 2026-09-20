@@ -85,7 +85,25 @@
       ["clearSequenceVideo", true],
       ["runSequenceFrames", true],
       ["keySequenceFrames", true],
-      ["composeSequence", true]
+      ["composeSequence", true],
+
+      // 模块④：骨骼动画生成
+      ["listRigJobs", false],
+      ["createRigJob", true],
+      ["getRigJob", true],
+      ["deleteRigJob", true],
+      ["saveRigJob", true],
+      ["uploadRigSource", true],
+      ["uploadRigPart", true],
+      ["removeRigPart", true],
+      ["renameRigPart", true],
+      ["setRigPartVisibility", true],
+      ["saveRigLayoutItem", true],
+      ["runRigSheet", true],
+      ["runRigSegment", true],
+      ["runRigLayout", true],
+      ["runRigBones", true],
+      ["runRigAtlas", true]
     ];
 
     const CONTRIBUTION = {
@@ -167,11 +185,12 @@
       return job !== undefined && Array.isArray(job.targets) && job.targets.includes(key);
     }
 
-    /** 三个功能模块。插件是「大师」，每个模块管一类素材。 */
+    /** 四个功能模块。插件是「大师」，每个模块管一类素材。 */
     const MODULES = [
       { key: "sprite", title: "八方向图生成", hint: "一张设定图 → 8 方向 × 8 帧精灵图" },
       { key: "image", title: "图片生成", hint: "按提示词出图，可带参考图，支持抠绿幕导出 PNG" },
-      { key: "sequence", title: "序列帧生成", hint: "图/视频参考生成视频 → 抽帧 → 抠像 → 合成与播放预览" }
+      { key: "sequence", title: "序列帧生成", hint: "图/视频参考生成视频 → 抽帧 → 抠像 → 合成与播放预览" },
+      { key: "rig", title: "骨骼动画生成", hint: "拆件 → 装配定位 → 推骨骼与动画 → 打包 Spine 图集" }
     ];
 
     const STAGES = [
@@ -192,7 +211,7 @@
     // http(s) 链接加 target="_blank"，不拦就会真的新开一个标签页。
     // 只按 `dsh-gmm` 参数识别自己的链接，其它链接（含站外的）一律放行。
     const OPEN_QUERY_KEY = "dsh-gmm";
-    const OPEN_MODULES = new Set(["sprite", "image", "sequence"]);
+    const OPEN_MODULES = new Set(["sprite", "image", "sequence", "rig"]);
     /** 意图订阅者：三个模块组件都挂着，谁在挂载谁就被通知。 */
     const intentListeners = new Set<any>();
     /** 最近一次意图。晚挂载的组件（切模块后才渲染）订阅时立刻拿到它。 */
@@ -432,6 +451,38 @@
 .SPR_stageHint{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.74);color:#333;font-size:13px;line-height:20px;font-family:inherit}
 .SPR_hud{position:absolute;left:10px;top:10px;display:flex;align-items:center;gap:8px;background:rgba(0,0,0,.62);color:#fff;border-radius:999px;padding:3px 12px;font-size:12px;line-height:18px;pointer-events:none;font-family:inherit}
 .SPR_hudDir{font-weight:600;letter-spacing:.5px}
+
+/* ── 模块④：骨骼动画生成 ─────────────────────────────────────────────── */
+.SPR_link{color:var(--dsw-alias-state-business-primary);font-size:12px;text-decoration:none;align-self:center}
+.SPR_link:hover{text-decoration:underline}
+.SPR_rigPanel{display:flex;flex-direction:column;gap:14px;padding:14px 18px 24px;min-height:0}
+.SPR_rigStage{border:1px solid var(--dsw-alias-border-l2);border-radius:12px;background:var(--dsw-alias-bg-layer-3);padding:12px}
+.SPR_rigStageHead{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.SPR_rigStageTitle{font-size:13px;font-weight:600}
+.SPR_rigStageHint{font-size:12px;color:var(--dsw-alias-label-tertiary);flex:1;min-width:180px}
+.SPR_rigGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:10px;margin-top:10px}
+.SPR_rigCard{border:1px solid var(--dsw-alias-border-l2);border-radius:10px;padding:8px;background:var(--dsw-alias-bg-layer-1);display:flex;flex-direction:column;gap:6px;min-width:0}
+.SPR_rigCard[data-approved=true]{border-color:var(--dsw-alias-state-business-primary)}
+.SPR_rigCard[data-hidden=true]{opacity:.45}
+.SPR_rigCardName{font-size:12px;font-weight:600;display:flex;align-items:center;gap:6px;justify-content:space-between}
+.SPR_rigCardMeta{font-size:11px;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums}
+.SPR_rigCardImg{width:100%;height:88px;object-fit:contain;border-radius:6px;background-color:var(--dsw-alias-bg-layer-1);background-image:linear-gradient(45deg,rgba(128,128,128,.18) 25%,transparent 25%,transparent 75%,rgba(128,128,128,.18) 75%),linear-gradient(45deg,rgba(128,128,128,.18) 25%,transparent 25%,transparent 75%,rgba(128,128,128,.18) 75%);background-size:14px 14px;background-position:0 0,7px 7px}
+.SPR_rigCardBtns{display:flex;gap:4px;flex-wrap:wrap}
+.SPR_rigCanvasWrap{position:relative;margin-top:10px;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;overflow:hidden;background:#fff;line-height:0;max-width:100%}
+.SPR_rigCanvasWrap img{display:block;width:100%;height:auto}
+.SPR_rigCanvasWrap[data-drag=true]{cursor:grabbing}
+.SPR_rigBox{position:absolute;border:1.5px solid rgba(63,111,255,.85);border-radius:3px;box-sizing:border-box;cursor:grab;background:rgba(63,111,255,.10)}
+.SPR_rigBox[data-selected=true]{border-color:#ff9f2e;background:rgba(255,159,46,.18);box-shadow:0 0 0 1px rgba(255,159,46,.6)}
+.SPR_rigBoxLabel{position:absolute;left:0;top:-15px;font-size:10px;line-height:14px;padding:0 4px;border-radius:4px;background:rgba(20,22,30,.72);color:#fff;white-space:nowrap;pointer-events:none;font-family:inherit}
+.SPR_rigSideBySide{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
+.SPR_rigSideBySide figure{margin:0;display:flex;flex-direction:column;gap:4px}
+.SPR_rigSideBySide figcaption{font-size:11px;color:var(--dsw-alias-label-tertiary)}
+.SPR_rigSideBySide img{width:100%;height:auto;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:#fff}
+.SPR_rigPreview{width:100%;height:620px;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;background:#12121c;margin-top:10px}
+.SPR_rigEditorRow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px}
+.SPR_rigEditorRow .SPR_field{max-width:104px}
+.SPR_rigAtlasWrap{margin-top:10px;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;overflow:auto;max-height:52vh;background-color:var(--dsw-alias-bg-layer-1);background-image:linear-gradient(45deg,rgba(128,128,128,.14) 25%,transparent 25%,transparent 75%,rgba(128,128,128,.14) 75%),linear-gradient(45deg,rgba(128,128,128,.14) 25%,transparent 25%,transparent 75%,rgba(128,128,128,.14) 75%);background-size:20px 20px;background-position:0 0,10px 10px}
+.SPR_rigAtlasWrap img{display:block;max-width:100%;height:auto}
 
 /* ── 调用接口时的视觉反馈 ───────────────────────────────────────────────
    所有会「出素材」的远程调用（生图 / 生视频 / 抽帧 / 抠像 / 合成 / 上传）
@@ -1238,7 +1289,9 @@
         )
           : module === "image"
             ? h(ImageModule, { api })
-            : h(SequenceModule, { api })
+            : module === "sequence"
+              ? h(SequenceModule, { api })
+              : h(RigModule, { api })
       );
     }
 
@@ -3540,6 +3593,804 @@
             )
           )
         )
+      );
+    }
+
+    // ── 模块④：骨骼动画生成 ──────────────────────────────────────────────
+    //
+    // 四个阶段各自独立可重跑，和八方向图的手感一致：
+    //   ① 拆件   —— 生图模型把角色拆成部件（**唯一花钱的一步**），也可以直接上传部件
+    //   ② 装配   —— 多尺度模板匹配把部件摆回参考姿态，出对比图供肉眼验收、可拖动微调
+    //   ③ 骨骼   —— 自动推骨骼层级 + 六个动画预设，出 skeleton.json 与可播放预览
+    //   ④ 图集   —— 打包 Spine 纹理图集
+    //
+    // 设计上刻意让「重跑」便宜：②③④ 全是本地计算，失败一两个部件只重跑那几个。
+
+    /** 内置动画预设（与宿主 src/spine.ts 的 RIG_ANIMATIONS 一致）。 */
+    const RIG_ANIMATIONS = ["idle", "walk", "run", "wave", "jump", "attack"];
+
+    const RIG_STAGES = [
+      { key: "parts", title: "① 拆件", hint: "生图模型把角色拆成独立部件（这一步花钱，只跑一次；也可以直接上传部件 PNG）" },
+      { key: "layout", title: "② 装配定位", hint: "把部件摆回参考姿态；本地计算，免费，可以逐件重跑或手工拖动" },
+      { key: "rig", title: "③ 骨骼与动画", hint: "自动推骨骼层级 + 待机/行走/奔跑/挥手/跳跃/攻击，直接播放验收" },
+      { key: "atlas", title: "④ 图集", hint: "打包成 Spine 纹理图集（.png + .atlas），可直接导入引擎" }
+    ];
+
+    const K_RIG_JOB = "rig:job";
+    const K_RIG_SHEET = "rig:sheet";
+    const K_RIG_SEGMENT = "rig:segment";
+    const K_RIG_LAYOUT = "rig:layout";
+    const K_RIG_BONES = "rig:bones";
+    const K_RIG_ATLAS = "rig:atlas";
+    const K_RIG_CREATE = "rig:create";
+
+    /** 后台任务的 pending 文案：宿主在跑什么，界面就直说什么。 */
+    const RIG_BUSY_LABEL = {
+      [K_RIG_JOB]: "正在刷新…",
+      [K_RIG_SHEET]: "正在拆件生图…",
+      [K_RIG_SEGMENT]: "正在分割部件…",
+      [K_RIG_LAYOUT]: "正在装配定位…",
+      [K_RIG_BONES]: "正在生成骨骼…",
+      [K_RIG_ATLAS]: "正在打包图集…",
+      [K_RIG_CREATE]: "正在创建任务…"
+    };
+
+    function rigStageOf(job, key) {
+      return (job.stages ?? []).find((entry) => entry.stage === key) ?? { stage: key, status: "empty" };
+    }
+
+    /** 部件卡片：逐件验收 / 隐藏 / 删除 / 重新定位。 */
+    function RigPartCard({ part, busy, onApprove, onHide, onRemove, onRetry, onSelect, onRename, selected }) {
+      return h(
+        "div",
+        { className: "SPR_rigCard", "data-approved": part.approved === true ? "true" : undefined, "data-hidden": part.hidden === true ? "true" : undefined },
+        h(
+          "div",
+          { className: "SPR_rigCardName" },
+          h("span", null, part.label ?? part.name),
+          h(StatusChip, { node: part })
+        ),
+        part.url !== null && part.url !== undefined ? h("img", { className: "SPR_rigCardImg", src: part.url, alt: part.name }) : null,
+        h(
+          "div",
+          { className: "SPR_rigCardMeta" },
+          `${part.width ?? "?"}×${part.height ?? "?"}`,
+          part.placed ? " · 已定位" : part.status === "ready" ? " · 未定位" : "",
+          typeof part.score === "number" ? ` · 相似度 ${part.score}` : "",
+          part.manual ? " · 手工调整" : ""
+        ),
+        // 低置信度必须一眼可见：平涂/低细节美术上，模板匹配很难分辨形状相同的
+        // 部件（左右肢、同色衣料），自动结果只是初值，要提醒用户逐个核对。
+        part.status === "ready" && (part.placed !== true || (typeof part.score === "number" && part.score < 0.5))
+          ? h("div", { className: "SPR_rigCardMeta", style: { color: "var(--dsw-alias-state-warning-primary, #b45309)" } },
+              part.placed !== true ? "自动定位没找到，请手工拖到正确位置" : "相似度偏低，建议核对或拖一下")
+          : null,
+        part.error ? h("div", { className: "SPR_rigCardMeta", style: { color: "var(--dsw-alias-state-error-primary)" } }, part.error) : null,
+        h(
+          "div",
+          { className: "SPR_rigCardBtns" },
+          h(Btn, { onClick: onSelect, on: selected }, "选中"),
+          h(Btn, { onClick: onApprove, on: part.approved === true }, part.approved ? "已通过" : "通过"),
+          h(Btn, { onClick: onRetry, disabled: busy || part.status !== "ready" }, "重新定位"),
+          h(Btn, { onClick: onRename }, "改名"),
+          h(Btn, { onClick: onHide }, part.hidden ? "取消隐藏" : "隐藏"),
+          h(Btn, { onClick: onRemove, danger: true }, "删除")
+        )
+      );
+    }
+
+    /**
+     * 装配可视化编辑器。
+     *
+     * 把 layout 里每个部件的像素框画成可拖动的方块叠在合成图上——装配正确与否
+     * 一眼就能看出来，摆错的直接拖，不必去猜数字。拖动结束才提交（一次请求），
+     * 中间过程纯本地。
+     */
+    function RigLayoutEditor({ job, selected, onSelect, onCommit, showReference }) {
+      const [scale, setScale] = React.useState(1);
+      const [drag, setDrag] = React.useState(null);
+      const wrapRef = React.useRef(null);
+      const canvasW = job.source?.width ?? 1;
+      const canvasH = job.source?.height ?? 1;
+      const items = job.layout?.items ?? {};
+      const parts = (job.parts ?? []).filter((part) => part.status === "ready" && part.hidden !== true);
+      const compositeUrl = assetUrl(job, job.layout?.composite, job.layout?.updatedAt);
+      const referenceUrl = assetUrl(job, job.source?.file, job.updatedAt);
+
+      const onImageLoad = (event) => {
+        const width = event.target.clientWidth;
+        if (width > 0) setScale(width / canvasW);
+      };
+
+      React.useEffect(() => {
+        if (drag === null) return undefined;
+        const move = (event) => {
+          const rect = wrapRef.current?.getBoundingClientRect();
+          if (rect === undefined || rect === null) return;
+          const dx = (event.clientX - drag.startX) / scale;
+          const dy = (event.clientY - drag.startY) / scale;
+          event.preventDefault();
+          setDrag((current) => (current === null ? current : { ...current, dx, dy }));
+        };
+        const up = () => {
+          const dx = Math.round(drag.dx);
+          const dy = Math.round(drag.dy);
+          setDrag(null);
+          if (dx !== 0 || dy !== 0) {
+            const base = items[drag.name];
+            if (base !== undefined) void onCommit(drag.name, { x: base.x + dx, y: base.y + dy });
+          }
+        };
+        window.addEventListener("mousemove", move);
+        window.addEventListener("mouseup", up);
+        return () => {
+          window.removeEventListener("mousemove", move);
+          window.removeEventListener("mouseup", up);
+        };
+      }, [drag, items, onCommit, scale]);
+
+      if (compositeUrl === null) return h("p", { className: "SPR_hint" }, "还没有装配结果。");
+
+      return h(
+        "div",
+        null,
+        showReference === true
+          ? h(
+              "div",
+              { className: "SPR_rigSideBySide" },
+              h("figure", null, h("figcaption", null, "参考图（角色整图）"), referenceUrl !== null ? h("img", { src: referenceUrl, alt: "reference" }) : null),
+              h("figure", null, h("figcaption", null, "合成图（部件按当前摆放叠出来）"), h("img", { src: compositeUrl, alt: "composite" }))
+            )
+          : null,
+        h(
+          "div",
+          { className: "SPR_rigCanvasWrap", "data-drag": drag !== null ? "true" : undefined, ref: wrapRef },
+          h("img", { src: compositeUrl, alt: "composite", onLoad: onImageLoad, draggable: false }),
+          parts.map((part) => {
+            const item = items[part.name];
+            if (item === undefined || item.matched !== true) return null;
+            const active = drag !== null && drag.name === part.name;
+            const offsetX = active ? drag.dx : 0;
+            const offsetY = active ? drag.dy : 0;
+            return h(
+              "div",
+              {
+                key: part.name,
+                className: "SPR_rigBox",
+                "data-selected": selected === part.name ? "true" : undefined,
+                style: {
+                  left: (item.x + offsetX) * scale,
+                  top: (item.y + offsetY) * scale,
+                  width: Math.max(6, item.width * scale),
+                  height: Math.max(6, item.height * scale)
+                },
+                onMouseDown: (event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onSelect(part.name);
+                  setDrag({ name: part.name, startX: event.clientX, startY: event.clientY, dx: 0, dy: 0 });
+                }
+              },
+              h("span", { className: "SPR_rigBoxLabel" }, part.label ?? part.name)
+            );
+          })
+        ),
+        h(
+          "p",
+          { className: "SPR_hint" },
+          `画布 ${canvasW}×${canvasH}。点方块选中，拖动即微调位置（松手保存）；也可以在下面对话框里精确调数值。`
+        )
+      );
+    }
+
+    /**
+     * 模块④的主体界面。
+     *
+     * 阶段之间用标签切换（和八方向图一致），但**每个阶段都自带状态、验收与重跑
+     * 入口**：`parts` 逐件通过/隐藏/删除，`layout` 逐件拖动/重定位，`rig` 逐个动画
+     * 播放，`atlas` 整体验收。深链接（`?dsh-gmm=1&module=rig&job=…&stage=…`）会直接
+     * 落到对应阶段。
+     */
+    function RigModule(props) {
+      const api = props.api;
+      const [jobs, setJobs] = React.useState([]);
+      const [jobId, setJobId] = React.useState(null);
+      const [job, setJob] = React.useState(null);
+      const [stage, setStage] = React.useState("parts");
+      const [notice, setNotice] = React.useState(null);
+      const [loading, setLoading] = React.useState(true);
+      const [uploading, setUploading] = React.useState(false);
+      const [selected, setSelected] = React.useState(null);
+      const [showReference, setShowReference] = React.useState(true);
+      const [anim, setAnim] = React.useState("idle");
+      const [promptDraft, setPromptDraft] = React.useState("");
+      const [suffixDraft, setSuffixDraft] = React.useState("");
+      const [settingsDraft, setSettingsDraft] = React.useState({});
+      const globalConfig = useGlobalConfig(api);
+      const tasks = usePendingTasks();
+      const intent = useStudioIntent();
+
+      React.useEffect(() => {
+        if (intent === null) return;
+        if (intent.module === "rig" && typeof intent.jobId === "string") setJobId(intent.jobId);
+        if (typeof intent.stage === "string" && RIG_STAGES.some((entry) => entry.key === intent.stage)) setStage(intent.stage);
+      }, [intent]);
+
+      const stageEntry = job === null ? null : rigStageOf(job, stage);
+      const stageBusy = stageEntry !== null && stageEntry.status === "running";
+      const busy = (job !== null && (job.stages ?? []).some((entry) => entry.status === "running")) || tasks.active;
+      const keyBusy = (key) => tasks.has(key);
+      const PART_K = (name, action) => `rig:${action}:${name}`;
+
+      const refresh = React.useCallback(async () => {
+        if (api === undefined) return [];
+        try {
+          const result = await api.listRigJobs();
+          const list = result.jobs ?? [];
+          setJobs(list);
+          return list;
+        } catch (error) {
+          setNotice({ kind: "error", text: msg(error) });
+          return [];
+        }
+      }, [api]);
+
+      const load = React.useCallback(
+        async (id) => {
+          if (api === undefined || id === null) return;
+          try {
+            const next = await api.getRigJob({ jobId: id });
+            setJob(next);
+            setPromptDraft(next.prompts?.sheet ?? "");
+            setSuffixDraft(next.prompts?.suffix ?? "");
+            setSettingsDraft({ ...(next.settings ?? {}) });
+            setSelected((current) => (current !== null && (next.parts ?? []).some((part) => part.name === current) ? current : null));
+          } catch (error) {
+            setNotice({ kind: "error", text: msg(error) });
+          }
+        },
+        [api]
+      );
+
+      React.useEffect(() => {
+        void (async () => {
+          const list = await refresh();
+          setLoading(false);
+          if (list.length > 0) setJobId((current) => current ?? list[0].id);
+        })();
+      }, [refresh]);
+
+      React.useEffect(() => {
+        if (jobId !== null) void load(jobId);
+      }, [jobId, load]);
+
+      React.useEffect(() => {
+        if (!busy || jobId === null) return undefined;
+        const timer = setInterval(() => void load(jobId), 2500);
+        return () => clearInterval(timer);
+      }, [busy, jobId, load]);
+
+      const run = async (fn, okText = undefined, feedback = undefined) => {
+        const invoke = async () => {
+          try {
+            const value = await fn();
+            if (okText !== undefined) setNotice({ kind: "ok", text: okText });
+            if (jobId !== null) await load(jobId);
+            await refresh();
+            return value;
+          } catch (error) {
+            setNotice({ kind: "error", text: msg(error) });
+            return undefined;
+          }
+        };
+        if (feedback === undefined) return invoke();
+        const label = RIG_BUSY_LABEL[feedback] ?? (feedback.startsWith("rig:relayout") ? "正在重新定位…" : "正在处理…");
+        return tasks.run(feedback, label, invoke);
+      };
+
+      const createJob = () =>
+        run(
+          async () => {
+            const created = await api.createRigJob({ name: "新骨骼动画任务" });
+            await refresh();
+            setJobId(created.jobId);
+            setStage("parts");
+            return created;
+          },
+          "已新建骨骼动画任务",
+          K_RIG_CREATE
+        );
+
+      const deleteJob = async () => {
+        if (job === null) return;
+        if (typeof window !== "undefined" && !window.confirm(`删除任务「${job.name}」？产物文件会一并删除。`)) return;
+        await run(async () => {
+          await api.deleteRigJob({ jobId: job.id });
+          const list = await refresh();
+          setJobId(list.length > 0 ? list[0].id : null);
+          if (list.length === 0) setJob(null);
+        });
+      };
+
+      const renameJob = async () => {
+        if (job === null) return;
+        const next = typeof window === "undefined" ? null : window.prompt("新的任务名", job.name);
+        if (next === null || next.trim() === "") return;
+        await run(() => api.saveRigJob({ jobId: job.id, name: next.trim() }), "已重命名");
+      };
+
+      const uploadSource = async (files) => {
+        const file = files[0];
+        if (file === undefined || job === null) return;
+        setUploading(true);
+        try {
+          const data = await readFileBase64(file);
+          await api.uploadRigSource({ jobId: job.id, name: file.name, data });
+          setNotice({ kind: "ok", text: `已上传参考图：${file.name}` });
+          await load(job.id);
+          await refresh();
+        } catch (error) {
+          setNotice({ kind: "error", text: msg(error) });
+        } finally {
+          setUploading(false);
+        }
+      };
+
+      const uploadParts = async (files) => {
+        if (job === null) return;
+        setUploading(true);
+        try {
+          for (const file of files) {
+            const data = await readFileBase64(file);
+            await api.uploadRigPart({ jobId: job.id, name: file.name, data });
+          }
+          setNotice({ kind: "ok", text: `已上传 ${files.length} 个部件（文件名即部件名）` });
+          await load(job.id);
+          await refresh();
+        } catch (error) {
+          setNotice({ kind: "error", text: msg(error) });
+        } finally {
+          setUploading(false);
+        }
+      };
+
+      const saveSettings = () =>
+        run(
+          () => api.saveRigJob({ jobId: job.id, sheetPrompt: promptDraft, suffix: suffixDraft, settings: settingsDraft }),
+          "已保存提示词与参数"
+        );
+
+      const selectedItem = job !== null && selected !== null ? (job.layout?.items ?? {})[selected] : undefined;
+
+      if (api === undefined) {
+        return h("div", { className: "SPR_rigPanel" }, h("p", { className: "SPR_hint" }, "远程服务尚未挂载完成，请稍候…"));
+      }
+
+      const headerButtons = h(
+        React.Fragment,
+        null,
+        h(Btn, { onClick: () => void refresh(), disabled: loading || keyBusy(K_RIG_JOB) }, "刷新列表"),
+        job !== null ? h(Btn, { onClick: () => void renameJob() }, "重命名") : null,
+        job !== null ? h(Btn, { onClick: () => void deleteJob(), danger: true }, "删除任务") : null,
+        h(BusyBtn, { onClick: () => void createJob(), busy: keyBusy(K_RIG_CREATE), busyText: "创建中…", primary: true }, "新建任务")
+      );
+
+      return h(
+        "div",
+        { className: "SPR_rigPanel" },
+        h(
+          "div",
+          { className: "SPR_toolbar" },
+          h("span", { className: "SPR_refRow" }, "生图模型"),
+          h("span", { className: "SPR_badge" }, globalConfig?.arkModel ?? job?.settings?.model ?? "未配置"),
+          h("span", { className: "SPR_refRow" }, "（模型在「设置 → 游戏素材大师」里改）"),
+          h("span", { className: "SPR_spacer" }),
+          headerButtons
+        ),
+        notice !== null
+          ? h(
+              "div",
+              { className: "SPR_notice", "data-kind": notice.kind === "error" ? "error" : "info" },
+              notice.text,
+              h(Btn, { onClick: () => setNotice(null) }, "关闭")
+            )
+          : null,
+        h(
+          "div",
+          { className: "SPR_modules" },
+          RIG_STAGES.map((entry) => {
+            const info = job === null ? { status: "empty" } : rigStageOf(job, entry.key);
+            const done = info.status === "ready";
+            return h(
+              "button",
+              {
+                key: entry.key,
+                type: "button",
+                className: "SPR_module",
+                "data-active": stage === entry.key ? "true" : "false",
+                onClick: () => setStage(entry.key)
+              },
+              h("span", { className: "SPR_moduleTitle" }, `${done ? "✓ " : ""}${entry.title}`),
+              h("span", { className: "SPR_moduleHint" }, info.status === "running" ? "进行中…" : entry.hint)
+            );
+          })
+        ),
+        jobs.length === 0
+          ? h("p", { className: "SPR_hint" }, loading ? "正在读取任务…" : "还没有骨骼动画任务，点右上角「新建任务」开始。")
+          : h(
+              React.Fragment,
+              null,
+              h(
+                "div",
+                { className: "SPR_toolbar", style: { flexWrap: "wrap" } },
+                h("span", { className: "SPR_refRow" }, "任务"),
+                h(
+                  "select",
+                  { className: "SPR_input", style: { width: 260 }, value: jobId ?? "", onChange: (event) => setJobId(event.target.value) },
+                  jobs.map((entry) => h("option", { key: entry.id, value: entry.id }, `${entry.name}（部件 ${entry.partCount}）`))
+                ),
+                job !== null ? h("span", { className: "SPR_badge" }, job.id) : null,
+                stageBusy ? h(BusyBadge, { show: true, text: "本阶段进行中…" }) : null
+              ),
+              job === null
+                ? null
+                : h(
+                    React.Fragment,
+                    null,
+                    h(ReviewModeBar, { api, module: "rig", id: job.id, mode: job.reviewMode, onChanged: () => void load(job.id) }),
+
+                    // ── 第 0 步：角色参考图 ────────────────────────────────
+                    h(
+                      "div",
+                      { className: "SPR_rigStage" },
+                      h(
+                        "div",
+                        { className: "SPR_rigStageHead" },
+                        h("span", { className: "SPR_rigStageTitle" }, "角色参考图"),
+                        h("span", { className: "SPR_rigStageHint" }, "拆件、装配、骨骼都以这张整图为基准；建议用能看清全身、背景干净的角色立绘。"),
+                        job.sourceUrl !== null && job.sourceUrl !== undefined ? h(Chip, { kind: "ready", text: `${job.canvas?.width ?? "?"}×${job.canvas?.height ?? "?"}` }) : h(Chip, { kind: "empty", text: "未上传" })
+                      ),
+                      h(
+                        "div",
+                        { className: "SPR_toolbar", style: { marginTop: 10 } },
+                        h(UploadBox, { label: "拖入角色整图（PNG / JPG）", accept: "image/*", onFiles: (files) => void uploadSource(files), busy: uploading }),
+                        h(UploadBox, { label: "拖入部件 PNG（可多选，文件名即部件名）", accept: "image/*", multiple: true, onFiles: (files) => void uploadParts(files), busy: uploading })
+                      ),
+                      job.sourceUrl !== null && job.sourceUrl !== undefined
+                        ? h("img", { className: "SPR_rigCardImg", style: { height: 200, marginTop: 10 }, src: job.sourceUrl, alt: "reference" })
+                        : null
+                    ),
+
+                    // ── ① 拆件 ────────────────────────────────────────────
+                    stage === "parts"
+                      ? h(
+                          "div",
+                          { className: "SPR_rigStage" },
+                          h(
+                            "div",
+                            { className: "SPR_rigStageHead" },
+                            h("span", { className: "SPR_rigStageTitle" }, "① 拆件"),
+                            h("span", { className: "SPR_rigStageHint" }, "让生图模型把角色拆成摊平的部件图，再自动分割成逐件透明 PNG。**这一步花钱**，只跑一次；参数改了可以「重新分割」，不额外计费。"),
+                            h(StatusChip, { node: rigStageOf(job, "parts") })
+                          ),
+                          h(
+                            "div",
+                            { className: "SPR_rigEditorRow" },
+                            h(
+                              BusyBtn,
+                              {
+                                busy: keyBusy(K_RIG_SHEET),
+                                busyText: "正在拆件生图…",
+                                primary: true,
+                                disabled: job.sourceUrl === null || job.sourceUrl === undefined || busy,
+                                onClick: () => void run(() => api.runRigSheet({ jobId: job.id }), "已提交拆件生图", K_RIG_SHEET)
+                              },
+                              job.sheet?.status === "ready" ? "重新生成拆件图（会花钱）" : "生成拆件图（会花钱）"
+                            ),
+                            h(
+                              BusyBtn,
+                              {
+                                busy: keyBusy(K_RIG_SEGMENT),
+                                busyText: "正在分割…",
+                                disabled: job.sheet?.status !== "ready" || busy,
+                                onClick: () => void run(() => api.runRigSegment({ jobId: job.id }), "已提交重新分割", K_RIG_SEGMENT)
+                              },
+                              "用现有拆件图重新分割"
+                            ),
+                            h(NumField, { label: "网格列", value: settingsDraft.gridColumns ?? 4, min: 1, max: 8, onChange: (value) => setSettingsDraft({ ...settingsDraft, gridColumns: value }) }),
+                            h(NumField, { label: "网格行", value: settingsDraft.gridRows ?? 4, min: 1, max: 8, onChange: (value) => setSettingsDraft({ ...settingsDraft, gridRows: value }) }),
+                            h(NumField, { label: "底色容差", value: settingsDraft.backgroundTolerance ?? 30, min: 1, max: 200, onChange: (value) => setSettingsDraft({ ...settingsDraft, backgroundTolerance: value }) }),
+                            h(NumField, { label: "边缘羽化", value: settingsDraft.feather ?? 26, min: 1, max: 200, onChange: (value) => setSettingsDraft({ ...settingsDraft, feather: value }) }),
+                            h(NumField, { label: "最小面积", value: settingsDraft.minArea ?? 0, min: 0, max: 100000, onChange: (value) => setSettingsDraft({ ...settingsDraft, minArea: value }) }),
+                            h(Btn, { onClick: () => void saveSettings() }, "保存参数与提示词")
+                          ),
+                          h("textarea", {
+                            className: "SPR_input",
+                            style: { width: "100%", minHeight: 110, marginTop: 10, fontFamily: "inherit", fontSize: 12 },
+                            value: promptDraft,
+                            placeholder: "留空则使用内置的网格拆件提示词（要求模型按 4×4 网格摆放 16 个标准人形部件）",
+                            onChange: (event) => setPromptDraft(event.target.value)
+                          }),
+                          h("textarea", {
+                            className: "SPR_input",
+                            style: { width: "100%", minHeight: 48, marginTop: 6, fontFamily: "inherit", fontSize: 12 },
+                            value: suffixDraft,
+                            placeholder: "统一附加提示词（可留空）",
+                            onChange: (event) => setSuffixDraft(event.target.value)
+                          }),
+                          job.sheet?.url !== null && job.sheet?.url !== undefined
+                            ? h(
+                                "div",
+                                { className: "SPR_rigCanvasWrap" },
+                                h("img", { src: job.sheet.url, alt: "sheet" }),
+                                h(LoadingOverlay, { show: keyBusy(K_RIG_SHEET) || keyBusy(K_RIG_SEGMENT), text: keyBusy(K_RIG_SHEET) ? "生图模型正在拆件…" : "正在分割部件…" })
+                              )
+                            : h("p", { className: "SPR_hint", style: { marginTop: 10 } }, job.sourceUrl === null || job.sourceUrl === undefined ? "先上传角色参考图。" : "还没有拆件图：点上面的「生成拆件图」，或者用上面的上传框直接给现成部件 PNG。"),
+                          (job.parts ?? []).length > 0
+                            ? h(
+                                "div",
+                                null,
+                                h("h3", { style: { fontSize: 13, margin: "14px 0 0" } }, `部件（${job.parts.length}）——逐件验收，摆错的可单独重跑`),
+                                h(
+                                  "div",
+                                  { className: "SPR_rigGrid" },
+                                  job.parts.map((part) =>
+                                    h(RigPartCard, {
+                                      key: part.name,
+                                      part,
+                                      selected: selected === part.name,
+                                      busy,
+                                      onSelect: () => {
+                                        setSelected(part.name);
+                                        setStage("layout");
+                                      },
+                                      onApprove: () => void run(() => api.saveRigJob({ jobId: job.id, approved: part.approved !== true, stage: "parts", part: part.name })),
+                                      onHide: () => void run(() => api.setRigPartVisibility({ jobId: job.id, name: part.name, hidden: part.hidden !== true })),
+                                      onRemove: () => void run(() => api.removeRigPart({ jobId: job.id, name: part.name })),
+                                      onRename: () => {
+                                        const next = typeof window === "undefined" ? null : window.prompt(
+                                          `把「${part.name}」改成什么名字？\n（名字决定骨骼层级，标准名如 head / torso / hip / left-upper-arm / left-lower-leg / right-foot，见拆件提示词里的网格表）`,
+                                          part.name
+                                        );
+                                        if (next === null || next.trim() === "" || next === part.name) return;
+                                        void run(() => api.renameRigPart({ jobId: job.id, from: part.name, to: next.trim() }), `已改名为「${next.trim()}」`);
+                                      },
+                                      onRetry: () =>
+                                        void run(
+                                          () => api.runRigLayout({ jobId: job.id, names: [part.name] }),
+                                          `已重新定位「${part.name}」`,
+                                          PART_K(part.name, "relayout")
+                                        )
+                                    })
+                                  )
+                                )
+                              )
+                            : null,
+                          h(
+                            "div",
+                            { className: "SPR_toolbar", style: { marginTop: 12 } },
+                            h(Btn, {
+                              onClick: () => void run(() => api.saveRigJob({ jobId: job.id, approved: true, stage: "parts" }), "第①步已通过"),
+                              on: rigStageOf(job, "parts").approved === true,
+                              disabled: (job.parts ?? []).filter((part) => part.status === "ready").length === 0
+                            }, rigStageOf(job, "parts").approved === true ? "第①步：已通过" : "第①步：通过"),
+                            h(Btn, {
+                              onClick: () => void run(() => api.saveRigJob({ jobId: job.id, approved: false, stage: "parts" }))
+                            }, "取消通过"),
+                            h(Btn, { onClick: () => setStage("layout") }, "下一步：装配定位 →")
+                          )
+                        )
+                      : null,
+
+                    // ── ② 装配定位 ────────────────────────────────────────
+                    stage === "layout"
+                      ? h(
+                          "div",
+                          { className: "SPR_rigStage" },
+                          h(
+                            "div",
+                            { className: "SPR_rigStageHead" },
+                            h("span", { className: "SPR_rigStageTitle" }, "② 装配定位"),
+                            h("span", { className: "SPR_rigStageHint" }, "多尺度模板匹配把每个部件摆回参考姿态。**本地计算，免费**：失败或摆错只重跑那几个部件，不用整批重来。"),
+                            h(StatusChip, { node: rigStageOf(job, "layout") })
+                          ),
+                          h(
+                            "div",
+                            { className: "SPR_rigEditorRow" },
+                            h(
+                              BusyBtn,
+                              {
+                                busy: keyBusy(K_RIG_LAYOUT),
+                                busyText: "正在装配定位…",
+                                primary: true,
+                                disabled: (job.parts ?? []).filter((part) => part.status === "ready").length === 0 || busy,
+                                onClick: () => void run(() => api.runRigLayout({ jobId: job.id }), "已提交装配定位（本地计算）", K_RIG_LAYOUT)
+                              },
+                              "重新装配全部部件"
+                            ),
+                            h(
+                              BusyBtn,
+                              {
+                                busy: keyBusy(K_RIG_LAYOUT),
+                                busyText: "正在重试…",
+                                disabled: (job.review?.unmatched ?? []).length === 0 || busy,
+                                onClick: () => void run(() => api.runRigLayout({ jobId: job.id, names: job.review.unmatched }), "已提交重试未命中的部件", K_RIG_LAYOUT)
+                              },
+                              `只重试未命中的 ${(job.review?.unmatched ?? []).length} 个`
+                            ),
+                            h(Btn, { onClick: () => setShowReference((current) => !current), on: showReference }, showReference ? "只显示合成图" : "并排显示参考图")
+                          ),
+                          h(RigLayoutEditor, {
+                            job,
+                            selected,
+                            showReference,
+                            onSelect: setSelected,
+                            onCommit: async (name, patch) => {
+                              await run(() => api.saveRigLayoutItem({ jobId: job.id, name, ...patch }), `已移动「${name}」`);
+                            }
+                          }),
+                          selectedItem !== undefined && selected !== null
+                            ? h(
+                                "div",
+                                { className: "SPR_rigStage", style: { marginTop: 10 } },
+                                h("div", { className: "SPR_rigStageHead" }, h("span", { className: "SPR_rigStageTitle" }, `微调：${selected}`), h("span", { className: "SPR_rigStageHint" }, "改完立刻重出合成图；这一步只影响这一个部件。")),
+                                h(
+                                  "div",
+                                  { className: "SPR_rigEditorRow" },
+                                  h(NumField, { label: "x", value: selectedItem.x, onChange: (value) => void run(() => api.saveRigLayoutItem({ jobId: job.id, name: selected, x: value })) }),
+                                  h(NumField, { label: "y", value: selectedItem.y, onChange: (value) => void run(() => api.saveRigLayoutItem({ jobId: job.id, name: selected, y: value })) }),
+                                  h(NumField, { label: "宽", value: selectedItem.width, min: 1, onChange: (value) => void run(() => api.saveRigLayoutItem({ jobId: job.id, name: selected, width: value })) }),
+                                  h(NumField, { label: "高", value: selectedItem.height, min: 1, onChange: (value) => void run(() => api.saveRigLayoutItem({ jobId: job.id, name: selected, height: value })) }),
+                                  h(NumField, { label: "层级 z", value: selectedItem.z, onChange: (value) => void run(() => api.saveRigLayoutItem({ jobId: job.id, name: selected, z: value })) }),
+                                  h(NumField, { label: "旋转", value: selectedItem.rotation, step: 5, onChange: (value) => void run(() => api.saveRigLayoutItem({ jobId: job.id, name: selected, rotation: value })) }),
+                                  h(
+                                    BusyBtn,
+                                    {
+                                      busy: keyBusy(PART_K(selected, "relayout")),
+                                      busyText: "正在重定位…",
+                                      onClick: () => void run(() => api.runRigLayout({ jobId: job.id, names: [selected] }), `已重新定位「${selected}」`, PART_K(selected, "relayout"))
+                                    },
+                                    "这块重新自动定位"
+                                  )
+                                )
+                              )
+                            : null,
+                          (job.review?.unmatched ?? []).length > 0
+                            ? h("p", { className: "SPR_hint", style: { color: "var(--dsw-alias-state-warning-primary, #b45309)" } }, `这些部件没匹配上，请手工拖到正确位置：${job.review.unmatched.join("、")}`)
+                            : null,
+                          h(
+                            "div",
+                            { className: "SPR_toolbar", style: { marginTop: 12 } },
+                            h(Btn, { onClick: () => void run(() => api.saveRigJob({ jobId: job.id, approved: true, stage: "layout" }), "第②步已通过"), on: rigStageOf(job, "layout").approved === true, disabled: job.layout?.status !== "ready" }, rigStageOf(job, "layout").approved === true ? "第②步：已通过" : "第②步：通过"),
+                            h(Btn, { onClick: () => void run(() => api.saveRigJob({ jobId: job.id, approved: false, stage: "layout" })) }, "取消通过"),
+                            h(Btn, { onClick: () => setStage("rig") }, "下一步：骨骼与动画 →")
+                          )
+                        )
+                      : null,
+
+                    // ── ③ 骨骼与动画 ──────────────────────────────────────
+                    stage === "rig"
+                      ? h(
+                          "div",
+                          { className: "SPR_rigStage" },
+                          h(
+                            "div",
+                            { className: "SPR_rigStageHead" },
+                            h("span", { className: "SPR_rigStageTitle" }, "③ 骨骼与动画"),
+                            h("span", { className: "SPR_rigStageHint" }, "按部件语义自动推骨骼层级，并生成六个动画预设。**本地计算，免费**。下面直接播放验收。"),
+                            h(StatusChip, { node: rigStageOf(job, "rig") })
+                          ),
+                          h(
+                            "div",
+                            { className: "SPR_rigEditorRow" },
+                            h(
+                              BusyBtn,
+                              {
+                                busy: keyBusy(K_RIG_BONES),
+                                busyText: "正在生成骨骼…",
+                                primary: true,
+                                disabled: job.layout?.status !== "ready" || busy,
+                                onClick: () => void run(() => api.runRigBones({ jobId: job.id }), "已提交骨骼构建", K_RIG_BONES)
+                              },
+                              "生成骨骼与动画"
+                            ),
+                            h("span", { className: "SPR_refRow" }, "动画预设"),
+                            RIG_ANIMATIONS.map((name) =>
+                              h(
+                                "label",
+                                { key: name, className: "SPR_refRow", style: { display: "inline-flex", gap: 4, alignItems: "center" } },
+                                h("input", {
+                                  type: "checkbox",
+                                  checked: (settingsDraft.animations ?? []).includes(name),
+                                  onChange: (event) => {
+                                    const current = new Set(settingsDraft.animations ?? []);
+                                    if (event.target.checked) current.add(name);
+                                    else current.delete(name);
+                                    setSettingsDraft({ ...settingsDraft, animations: RIG_ANIMATIONS.filter((entry) => current.has(entry)) });
+                                  }
+                                }),
+                                name
+                              )
+                            ),
+                            h(Btn, { onClick: () => void saveSettings() }, "保存动画选择"),
+                            job.rig?.skeleton !== null && job.rig?.skeleton !== undefined ? h("a", { className: "SPR_link", href: job.rig.skeleton, download: "skeleton.json" }, "下载 skeleton.json") : null,
+                            job.rig?.preview !== null && job.rig?.preview !== undefined ? h("a", { className: "SPR_link", href: job.rig.preview, target: "_blank", rel: "noreferrer" }, "新窗口打开预览") : null
+                          ),
+                          (job.rig?.warnings ?? []).length > 0
+                            ? h("p", { className: "SPR_hint", style: { color: "var(--dsw-alias-state-warning-primary, #b45309)" } }, `骨骼告警：${job.rig.warnings.join("；")}`)
+                            : null,
+                          job.rig?.preview !== null && job.rig?.preview !== undefined
+                            ? h(
+                                React.Fragment,
+                                null,
+                                h(
+                                  "div",
+                                  { className: "SPR_rigEditorRow" },
+                                  h("span", { className: "SPR_refRow" }, "播放动画"),
+                                  (job.rig.animations ?? []).map((name) =>
+                                    h(Btn, { key: name, on: anim === name, onClick: () => setAnim(name) }, name)
+                                  ),
+                                  h("span", { className: "SPR_hint" }, "预览里也能拖时间轴、开骨骼网格")
+                                ),
+                                h("iframe", { className: "SPR_rigPreview", src: `${job.rig.preview}#${anim}`, title: "骨骼动画预览" })
+                              )
+                            : h("p", { className: "SPR_hint", style: { marginTop: 10 } }, job.layout?.status === "ready" ? "点「生成骨骼与动画」得到 skeleton.json 与可播放预览。" : "先完成第②步装配定位。"),
+                          h(
+                            "div",
+                            { className: "SPR_toolbar", style: { marginTop: 12 } },
+                            h(Btn, { onClick: () => void run(() => api.saveRigJob({ jobId: job.id, approved: true, stage: "rig" }), "第③步已通过"), on: rigStageOf(job, "rig").approved === true, disabled: job.rig?.status !== "ready" }, rigStageOf(job, "rig").approved === true ? "第③步：已通过" : "第③步：通过"),
+                            h(Btn, { onClick: () => void run(() => api.saveRigJob({ jobId: job.id, approved: false, stage: "rig" })) }, "取消通过"),
+                            h(Btn, { onClick: () => setStage("atlas") }, "下一步：图集 →")
+                          )
+                        )
+                      : null,
+
+                    // ── ④ 图集 ────────────────────────────────────────────
+                    stage === "atlas"
+                      ? h(
+                          "div",
+                          { className: "SPR_rigStage" },
+                          h(
+                            "div",
+                            { className: "SPR_rigStageHead" },
+                            h("span", { className: "SPR_rigStageTitle" }, "④ 图集"),
+                            h("span", { className: "SPR_rigStageHint" }, "把部件按装配后的尺寸打包成 Spine 纹理图集。区域尺寸与 skeleton.json 里挂点的 width/height 一致，导入引擎不会错位。"),
+                            h(StatusChip, { node: rigStageOf(job, "atlas") })
+                          ),
+                          h(
+                            "div",
+                            { className: "SPR_rigEditorRow" },
+                            h(
+                              BusyBtn,
+                              {
+                                busy: keyBusy(K_RIG_ATLAS),
+                                busyText: "正在打包…",
+                                primary: true,
+                                disabled: job.rig?.status !== "ready" || busy,
+                                onClick: () => void run(() => api.runRigAtlas({ jobId: job.id }), "已提交图集打包", K_RIG_ATLAS)
+                              },
+                              "打包纹理图集"
+                            ),
+                            job.atlas?.text !== null && job.atlas?.text !== undefined ? h("a", { className: "SPR_link", href: job.atlas.text, target: "_blank", rel: "noreferrer" }, "查看 skeleton.atlas") : null,
+                            job.atlas?.image !== null && job.atlas?.image !== undefined ? h("a", { className: "SPR_link", href: job.atlas.image, download: "skeleton.png" }, "下载 skeleton.png") : null,
+                            job.atlas?.width !== undefined ? h(Chip, { kind: "ready", text: `${job.atlas.width}×${job.atlas.height} · ${job.atlas.regions} 区域` }) : null
+                          ),
+                          job.atlas?.url !== null && job.atlas?.url !== undefined
+                            ? h("div", { className: "SPR_rigAtlasWrap" }, h("img", { src: job.atlas.url, alt: "atlas" }))
+                            : h("p", { className: "SPR_hint", style: { marginTop: 10 } }, job.rig?.status === "ready" ? "点「打包纹理图集」生成 skeleton.png + skeleton.atlas。" : "先完成第③步骨骼构建。"),
+                          h(
+                            "div",
+                            { className: "SPR_toolbar", style: { marginTop: 12 } },
+                            h(Btn, { onClick: () => void run(() => api.saveRigJob({ jobId: job.id, approved: true, stage: "atlas" }), "第④步已通过"), on: rigStageOf(job, "atlas").approved === true, disabled: job.atlas?.status !== "ready" }, rigStageOf(job, "atlas").approved === true ? "第④步：已通过" : "第④步：通过"),
+                            h(Btn, { onClick: () => void run(() => api.saveRigJob({ jobId: job.id, approved: false, stage: "atlas" })) }, "取消通过")
+                          ),
+                          h("p", { className: "SPR_hint", style: { marginTop: 10 } }, "导入 Spine：把 skeleton.json、skeleton.atlas、skeleton.png 三个文件放在同一目录，打开 Spine 时选 skeleton.json 即可。")
+                        )
+                      : null,
+
+                    renderJobLog(job)
+                  )
+            )
       );
     }
 

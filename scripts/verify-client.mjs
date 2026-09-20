@@ -297,6 +297,7 @@ for (const file of files) {
     check(`${label}：可读取`, false, file);
     continue;
   }
+  checkRigContracts(text, label);
 
   const renderers = renderersIn(text);
   check(`${label}：找到阶段渲染函数`, renderers.size > 0, [...renderers.keys()].join("、"));
@@ -402,4 +403,54 @@ if (failures.length > 0) {
   console.error("宿主任务 key / targets 对不上时同样看不出来，只是批量任务中途会退回空态。请把两边对齐。");
   process.exit(1);
 }
+
 console.log(`共 ${checks} 项检查，全部通过。`);
+
+/**
+ * 骨骼动画模块的文本契约。
+ *
+ * 浏览器半区是经典脚本，不能 import 宿主的常量，两边只能靠**同名文本**对齐：
+ * 模块 key、深链接白名单、远程方法名、四个阶段标题。任一侧改名都会让这里失败。
+ */
+function checkRigContracts(text, label) {
+  check(`${label}：注册了 RigModule`, text.includes("function RigModule"));
+  check(`${label}：模块导航含骨骼动画生成`, text.includes("骨骼动画生成"));
+  check(`${label}：深链接允许 rig 模块`, text.includes('new Set(["sprite", "image", "sequence", "rig"])'));
+  for (const method of [
+    "listRigJobs",
+    "createRigJob",
+    "getRigJob",
+    "deleteRigJob",
+    "saveRigJob",
+    "uploadRigSource",
+    "uploadRigPart",
+    "removeRigPart",
+    "renameRigPart",
+    "setRigPartVisibility",
+    "saveRigLayoutItem",
+    "runRigSheet",
+    "runRigSegment",
+    "runRigLayout",
+    "runRigBones",
+    "runRigAtlas"
+  ]) {
+    check(`${label}：声明了远程方法 ${method}`, text.includes(`["${method}"`));
+  }
+  check(
+    `${label}：四个阶段标题齐全`,
+    ["① 拆件", "② 装配定位", "③ 骨骼与动画", "④ 图集"].every((entry) => text.includes(entry))
+  );
+  check(`${label}：装配结果可拖动微调`, text.includes("SPR_rigBox"));
+  check(`${label}：骨骼预览内联在 iframe 里`, text.includes("SPR_rigPreview"));
+  check(`${label}：低置信度部件有提示`, text.includes("相似度偏低"));
+  check(
+    `${label}：生成类调用都带 loading 文案`,
+    [
+      /runRigSheet\s*\(/,
+      /runRigSegment\s*\(/,
+      /runRigLayout\s*\(/,
+      /runRigBones\s*\(/,
+      /runRigAtlas\s*\(/
+    ].every((pattern) => pattern.test(text))
+  );
+}

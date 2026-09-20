@@ -31,8 +31,8 @@ export const OPEN_QUERY_KEY = "dsh-gmm";
 /** 工作台在 `main` 槽里的 key，也是侧栏 `sidebar.panellist` 的 id。 */
 export const PANEL_KEY = "gameStudio";
 
-/** 三个模块的 key。 */
-export const STUDIO_MODULES = ["sprite", "image", "sequence"] as const;
+/** 四个模块的 key。 */
+export const STUDIO_MODULES = ["sprite", "image", "sequence", "rig"] as const;
 export type StudioModule = (typeof STUDIO_MODULES)[number];
 
 /** 八方向图的四个阶段。 */
@@ -43,7 +43,7 @@ export interface OpenIntent {
   module?: StudioModule;
   /** 模块一的项目 id（p…）。 */
   projectId?: string;
-  /** 模块二 / 三的任务 id（i… / s…）。 */
+  /** 模块二 / 三 / 四的任务 id（i… / s… / r…）。 */
   jobId?: string;
   /** 八方向图的阶段：images / videos / frames / sheet。 */
   stage?: string;
