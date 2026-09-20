@@ -239,6 +239,7 @@
 .SPR_moduleTitle{font-size:13px;font-weight:600}
 .SPR_moduleHint{font-size:11px;color:var(--dsw-alias-label-tertiary)}
 .SPR_thumbSm{width:44px;height:44px;object-fit:contain;border-radius:6px;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l2);flex:none}
+.SPR_thumbMd{width:104px;height:104px;object-fit:contain;border-radius:8px;border:1px solid var(--dsw-alias-border-l2);flex:none;background-color:var(--dsw-alias-bg-layer-1);background-image:linear-gradient(45deg,rgba(128,128,128,.18) 25%,transparent 25%,transparent 75%,rgba(128,128,128,.18) 75%),linear-gradient(45deg,rgba(128,128,128,.18) 25%,transparent 25%,transparent 75%,rgba(128,128,128,.18) 75%);background-size:16px 16px;background-position:0 0,8px 8px}
 .SPR_player{border:1px solid var(--dsw-alias-border-l2);border-radius:12px;background:#fff;padding:10px;display:flex;justify-content:center;overflow:auto;max-height:60vh}
 .SPR_canvasPlayer{display:block;max-width:100%;image-rendering:pixelated}
 .SPR_frames{display:flex;flex-wrap:wrap;gap:5px;margin-top:10px}
@@ -2322,9 +2323,9 @@
                           React.Fragment,
                           null,
                           h("span", { className: "SPR_fieldLabel" }, "首帧图（必填）"),
-                          h(RefRow, { job, ref: job.refs.firstFrame, kind: "firstFrame", api, reload: load, setNotice }),
+                          h(RefRow, { job, frame: job.refs.firstFrame, kind: "firstFrame", api, reload: load, setNotice }),
                           h("span", { className: "SPR_fieldLabel" }, "尾帧图（选填）"),
-                          h(RefRow, { job, ref: job.refs.lastFrame, kind: "lastFrame", api, reload: load, setNotice }),
+                          h(RefRow, { job, frame: job.refs.lastFrame, kind: "lastFrame", api, reload: load, setNotice }),
                           h(UploadBox, { label: "把首帧图拖到这里", accept: "image/*", busy: uploading, onFiles: (files) => void uploadRef(files, "firstFrame") })
                         )
                       : h(
@@ -2472,13 +2473,16 @@
 
     /** 单张参考图/首尾帧的展示行。 */
     function RefRow(props) {
-      const { job, ref, kind, api, reload, setNotice } = props;
-      if (ref === undefined) return h("span", { className: "SPR_refRow" }, "未上传");
+      // ⚠️ 这里的 prop 不能叫 `ref`：React 会把名为 ref 的 prop 特殊处理（不进 props），
+      // 函数组件里 `props.ref` 恒为 undefined，界面就会永远显示「未上传」——
+      // 看起来像「选了图没反应」，实测踩过。
+      const { job, frame, kind, api, reload, setNotice } = props;
+      if (frame === undefined) return h("span", { className: "SPR_refRow" }, "未上传");
       return h(
         "div",
         { className: "SPR_toolbar" },
-        h("img", { className: "SPR_thumbSm", src: `${job.assetBase}${ref.file}?v=${job.updatedAt}`, alt: ref.name }),
-        h("span", { className: "SPR_refRow" }, ref.name),
+        h("img", { className: "SPR_thumbMd", src: `${job.assetBase}${frame.file}?v=${job.updatedAt}`, alt: frame.name }),
+        h("span", { className: "SPR_refRow" }, frame.name),
         h(
           Btn,
           {
