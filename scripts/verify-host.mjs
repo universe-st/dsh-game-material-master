@@ -63,7 +63,7 @@ async function main() {
   check("注册了一条 prefix 路由", captured.routes.length === 1 && captured.routes[0].kind === "prefix", JSON.stringify(captured.routes.map((r) => r.path)));
 
   const invocations = captured.manifest?.invocations ?? [];
-  check("manifest 方法数为 46", invocations.length === 46, `实际 ${invocations.length}`);
+  check("manifest 方法数为 48", invocations.length === 48, `实际 ${invocations.length}`);
   const ids = new Set(invocations.map((i) => i.id));
   check("方法 id 唯一", ids.size === invocations.length);
   check("所有方法都声明在 gameStudio 服务下", invocations.every((i) => i.service === "gameStudio" && i.namespace === "gameStudio"));
@@ -308,6 +308,31 @@ async function main() {
   await studio.setApproved({ projectId, stage: "sheet", approved: true });
   project = await studio.getProject({ projectId });
   check("整图验收打标生效", project.sheet.approved === true);
+
+  // 审核模式：固定流程里必须先问用户，选完存在目标自己身上，界面与会话读同一份。
+  const expectReject = async (name, fn, needle) => {
+    try {
+      await fn();
+      check(name, false, "预期抛错但没有");
+    } catch (error) {
+      const message = String(error?.message ?? error);
+      check(name, message.includes(needle), message.slice(0, 80));
+    }
+  };
+  await studio.setReviewMode({ module: "sprite", id: projectId, reviewMode: "manual" });
+  project = await studio.getProject({ projectId });
+  check("审核模式记在项目上", project.reviewMode === "manual", String(project.reviewMode));
+  await studio.setReviewMode({ module: "sprite", id: projectId, reviewMode: "auto" });
+  project = await studio.getProject({ projectId });
+  check("审核模式可改选", project.reviewMode === "auto", String(project.reviewMode));
+  await expectReject("审核模式取值必须是 auto/manual", () => studio.setReviewMode({ module: "sprite", id: projectId, reviewMode: "sometimes" }), "未知审核模式");
+  await expectReject("审核模式必须指名模块", () => studio.setReviewMode({ module: "nope", id: projectId, reviewMode: "auto" }), "未知模块");
+
+  // 浏览器半区上报 origin：宿主据此拼出模型贴给用户的深链接。
+  const originOk = await studio.reportClientOrigin({ origin: "http://127.0.0.1:43120" });
+  check("接受 http origin 上报", originOk.ok === true && originOk.origin === "http://127.0.0.1:43120", JSON.stringify(originOk));
+  const originBad = await studio.reportClientOrigin({ origin: "file:///etc/passwd" });
+  check("拒绝非 http(s) origin", originBad.ok === false, JSON.stringify(originBad));
 
   // ── 6. 阶段前置校验 ────────────────────────────────────────────────────
   console.log("6) 前置校验（缺素材时给出可读错误）");

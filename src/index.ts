@@ -32,6 +32,8 @@ import { assetPath, createProject, deleteProject, listProjects, log, patchProjec
 import * as imagegen from "./imagegen.js";
 import * as seqgen from "./seqgen.js";
 import { MANIFEST, METHODS, SERVICE_NAME } from "./wire.js";
+import { rememberClientOrigin } from "./links.js";
+import { registerStudioTools } from "./tools.js";
 /**
  * 游戏素材大师 —— 宿主半区。
  *
@@ -245,6 +247,17 @@ export class GameStudioGateway extends TypertRemoteService {
       timeoutMs: config.minimaxTimeoutMs
     });
   }
+  /**
+   * 浏览器半区上报自己的 `location.origin`。
+   *
+   * 宿主不知道对外 origin（可能被反代改写），而模型要在回复里贴可点链接，
+   * 只能由页面自己报一次。返回体里回带上「认没认」，方便界面自检。
+   */
+  async reportClientOrigin(payload) {
+    const origin = asString(asRecord(payload).origin);
+    const accepted = rememberClientOrigin(origin);
+    return accepted ? { ok: true, origin } : { ok: false, message: `拒绝非 http(s) origin：${origin}` };
+  }
   // ── 项目 ────────────────────────────────────────────────────────────────
   async listProjects() {
     return { projects: await listProjects() };
@@ -450,6 +463,42 @@ export class GameStudioGateway extends TypertRemoteService {
     }
     return { ok: true, dir };
   }
+  /**
+   * 记录审核模式（`auto` = agent 自己审完继续；`manual` = 每步停下等用户确认）。
+   *
+   * 固定流程要求：动手之前先问用户选哪个。选完存在目标自己身上，
+   * 之后每一轮都由它决定「agent 继续」还是「停下来等回复」——不靠模型记性。
+   */
+  async setReviewMode(payload) {
+    const input = asRecord(payload);
+    const id = asString(input.id);
+    const module = asString(input.module);
+    const reviewMode = asString(input.reviewMode);
+    if (reviewMode !== "auto" && reviewMode !== "manual")
+      throw new Error(`未知审核模式：${reviewMode}`);
+    if (module === "sprite") {
+      await patchProject(id, (project) => {
+        project.reviewMode = reviewMode;
+        log(project, "info", `审核模式：${reviewMode === "manual" ? "每一步人工审核" : "agent 自动审核"}`);
+      });
+      return { ok: true, id, module, reviewMode };
+    }
+    if (module === "image") {
+      const job = await imagegen.readImageJob(id);
+      if (job === undefined) throw new Error(`任务不存在：${id}`);
+      job.reviewMode = reviewMode;
+      await imagegen.writeImageJob(job);
+      return { ok: true, id, module, reviewMode };
+    }
+    if (module === "sequence") {
+      const job = await seqgen.readSequenceJob(id);
+      if (job === undefined) throw new Error(`任务不存在：${id}`);
+      job.reviewMode = reviewMode;
+      await seqgen.writeSequenceJob(job);
+      return { ok: true, id, module, reviewMode };
+    }
+    throw new Error(`未知模块：${module}`);
+  }
   // ── 流水线控制 ──────────────────────────────────────────────────────────
   async runImage(payload) {
     const input = asRecord(payload);
@@ -599,6 +648,18 @@ export class GameStudioGateway extends TypertRemoteService {
       job.settings.watermark = raw.watermark === true;
     }
     if (input.keying !== undefined) applyKeying(job.keying, asRecord(input.keying));
+    // 验收打标：不带 index 就是整个任务，带 index 只改那一张。和界面上的「通过」是同一份数据。
+    if (typeof input.approved === "boolean") {
+      const index = input.index === undefined || input.index === null ? undefined : clampInt(input.index, -1, 0, 9999);
+      let touched = 0;
+      for (const item of job.items) {
+        if (index === undefined || item.index === index) {
+          item.approved = input.approved;
+          touched++;
+        }
+      }
+      if (index !== undefined && touched === 0) throw new Error(`没有第 ${index} 张产物`);
+    }
     await imagegen.writeImageJob(job);
     return { ok: true };
   }
@@ -706,6 +767,18 @@ export class GameStudioGateway extends TypertRemoteService {
       }
     }
     if (input.keying !== undefined) applyKeying(job.keying, asRecord(input.keying));
+    // 验收打标：不带 step 就是三步全打，带 step 只改那一步。与界面的「通过」共用同一份数据。
+    if (typeof input.approved === "boolean") {
+      const step = typeof input.step === "string" ? input.step : undefined;
+      if (step === undefined) {
+        job.video.approved = input.approved;
+        job.frames.approved = input.approved;
+        job.sheet.approved = input.approved;
+      } else {
+        if (step !== "video" && step !== "frames" && step !== "sheet") throw new Error(`未知步骤：${step}`);
+        job[step].approved = input.approved;
+      }
+    }
     await seqgen.writeSequenceJob(job);
     return { ok: true };
   }
@@ -1009,6 +1082,22 @@ export function apply(ctx) {
   const gateway = new GameStudioGateway(ctx);
   gateway.assertSurface();
   ctx.effect(() => ctx.typert.register(MANIFEST), "dsh-8dir-sprites: typert manifest");
+  /**
+   * 对话调用面：把网关的全部方法 + 多步流程编排注册成模型工具，
+   * 并加一段系统提示词说明「怎么推进、怎么把验收链接贴给用户」。
+   *
+   * `tools` / `systemPrompt` 都是可选服务：最小化的测试组合里可能没有，
+   * 缺了就只是没有对话调用面，插件本体照常工作。
+   */
+  ctx.effect(() => {
+    const disposers = registerStudioTools(
+      { tools: ctx.get("tools"), systemPrompt: ctx.get("systemPrompt") },
+      gateway
+    );
+    return () => {
+      for (const dispose of disposers) dispose();
+    };
+  }, "dsh-game-material-master: 对话调用面");
   const webServer = ctx.get("webServer");
   if (webServer !== undefined) {
     ctx.effect(() => webServer.register({ kind: "prefix", path: ROUTE_PREFIX, handler: handleAsset }), "dsh-8dir-sprites: asset route");

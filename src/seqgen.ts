@@ -43,6 +43,8 @@ export interface SequenceVideoState {
   remoteStatus?: string;
   file?: string;
   error?: string;
+  /** 验收打标（固定流程里的人工审核）。 */
+  approved?: boolean;
   updatedAt?: number;
 }
 
@@ -59,6 +61,8 @@ export interface SequenceFramesState {
   duration?: number;
   error?: string;
   stale?: boolean;
+  /** 验收打标。 */
+  approved?: boolean;
   updatedAt?: number;
 }
 
@@ -68,6 +72,8 @@ export interface SequenceSheetState {
   width?: number;
   height?: number;
   error?: string;
+  /** 验收打标。 */
+  approved?: boolean;
   updatedAt?: number;
 }
 
@@ -111,6 +117,8 @@ export interface SequenceJob {
   video: SequenceVideoState;
   frames: SequenceFramesState;
   sheet: SequenceSheetState;
+  /** 固定流程里问过用户的审核模式；没问过就是 undefined。 */
+  reviewMode?: "auto" | "manual";
   log: JobLogEntry[];
 }
 
@@ -296,6 +304,7 @@ function normalizeSequenceJob(raw: any): SequenceJob {
       remoteStatus: typeof raw?.video?.remoteStatus === "string" ? raw.video.remoteStatus : undefined,
       file: typeof raw?.video?.file === "string" ? raw.video.file : undefined,
       error: typeof raw?.video?.error === "string" ? raw.video.error : undefined,
+      approved: raw?.video?.approved === true,
       updatedAt: typeof raw?.video?.updatedAt === "number" ? raw.video.updatedAt : undefined
     },
     frames: {
@@ -309,6 +318,7 @@ function normalizeSequenceJob(raw: any): SequenceJob {
       duration: typeof raw?.frames?.duration === "number" ? raw.frames.duration : undefined,
       error: typeof raw?.frames?.error === "string" ? raw.frames.error : undefined,
       stale: raw?.frames?.stale === true,
+      approved: raw?.frames?.approved === true,
       updatedAt: typeof raw?.frames?.updatedAt === "number" ? raw.frames.updatedAt : undefined
     },
     sheet: {
@@ -317,8 +327,10 @@ function normalizeSequenceJob(raw: any): SequenceJob {
       width: typeof raw?.sheet?.width === "number" ? raw.sheet.width : undefined,
       height: typeof raw?.sheet?.height === "number" ? raw.sheet.height : undefined,
       error: typeof raw?.sheet?.error === "string" ? raw.sheet.error : undefined,
+      approved: raw?.sheet?.approved === true,
       updatedAt: typeof raw?.sheet?.updatedAt === "number" ? raw.sheet.updatedAt : undefined
     },
+    reviewMode: raw?.reviewMode === "manual" ? "manual" : raw?.reviewMode === "auto" ? "auto" : undefined,
     log: Array.isArray(raw?.log) ? raw.log.slice(-200) : []
   };
 }

@@ -14,6 +14,10 @@
 
 每个阶段都有独立的验收界面：看图、改提示词、单独重跑、打「通过」。任何一步不满意都可以只重做那一步。
 
+三个模块的**全部功能都可以通过对话调用**：agent 用工具驱动同一条流水线，
+多步流程（八方向图这种）能自己推进、等待、审查，也可以在每一步停下来让你验收——
+详见下面的[对话调用](#对话调用agent-也能驱动整条流水线)。
+
 ---
 
 ## 一些绕不开的坑（先说，省得踩）
@@ -24,6 +28,71 @@
 - **图生视频不保证守住纯色背景。** 同一段素材里有的帧背景保持绿色，有的会逐渐打光成橙黄渐变。
   所以抠像不能只认绿色——见下面的「抠像」。
 - **重复提交会白花钱。** 三个模块都做了重复提交拦截：同一张图 / 同一段视频在跑时再点一次会被拒绝。
+  agent 走对话调用时同样受这条约束（工具层不重复拦一次，报错信息才清楚）。
+
+---
+
+## 对话调用：agent 也能驱动整条流水线
+
+插件挂载时会把自己的控制面注册成一组模型工具，并追加一段系统提示词，
+约定**固定流程**与验收协议。所以「帮我做个八方向的角色」这句话本身就能跑完整条链路。
+
+### 工具
+
+| 工具 | 作用 |
+|---|---|
+| `game_material_intake` | **固定流程第 0 步**：按真实状态算出「还缺哪些关键参数」与「必须先解决的阻塞」，并把「自动审核 / 每步人工审核」这个必问项一起交出来 |
+| `game_material_call` | 万能通道：插件界面上有的功能都能调（47 个方法，含配置、提示词、抠像参数、删除等），描述里逐个列了入参与用途 |
+| `game_material_upload` | 按**本机路径**上传素材（源图 / 参考图 / 首尾帧 / 参考视频），宿主自己读盘，不用把 base64 贴进对话 |
+| `game_material_reviewMode` | 记录用户选的审核模式，存在项目 / 任务上；界面与对话读写同一份 |
+| `game_material_status` | 读进度：项目 / 任务清单，或某个目标的阶段进度与产物 URL |
+| `game_material_wait` | 阻塞等待「没有任务在跑」或超时（默认 120s，上限 900s），回来就是可审查状态 |
+| `game_material_review` | 出**验收包**：每个产物的绝对 URL、状态、通过标记、报错与建议的下一步 |
+| `game_material_approve` | 打「通过 / 取消通过」（八方向图按阶段+方位，图片按张，序列帧按步骤） |
+
+底层没有第二套实现：工具直接复用界面用的那个 Typert 远程服务，所以
+「界面上做到的事」与「对话里做到的事」永远是同一件事、同一份数据。
+
+### 固定流程
+
+```
+第 0 步  先问，再动手
+         agent 必须先用 game_material_intake 把缺的参数问清楚，
+         并且必须问「自动审核 还是 每一步人工审核」——合并成一次提问。
+         两个问题都拿到答复之前，不允许调用任何生成 / 删除类方法。
+第 1 步  逐阶段推进（八方向图：images → videos → frames → sheet）
+         每次提交类调用之后立刻 game_material_wait。
+第 2 步  每步都审：game_material_review 看逐项 status / error / URL。
+第 3 步  按审核模式分岔
+         auto   → agent 自己判断没问题就 approve 并进入下一步
+         manual → 贴出验收链接并停下等用户回复，用户说「通过」才继续
+```
+
+审核模式也可以在界面上直接改（三个模块都有下拉），因为它就是同一份数据。
+没设置时界面显示「未设置（对话里会先问）」。
+
+### 点链接切界面
+
+工具返回里的 `openUrl` 是给用户点的深链接，形如：
+
+```
+http://127.0.0.1:43120/?dsh-gmm=1&module=sprite&project=p…&stage=videos
+```
+
+agent 会把它原样写成 Markdown 链接贴出来。用户点一下：
+
+- 浏览器半区装了**捕获阶段的点击拦截器**，命中就 `preventDefault` 原地切到
+  「游戏素材大师」面板，并落到对应模块 / 项目 / 阶段——不跳转、不新开标签；
+- 若用户用中键 / Ctrl+点击强制新开标签页，链接会真的被打开，应用在
+  `/?dsh-gmm=…` 上正常启动，插件读到参数后完成同样的切换（两条路径共用同一份意图）。
+
+为什么链接必须是 `http(s)`：会话正文的 Markdown 渲染器对链接做了协议白名单
+（只放行 http/https/mailto），自定义 scheme 会被丢掉、连 `<a>` 都不生成。
+又因为宿主不知道对外 origin（可能被反代改写），浏览器半区会在挂载时把自己真实的
+`location.origin` 上报给宿主（`reportClientOrigin`）。没收到上报时退化成
+`http://localhost` —— 拦截是按参数匹配的，origin 不对也不影响点击。
+
+拦截器只认 `dsh-gmm` 参数，其余链接（含站外的）一律放行。
 
 ---
 
@@ -34,6 +103,10 @@ dsh plugin --profile web add /path/to/dsh-game-material-master
 ```
 
 装完**重启 DSH**（新增 bundle 只在启动时读取）。
+
+> **改了代码之后**：浏览器半区是按磁盘上的 `lib/client.js` 现取的，**刷新浏览器**就能用上；
+> 宿主半区（工具注册、系统提示词、远程方法）是启动时装入的，**必须重启 DSH**。
+> `node scripts/verify-live-bundle.mjs` 可以确认运行中的宿主到底在提供哪一版浏览器束。
 
 - 需要宿主提供 `webServer` 与 `typert`，二者由 `@deepseek-ai/dsh-base` / `dsh-web-app` 提供，无需额外依赖。
 - 需要 **ffmpeg / ffprobe** 在 `PATH` 上（macOS：`brew install ffmpeg`），
@@ -166,6 +239,7 @@ Key 只写入本机 `<DSH_HOME>/game-material-master/config.json`，回传界面
 - 生成张数 1~8，按 Seedream 刊例约 0.2 元/张
 - 每张可单独重新生成、删除、下载透明 PNG
 - 每张会记录**背景占比**，用来判断抠像是否可信（占比异常说明绿幕没生成好）
+- 每张可单独打「通过」，也可以一键全部通过；对话里的 `game_material_approve` 改的是同一份标记
 
 ---
 
@@ -185,6 +259,7 @@ Key 只写入本机 `<DSH_HOME>/game-material-master/config.json`，回传界面
 - 播放生成出来的视频（`<video>`，支持拖动进度条）
 - **循环播放抠像后的序列帧**（可调 fps 与缩放），直接判断动作连贯性与抠像边缘稳定性
 - 导出横向条图与逐帧 PNG
+- 对「视频 / 抽帧 / 条图」三步各自打「通过」；对话里的 `game_material_approve` 改的是同一份标记
 
 ---
 
@@ -250,9 +325,10 @@ npm run build          # tsc → lib/，并剥掉浏览器束结尾的 export {}
 # 纯本地测试（不联网、不花钱）
 node scripts/verify-minimax.mjs    # MiniMax 协议层（85 项，含请求体逐字段断言）
 node scripts/verify-pipeline.mjs   # 抽帧/抠像/合成链路（30 项，含回归用例）
-node scripts/verify-host.mjs       # 宿主冒烟（187 项，真实 cordis + 真实 HTTP）
+node scripts/verify-host.mjs       # 宿主冒烟（193 项，真实 cordis + 真实 HTTP）
 node scripts/verify-client.mjs     # 浏览器半区契约（66 项：阶段 ctx 键必须被转发，且每个生成类调用点都带 loading 反馈）
-node scripts/verify-feedback.mjs   # 浏览器半区渲染（真加载 lib/client.js，断言遮罩真的出现 / 空闲时真的不出现）
+node scripts/verify-feedback.mjs   # 浏览器半区渲染（73 项：真加载 lib/client.js，断言遮罩真的出现 / 空闲时真的不出现 / 深链接点击真的切面板）
+node scripts/verify-tools.mjs      # 对话调用面（83 项：工具 schema、方法覆盖、固定流程、审核模式、深链接契约）
 node scripts/verify-live-bundle.mjs # 运行中的宿主是否已在提供新束（走 /plugins/events 拿真实 graph，再按图里的 URL 取回）
 
 # 真实 API 端到端（会花钱）
@@ -283,10 +359,22 @@ node scripts/retry-video.mjs <项目 id> <方向> [--soft]         # 单方向�
 `start` / `run` / `kickAndWatch` 的实参里有 `{ key, label }`。
 
 `verify-feedback.mjs` 再往前一步——它把 `lib/client.js` **真的加载起来**（假
-`__ModuleLoader__` + 假 React），用桩项目数据渲染出元素树，断言遮罩真的长出来了：
+`__ModuleLoader__` + 假 React + 假 document），用桩项目数据渲染出元素树，断言遮罩真的长出来了：
 某个方向在跑时它的预览必须被 `SPR_ovl` 盖住、批量时还没轮到的方向也要盖住、
 空闲时**一个遮罩都不能有**。这类问题肉眼极难发现：不盖遮罩时界面看着完全正常，
 只是「点了没反应」，用户会以为按钮失效而反复点击——每次点击都是真实计费。
+
+它还顺带钉住了两件事：**验收控件真的渲染出来**（三个模块都能看到审核模式下拉与「通过」按钮），
+以及**深链接点击真的会切面板**——装上真的捕获阶段监听器，派发一次合成点击，
+断言 `preventDefault` 被调用、`layout.selectPanel("gameStudio")` 被调用、意图被广播出来；
+同时断言普通外链与 Ctrl+点击 / 中键**不被抢走**。
+
+`verify-tools.mjs` 盯的是对话调用面这一类坑：工具 schema 必须落在 DSH 支持的关键字子集里、
+`game_material_call` 的 method 枚举必须**覆盖插件的每一个远程方法**（少一个就是「某个功能对话里调不了」）、
+固定流程第 0 步必须按真实状态算出要问什么（缺源图就问、已有源图就不问）、
+审核模式必须只有 auto/manual 两个选项。最后用**文本契约**把宿主 `links.ts` 与浏览器半区
+`client.ts` 的深链接常量钉成一致——两边是两份实现（经典脚本不能 `import`），
+参数名或模块名改单边会静默失效。
 
 `verify-live-bundle.mjs` 回答的是另一个问题：「我改完了，运行中的宿主到底有没有换新束？」
 自己拼 `/plugins/<id>/client.js` 一定 404（浏览器束是按模块图里带 rev 的 URL 提供的），
@@ -332,7 +420,9 @@ running 落在下一次 `getProject` 里**：
 | `src/imagegen.ts` | 模块二：图片生成任务 |
 | `src/seqgen.ts` | 模块三：序列帧任务 |
 | `src/wire.ts` | Typert 远程协议清单（**唯一真源**） |
-| `src/index.ts` | 宿主半区：远程服务 + 资源路由 |
+| `src/links.ts` | 深链接：意图编解码、origin 记录、面板 key（与浏览器半区共用同一套约定） |
+| `src/tools.ts` | 对话调用面：`game_material_*` 工具、固定流程第 0 步、系统提示词段 |
+| `src/index.ts` | 宿主半区：远程服务 + 资源路由 + 工具注册 |
 | `src/client.ts` | 浏览器半区：三个模块的界面 |
 
 `src/client.ts` 由宿主直接以 `/plugins/dsh-game-material-master/client.js` 提供给浏览器，

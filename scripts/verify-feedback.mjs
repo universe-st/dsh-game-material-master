@@ -45,8 +45,8 @@ const ReactStub = {
     return { type, props: props ?? {}, children };
   },
   useState(initial) {
-    if (HOOK.cursor >= HOOK.slots.length) hookOverflow = true;
-    const value = HOOK.slots[HOOK.cursor++];
+    const index = HOOK.cursor++;
+    const value = HOOK.slots[index];
     return [value === undefined ? (typeof initial === "function" ? initial() : initial) : value, () => {}];
   },
   useRef(initial) {
@@ -74,6 +74,41 @@ const windowStub = {
     load(registration) {
       LOADED.push(registration);
     }
+  },
+  // 深链接用到的最小 location/history 面（默认没有深链接参数）。
+  location: { origin: "http://127.0.0.1:43120", search: "", href: "http://127.0.0.1:43120/" },
+  history: {
+    // 真浏览器的 replaceState 会同步地址栏；桩里手动把 Location 的两处一起改，
+    // 否则「参数被清掉」这条断言永远测不到东西。
+    replaceState(_state, _title, url) {
+      const next = new URL(url, windowStub.location.href);
+      windowStub.location.href = next.toString();
+      windowStub.location.search = next.search;
+    }
+  },
+  setTimeout: (fn) => {
+    fn();
+    return 0;
+  }
+};
+
+/** 捕获 document 上的点击监听器（深链接拦截器就装在这里）。 */
+const CLICK_LISTENERS = [];
+globalThis.document = {
+  head: { appendChild() {}, removeChild() {} },
+  // 插件用 <style> 注入自己的 CSS；这里只要求它不炸，样式内容由 verify-client 检查。
+  createElement: () => ({
+    setAttribute() {},
+    remove() {},
+    style: {},
+    textContent: ""
+  }),
+  addEventListener(type, listener) {
+    if (type === "click") CLICK_LISTENERS.push(listener);
+  },
+  removeEventListener(type, listener) {
+    const index = CLICK_LISTENERS.indexOf(listener);
+    if (index >= 0) CLICK_LISTENERS.splice(index, 1);
   }
 };
 
@@ -115,11 +150,19 @@ check("factory 可执行", true, `导出 ${Object.keys(bundle).join("、")}`);
 
 // ── 抓住三个挂载点里的组件 ───────────────────────────────────────────────
 const REGISTERED = {};
+const SELECTED_PANELS = [];
 const fakeCtx = {
   effect(fn) {
     return fn();
   },
-  get() {
+  get(name) {
+    if (name === "layout") {
+      return {
+        selectPanel(panelId) {
+          SELECTED_PANELS.push(panelId);
+        }
+      };
+    }
     return undefined;
   },
   slots: {
@@ -175,7 +218,16 @@ function collect(node, predicate, out = [], seen = new Set()) {
   for (const value of Object.values(node.props ?? {})) {
     if (value !== null && typeof value === "object") collect(value, predicate, out, seen);
   }
-  if (typeof node.type === "function") collect(node.type(node.props ?? {}), predicate, out, seen);
+  if (typeof node.type === "function") {
+    // 函数组件要按 React 语义渲染：children 通过 props 传进去，不在 props 里。
+    // 只传 node.props 的话，`h(Btn, {...}, "通过")` 里的文字会整段丢掉——
+    // 于是「按钮没有文案」这种界面问题在测试里反而看不出来。
+    const children = Array.isArray(node.children) ? node.children.filter((child) => child !== null && child !== undefined) : [];
+    const props = { ...(node.props ?? {}) };
+    if (children.length === 1) props.children = children[0];
+    else if (children.length > 1) props.children = children;
+    collect(node.type(props), predicate, out, seen);
+  }
   return out;
 }
 const byClass = (tree, className) =>
@@ -188,6 +240,17 @@ const textOf = (node) => {
   return textOf(node.children ?? []);
 };
 const overlayText = (tree) => overlays(tree).map(textOf).join(" | ");
+
+/** 验收控件：审核模式下拉（auto/manual）与「通过」按钮。 */
+const modeOptions = (tree) => collect(tree, (node) => node.type === "option").map((node) => node.props?.value);
+const approveLabels = (tree) =>
+  collect(tree, (node) => node.props?.className === "SPR_btn")
+    .map(textOf)
+    .filter((text) => text === "通过" || text === "已通过");
+const hasReviewModeSelect = (tree) => {
+  const options = modeOptions(tree);
+  return options.includes("auto") && options.includes("manual");
+};
 
 // ── 桩数据 ───────────────────────────────────────────────────────────────
 const COMPASSES = ["front", "back", "downLeft", "downRight", "upLeft", "upRight", "left", "right"];
@@ -252,12 +315,26 @@ const api = new Proxy(
 );
 
 /**
+ * 每个组件的「Hook 调用总数」（useState + useRef），顺序与数量都不能变。
+ *
+ * 为什么用确切数字而不是「不越界」：桩槽位是按顺序喂值的，顺序一挪，
+ * 某个 useState 就会读到别人的值——界面上表现为莫名其妙的初始值，
+ * 本地却什么都看不出来。数字变了就说明 Hook 顺序改了，必须同步这里的槽位。
+ */
+const EXPECTED_HOOKS = {
+  StudioPanel: 18,
+  ImageModule: 14,
+  SequenceModule: 15
+};
+
+/**
  * 渲染 StudioPanel 的某个阶段。
  *
- * StudioPanel 的 Hook 顺序（只列 useState，顺序不能错）：
+ * StudioPanel 的 Hook 顺序（只列 state 槽，顺序不能错）：
  *   0 projects / 1 projectId / 2 project / 3 stage / 4 module / 5 notice /
  *   6 loading / 7 promptDraft / 8 promptOpen / 9 videoPromptDraft /
- *   10 settingsDraft / 11 sourceBusy / 12 dropOver / 14 usePendingTasks.map
+ *   10 settingsDraft / 11 sourceBusy / 12 dropOver / 14 usePendingTasks.map /
+ *   15 useStudioIntent（深链接意图；null = 没有待处理的链接）
  * useRef（13 fileInputRef，以及 usePendingTasks 内部的 ref）与 useCallback 不占 state 槽。
  */
 function renderStage(project, stage, tasks) {
@@ -276,12 +353,13 @@ function renderStage(project, stage, tasks) {
     false,
     false,
     undefined,
-    tasks.map
+    tasks.map,
+    null
   ];
   HOOK.cursor = 0;
   hookOverflow = false;
   const tree = panel({ api });
-  return { tree, overflow: hookOverflow, hooks: HOOK.cursor };
+  return { tree, overflow: false, hooks: HOOK.cursor };
 }
 
 if (typeof panel !== "function") report();
@@ -290,8 +368,14 @@ if (typeof panel !== "function") report();
 section("阶段① 八方向绿幕图");
 {
   const idle = renderStage(makeProject(), "images", makeTasks());
-  check("Hook 槽位与 StudioPanel 对齐", idle.overflow === false, idle.overflow ? "useState 调用次数超出桩槽位" : `${HOOK.cursor} 个`);
+  check(
+    "Hook 槽位与 StudioPanel 对齐",
+    idle.hooks === EXPECTED_HOOKS.StudioPanel,
+    `调用 ${idle.hooks} 个 Hook，期望 ${EXPECTED_HOOKS.StudioPanel}`
+  );
   check("空闲时一个遮罩都没有", overlays(idle.tree).length === 0, `${overlays(idle.tree).length} 个`);
+  // 固定流程的审核模式必须能在八方向图界面上看到 / 改。
+  check("八方向图有审核模式下拉", hasReviewModeSelect(idle.tree), modeOptions(idle.tree).join("、"));
 
   const busy = renderStage(makeProject(), "images", makeTasks(["image:upLeft"]));
   check("单方向生成时出现 loading 遮罩", overlays(busy.tree).length >= 1, `${overlays(busy.tree).length} 个`);
@@ -431,10 +515,9 @@ function makeSequenceJob(overrides = {}) {
  *
  * ImageModule 的 useState 顺序：
  *   0 jobs / 1 jobId / 2 job / 3 notice / 4 uploading / 5 promptDraft / 6 suffixDraft /
- *   7 settingsDraft / 8 keyingDraft / 9 useGlobalConfig / 10 usePendingTasks.map
- * SequenceModule 的顺序：
- *   0 jobs / 1 jobId / 2 job / 3 notice / 4 uploading / 5 promptDraft / 6 suffixDraft /
- *   7 settingsDraft / 8 keyingDraft / 9 useGlobalConfig / 10 usePendingTasks.map
+ *   7 settingsDraft / 8 keyingDraft / 9 useGlobalConfig / 10 usePendingTasks.map /
+ *   11 useStudioIntent（深链接意图）
+ * SequenceModule 的顺序与之完全相同。
  */
 function renderModule(component, job, tasks) {
   HOOK.slots = [
@@ -448,19 +531,23 @@ function renderModule(component, job, tasks) {
     { ...(job.settings ?? {}) },
     { ...(job.keying ?? {}) },
     undefined,
-    tasks.map
+    tasks.map,
+    null
   ];
   HOOK.cursor = 0;
-  hookOverflow = false;
   const tree = component({ api });
-  return { tree, overflow: hookOverflow };
+  return { tree, overflow: false, hooks: HOOK.cursor };
 }
 
 if (typeof ImageModule === "function") {
   section("模块② 图片生成");
   {
     const idle = renderModule(ImageModule, makeImageJob(), makeTasks());
-    check("Hook 槽位与 ImageModule 对齐", idle.overflow === false, idle.overflow ? "useState 调用次数超出桩槽位" : `${HOOK.cursor} 个`);
+    check(
+      "Hook 槽位与 ImageModule 对齐",
+      idle.hooks === EXPECTED_HOOKS.ImageModule,
+      `调用 ${idle.hooks} 个 Hook，期望 ${EXPECTED_HOOKS.ImageModule}`
+    );
     check("空闲时一个遮罩都没有", overlays(idle.tree).length === 0, `${overlays(idle.tree).length} 个`);
 
     const gen = renderModule(ImageModule, makeImageJob(), makeTasks(["img:job"]));
@@ -489,6 +576,19 @@ if (typeof ImageModule === "function") {
     ];
     const running = renderModule(ImageModule, runningJob, makeTasks());
     check("宿主 running 时出现遮罩", overlays(running.tree).length >= 1, `${overlays(running.tree).length} 个`);
+
+    // 验收：每张就绪的图都有自己的「通过」，且审核模式下拉在（固定流程的必问项）。
+    const acceptance = renderModule(ImageModule, makeImageJob(), makeTasks());
+    check("图片结果每张都有「通过」按钮", approveLabels(acceptance.tree).length === 2, approveLabels(acceptance.tree).join("、"));
+    check("图片任务有审核模式下拉", hasReviewModeSelect(acceptance.tree), modeOptions(acceptance.tree).join("、"));
+    const approvedJob = makeImageJob();
+    approvedJob.items = [
+      { status: "ready", source: "generated", file: "out/1.png", updatedAt: 2, approved: true },
+      { status: "empty", source: "generated" }
+    ];
+    const approvedTree = renderModule(ImageModule, approvedJob, makeTasks()).tree;
+    check("已通过的显示「已通过」", approveLabels(approvedTree).includes("已通过"), approveLabels(approvedTree).join("、"));
+    check("未就绪的那张「通过」被禁用", collect(approvedTree, (node) => node.props?.className === "SPR_btn" && textOf(node) === "通过").every((node) => node.props.disabled === true));
   }
 }
 
@@ -496,7 +596,11 @@ if (typeof SequenceModule === "function") {
   section("模块③ 序列帧生成");
   {
     const idle = renderModule(SequenceModule, makeSequenceJob(), makeTasks());
-    check("Hook 槽位与 SequenceModule 对齐", idle.overflow === false, idle.overflow ? "useState 调用次数超出桩槽位" : `${HOOK.cursor} 个`);
+    check(
+      "Hook 槽位与 SequenceModule 对齐",
+      idle.hooks === EXPECTED_HOOKS.SequenceModule,
+      `调用 ${idle.hooks} 个 Hook，期望 ${EXPECTED_HOOKS.SequenceModule}`
+    );
     check("空闲时一个遮罩都没有", overlays(idle.tree).length === 0, `${overlays(idle.tree).length} 个`);
 
     const video = renderModule(SequenceModule, makeSequenceJob(), makeTasks(["seq:video"]));
@@ -516,7 +620,110 @@ if (typeof SequenceModule === "function") {
     runningJob.video = { status: "running", remoteStatus: "Processing" };
     const running = renderModule(SequenceModule, runningJob, makeTasks());
     check("宿主视频 running 时出现遮罩", overlays(running.tree).length >= 1, `${overlays(running.tree).length} 个`);
+
+    // 验收：视频 / 序列帧 / 条图三步各自可「通过」，审核模式下拉在。
+    const acceptance = renderModule(SequenceModule, makeSequenceJob(), makeTasks());
+    check("序列帧三步都有「通过」按钮", approveLabels(acceptance.tree).length === 3, approveLabels(acceptance.tree).join("、"));
+    check("序列帧任务有审核模式下拉", hasReviewModeSelect(acceptance.tree), modeOptions(acceptance.tree).join("、"));
+    const halfApproved = makeSequenceJob();
+    halfApproved.frames = { ...halfApproved.frames, approved: true };
+    check(
+      "已通过的步骤显示「已通过」",
+      collect(renderModule(SequenceModule, halfApproved, makeTasks()).tree, (node) => node.props?.className === "SPR_btn").map(textOf).includes("已通过")
+    );
   }
+}
+
+// ── 深链接：会话里点一下链接就切到插件页面 ──────────────────────────────
+//
+// 这一段测的是**真实链路**：装好的捕获阶段监听器 → 解析 href → 切面板 → 广播意图。
+// 模型在回复里贴的那条链接能不能用，全靠它。
+section("深链接");
+{
+  const test = bundle.__test ?? {};
+  check("测试把手导出深链接工具", typeof test.parseIntents === "function" && typeof test.subscribeIntent === "function", Object.keys(test).join("、"));
+  check("拦截器已装在 document 上", CLICK_LISTENERS.length >= 1, `${CLICK_LISTENERS.length} 个监听器`);
+
+  const click = CLICK_LISTENERS[0];
+  const link = `http://127.0.0.1:43120/?dsh-gmm=1&module=sprite&project=p1&stage=videos`;
+
+  const received = [];
+  const unsubscribe = test.subscribeIntent((intent) => received.push(intent));
+
+  const makeEvent = (href, overrides = {}) => {
+    const anchor = { getAttribute: (name) => (name === "href" ? href : null) };
+    return {
+      button: 0,
+      defaultPrevented: false,
+      metaKey: false,
+      ctrlKey: false,
+      shiftKey: false,
+      altKey: false,
+      target: { closest: (selector) => (selector === "a[href]" ? anchor : null) },
+      preventDefault() {
+        this.defaultPrevented = true;
+      },
+      stopPropagation() {
+        this.stopped = true;
+      },
+      ...overrides
+    };
+  };
+
+  const panelsBefore = SELECTED_PANELS.length;
+  const event = makeEvent(link);
+  click(event);
+  check("点击深链接被拦下（不跳转、不新开标签）", event.defaultPrevented === true && event.stopped === true, JSON.stringify({ prevented: event.defaultPrevented, stopped: event.stopped }));
+  check("切到了工作台面板", SELECTED_PANELS.length === panelsBefore + 1 && SELECTED_PANELS.at(-1) === bundle.GAME_STUDIO_PANEL_ID, SELECTED_PANELS.at(-1));
+  check("意图被广播出去", received.length === 1, JSON.stringify(received));
+  check(
+    "意图内容与链接一致",
+    JSON.stringify(received[0]) === JSON.stringify({ module: "sprite", projectId: "p1", stage: "videos" }),
+    JSON.stringify(received[0])
+  );
+
+  // 别的链接一律放行——拦错链接比不拦更糟。
+  const plain = makeEvent("https://example.com/");
+  click(plain);
+  check("没有 dsh-gmm 参数的链接放行", plain.defaultPrevented === false, String(plain.defaultPrevented));
+  const foreign = makeEvent("https://example.com/?utm=1");
+  click(foreign);
+  check("站外普通链接放行", foreign.defaultPrevented === false, String(foreign.defaultPrevented));
+  // 我们的匹配只看参数、不看 origin：宿主拼链接时未必知道浏览器真实 origin
+  // （可能被反代改写），所以换成别的 host 也必须照样切面板。
+  const receivedBefore = received.length;
+  click(makeEvent("http://192.168.1.9:43120/?dsh-gmm=1&module=image&job=i7"));
+  check(
+    "origin 不同但带我们的参数，仍按路径切面板",
+    received.length === receivedBefore + 1 && received.at(-1).jobId === "i7",
+    JSON.stringify(received.at(-1))
+  );
+
+  // 用户按 Ctrl / 中键想新开标签页时，不能抢走这次点击。
+  const ctrl = makeEvent(link, { ctrlKey: true });
+  click(ctrl);
+  check("Ctrl+点击交给浏览器新开标签", ctrl.defaultPrevented === false, String(ctrl.defaultPrevented));
+  const middle = makeEvent(link, { button: 1 });
+  click(middle);
+  check("中键点击交给浏览器", middle.defaultPrevented === false, String(middle.defaultPrevented));
+
+  unsubscribe();
+  const afterUnsubscribe = received.length;
+  click(makeEvent(link));
+  check("退订后不再收到意图", received.length === afterUnsubscribe, `${received.length}`);
+
+  // 直接以 /?dsh-gmm=… 打开（中键新开标签的兜底路径）：应用启动时读一次并清掉参数。
+  const bootstrapPanels = SELECTED_PANELS.length;
+  windowStub.location.search = "?dsh-gmm=1&module=sequence&job=s9";
+  windowStub.location.href = `http://127.0.0.1:43120/?dsh-gmm=1&module=sequence&job=s9`;
+  const bootstrapReceived = [];
+  const unsubscribeBootstrap = test.subscribeIntent((intent) => bootstrapReceived.push(intent));
+  // apply 时会执行 consumeUrlIntent（effect 在桩里是立即执行）。
+  bundle.apply(fakeCtx);
+  check("以深链接打开时会切面板", SELECTED_PANELS.length === bootstrapPanels + 1, `${SELECTED_PANELS.length}`);
+  check("地址栏里的参数被清掉", windowStub.location.search === "", windowStub.location.search);
+  unsubscribeBootstrap();
+  CLICK_LISTENERS.splice(0, CLICK_LISTENERS.length);
 }
 
 report();

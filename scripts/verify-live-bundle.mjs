@@ -82,13 +82,30 @@ if (process.env.DSH_VERIFY_DUMP === "1") {
   console.log(bundle.body.slice(-400));
 }
 // 最后一组标记是「这次改动是否已经在线上生效」的判别词：
-// 单方向「重新生成」视频必须把 regenerate 传给宿主（否则宿主会把已完成的方向
-// 当成已完成跳过，界面转一圈就结束，失败只留在日志里）。
-const markers = ["SPR_ovl", "usePendingTasks", "LoadingOverlay", "BusyBtn", "BusyBadge", "SPR_spinSm", "正在生成", "regenerate"];
+// ① 单方向「重新生成」视频必须把 regenerate 传给宿主（否则宿主会把已完成的方向
+//    当成已完成跳过，界面转一圈就结束，失败只留在日志里）。
+// ② 对话调用面那批改动：深链接参数名、origin 上报、审核模式。
+//    这几个字符串都直接来自源码字面量，改坏了这里一定失败。
+const markers = [
+  "SPR_ovl",
+  "usePendingTasks",
+  "LoadingOverlay",
+  "BusyBtn",
+  "BusyBadge",
+  "SPR_spinSm",
+  "正在生成",
+  "regenerate",
+  "dsh-gmm",
+  "reportClientOrigin",
+  "setReviewMode",
+  "每一步人工审核"
+];
 const missing = markers.filter((marker) => !bundle.body.includes(marker));
 for (const marker of markers) console.log(`  ${missing.includes(marker) ? "✗" : "✓"} ${marker}`);
 if (missing.length > 0) {
-  console.error(`运行中的宿主提供的束里缺少：${missing.join("、")} —— 浏览器刷新后看不到新反馈`);
+  console.error(`运行中的宿主提供的束里缺少：${missing.join("、")} —— 浏览器刷新后看不到新功能`);
+  console.error("浏览器半区是按磁盘上的 lib/client.js 现取的，所以只要浏览器刷新就该是新代码；");
+  console.error("宿主半区（工具注册 / 系统提示词 / 新远程方法）是启动时装入的，改完必须重启 DSH。");
   process.exit(1);
 }
-console.log("运行中的宿主正在提供带 loading 反馈的新浏览器束。");
+console.log("运行中的宿主正在提供新的浏览器束（刷新浏览器即可用上；宿主半区仍需重启 DSH）。");

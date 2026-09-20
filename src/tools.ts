@@ -1,0 +1,1124 @@
+/**
+ * 游戏素材大师 —— 对话调用面（模型工具）。
+ *
+ * 目标：**插件里的每个功能都能通过对话调用**，多步流程（八方向图这种）
+ * 让 agent 自己推进 / 等待 / 审查，也可以每一步停下来交给人验收。
+ *
+ * 工具分工：
+ *
+ * | 工具 | 作用 |
+ * |---|---|
+ * | `game_material_call` | 万能通道：45 个远程方法逐个可调，覆盖全部功能 |
+ * | `game_material_status` | 读一眼当前进度（项目 / 任务 / 阶段 / 是否有任务在跑） |
+ * | `game_material_wait` | 阻塞等待到「没有任务在跑」或超时，回来就是可审查状态 |
+ * | `game_material_review` | 出一个**验收包**：每个产物的绝对 URL、状态、通过标记、深链接 |
+ * | `game_material_approve` | 打「通过 / 取消通过」（八方向图按阶段+方位，图片按张，序列帧按步骤） |
+ *
+ * 几个刻意的设计：
+ *
+ * - **不新增业务逻辑**：工具只是 `GameStudioGateway` 上已有方法的编排层，
+ *   避免同一件事有两份实现（界面走远程服务，模型走工具，底层同一份代码）。
+ * - **结果里永远带 `openUrl`**：模型把这条链接贴给用户，用户点一下就把
+ *   Web GUI 切到插件对应页面验收。见 src/links.ts。
+ * - **不重复提交**：生成类调用照旧由宿主半区拦重复提交，工具层不再拦一次
+ *   （两层拦截会让报错信息变得莫名其妙）。
+ */
+
+import type { GameStudioGateway } from "./index.js";
+import { readFile, stat } from "node:fs/promises";
+import { basename, resolve } from "node:path";
+import { DIRECTION_KEYS, directionOf } from "./directions.js";
+import { listJobs } from "./pipeline.js";
+import { listProjects, readProject } from "./store.js";
+import { listImageJobs, readImageJob, sniffImage } from "./imagegen.js";
+import { listSequenceJobs, readSequenceJob, listSequenceTasks } from "./seqgen.js";
+import { TOOL_METHODS } from "./wire.js";
+import { PANEL_KEY, buildOpenLink, originForLinks, type OpenIntent } from "./links.js";
+
+/** 三个模块的 key 与界面里的模块 key 完全一致。 */
+const MODULES = ["sprite", "image", "sequence"] as const;
+type ModuleKey = (typeof MODULES)[number];
+
+/** 工具名统一前缀，避免和别家插件撞名。 */
+const PREFIX = "game_material_";
+
+/** 远程资源路由前缀，与 index.ts 的 ROUTE_PREFIX 一致。 */
+const ROUTE_PREFIX = "/dsh-game-material-master";
+
+/** 输出 schema：工具返回值是不定形的 JSON，这里只约束到「对象」。 */
+const OBJECT_SCHEMA = { type: "object", additionalProperties: true } as const;
+
+const textBlocks = (text: string) => [{ type: "text", text }];
+const asRecord = (value: unknown): Record<string, any> =>
+  value !== null && typeof value === "object" ? (value as Record<string, any>) : {};
+const asString = (value: unknown, fallback = ""): string => (typeof value === "string" ? value : fallback);
+const clampInt = (value: unknown, fallback: number, min: number, max: number): number => {
+  const n = typeof value === "number" ? value : Number.parseFloat(String(value ?? ""));
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(n)));
+};
+
+function moduleOf(value: unknown): ModuleKey | undefined {
+  return typeof value === "string" && (MODULES as readonly string[]).includes(value) ? (value as ModuleKey) : undefined;
+}
+
+/** 任务 id 前缀决定它属于哪个模块（p… / i… / s…）。 */
+export function moduleForId(id: string): ModuleKey | undefined {
+  if (/^p[a-z0-9]+$/.test(id)) return "sprite";
+  if (/^i[a-z0-9]+$/.test(id)) return "image";
+  if (/^s[a-z0-9]+$/.test(id)) return "sequence";
+  return undefined;
+}
+
+/** 产物相对路径 → 浏览器可直接打开的绝对 URL。 */
+function assetUrl(assetBase: string, relative: string | undefined): string | undefined {
+  if (typeof relative !== "string" || relative === "") return undefined;
+  return `${originForLinks()}${assetBase}${relative}`;
+}
+
+// ── 三份「状态快照」 ────────────────────────────────────────────────────
+// 每份都返回纯 JSON：给模型看的是**判断所需的最小字段**，不是整个 project.json。
+
+interface DirectionCell {
+  direction: string;
+  label: string;
+  status: string;
+  approved: boolean;
+  stale: boolean;
+  file?: string;
+  url?: string;
+  error?: string;
+}
+
+function cellsOf(
+  nodes: Record<string, any>,
+  assetBase: string,
+  pick: (node: any) => { file?: string; url?: string; extra?: Record<string, unknown> }
+): DirectionCell[] {
+  return DIRECTION_KEYS.map((key) => {
+    const node = nodes?.[key] ?? {};
+    const picked = pick(node);
+    return {
+      direction: key,
+      label: directionOf(key)?.label ?? key,
+      status: String(node.status ?? "empty"),
+      approved: node.approved === true,
+      stale: node.stale === true,
+      file: picked.file,
+      url: picked.url ?? assetUrl(assetBase, picked.file),
+      ...(picked.extra ?? {}),
+      ...(typeof node.error === "string" && node.error !== "" ? { error: node.error } : {})
+    };
+  });
+}
+
+function spriteSnapshot(project: any) {
+  const assetBase = `${ROUTE_PREFIX}/assets/${project.id}/`;
+  const busy = DIRECTION_KEYS.some(
+    (key) =>
+      project.images?.[key]?.status === "running" ||
+      project.videos?.[key]?.status === "running" ||
+      project.frames?.[key]?.status === "running"
+  ) || project.sheet?.status === "running";
+  const count = (cells: DirectionCell[], status: string) => cells.filter((cell) => cell.status === status).length;
+  const approved = (cells: DirectionCell[]) => cells.filter((cell) => cell.approved).length;
+
+  const images = cellsOf(project.images, assetBase, (node) => ({ file: node.file }));
+  const videos = cellsOf(project.videos, assetBase, (node) => ({ file: node.file }));
+  const frames = cellsOf(project.frames, assetBase, (node) => ({ file: node.strip, extra: { frameCount: node.frames?.length ?? 0 } }));
+  const sheetCell: DirectionCell[] = [
+    {
+      direction: "sheet",
+      label: "整图",
+      status: String(project.sheet?.status ?? "empty"),
+      approved: project.sheet?.approved === true,
+      stale: false,
+      file: project.sheet?.file,
+      url: assetUrl(assetBase, project.sheet?.file),
+      ...(typeof project.sheet?.error === "string" && project.sheet.error !== "" ? { error: project.sheet.error } : {})
+    }
+  ];
+
+  return {
+    module: "sprite" as const,
+    id: project.id,
+    name: project.name,
+    sourceFile: project.source?.file ?? null,
+    reviewMode: project.reviewMode ?? null,
+    busy,
+    stages: [
+      { stage: "images", title: "① 八方向绿幕图", ready: count(images, "ready"), running: count(images, "running"), error: count(images, "error"), approved: approved(images), total: 8, cells: images },
+      { stage: "videos", title: "② 行走动作视频", ready: count(videos, "ready"), running: count(videos, "running"), error: count(videos, "error"), approved: approved(videos), total: 8, cells: videos },
+      { stage: "frames", title: "③ 提取序列帧", ready: count(frames, "ready"), running: count(frames, "running"), error: count(frames, "error"), approved: approved(frames), total: 8, cells: frames },
+      { stage: "sheet", title: "④ 抠绿幕合成整图", ready: sheetCell[0].status === "ready" ? 1 : 0, running: sheetCell[0].status === "running" ? 1 : 0, error: sheetCell[0].status === "error" ? 1 : 0, approved: sheetCell[0].approved ? 1 : 0, total: 1, cells: sheetCell }
+    ],
+    settings: {
+      cellWidth: project.settings?.cellWidth,
+      cellHeight: project.settings?.cellHeight,
+      frameCount: project.settings?.frameCount,
+      pixelSize: project.settings?.pixelSize,
+      rowOrder: project.settings?.rowOrder
+    },
+    prompts: {
+      video: project.prompts?.video,
+      suffix: project.prompts?.suffix ?? "",
+      images: project.prompts?.images
+    },
+    runningTasks: listJobs(project.id),
+    logTail: Array.isArray(project.log) ? project.log.slice(-6).map((entry: any) => `${entry.level}: ${entry.message}`) : []
+  };
+}
+
+function imageSnapshot(job: any) {
+  const assetBase = `${ROUTE_PREFIX}/image-assets/${job.id}/`;
+  const items = (job.items ?? []).map((item: any) => ({
+    index: item.index,
+    status: item.status,
+    approved: item.approved === true,
+    source: item.source,
+    file: item.file,
+    url: assetUrl(assetBase, item.file),
+    keyedFile: item.keyedFile,
+    keyedUrl: assetUrl(assetBase, item.keyedFile),
+    backgroundFraction: item.backgroundFraction,
+    ...(typeof item.error === "string" && item.error !== "" ? { error: item.error } : {})
+  }));
+  return {
+    module: "image" as const,
+    id: job.id,
+    name: job.name,
+    reviewMode: job.reviewMode ?? null,
+    busy: items.some((item: any) => item.status === "running"),
+    prompt: job.prompt,
+    suffix: job.suffix,
+    refs: (job.refs ?? []).map((ref: any) => ref.file),
+    settings: job.settings,
+    keying: job.keying,
+    items,
+    review: {
+      ready: items.filter((item: any) => item.status === "ready").length,
+      approved: items.filter((item: any) => item.approved).length,
+      error: items.filter((item: any) => item.status === "error").length
+    }
+  };
+}
+
+function sequenceSnapshot(job: any) {
+  const assetBase = `${ROUTE_PREFIX}/sequence-assets/${job.id}/`;
+  const steps = [
+    { step: "video", title: "① 生成视频", status: job.video?.status, approved: job.video?.approved === true, url: assetUrl(assetBase, job.video?.file), error: job.video?.error },
+    { step: "frames", title: "② 抽帧 + 抠像", status: job.frames?.status, approved: job.frames?.approved === true, files: (job.frames?.files ?? []).map((file: string) => assetUrl(assetBase, file)), keyed: (job.frames?.keyed ?? []).map((file: string) => assetUrl(assetBase, file)), stale: job.frames?.stale === true, error: job.frames?.error },
+    { step: "sheet", title: "③ 横向合成条图", status: job.sheet?.status, approved: job.sheet?.approved === true, url: assetUrl(assetBase, job.sheet?.file), error: job.sheet?.error }
+  ];
+  return {
+    module: "sequence" as const,
+    id: job.id,
+    name: job.name,
+    mode: job.mode,
+    reviewMode: job.reviewMode ?? null,
+    prompt: job.prompt,
+    suffix: job.suffix,
+    refs: {
+      firstFrame: job.refs?.firstFrame?.file ?? null,
+      lastFrame: job.refs?.lastFrame?.file ?? null,
+      referenceImages: (job.refs?.referenceImages ?? []).length,
+      referenceVideos: (job.refs?.referenceVideos ?? []).length
+    },
+    busy: steps.some((step) => step.status === "running"),
+    settings: job.settings,
+    keying: job.keying,
+    steps,
+    runningTasks: listSequenceTasks(job.id)
+  };
+}
+
+/** 读一个目标（项目 / 图片任务 / 序列帧任务）的快照。 */
+async function snapshotOf(module: ModuleKey, id: string): Promise<any> {
+  if (module === "sprite") {
+    const project = await readProject(id);
+    if (project === undefined) throw new Error(`找不到八方向图项目：${id}`);
+    return spriteSnapshot(project);
+  }
+  if (module === "image") {
+    const job = await readImageJob(id);
+    if (job === undefined) throw new Error(`找不到图片任务：${id}`);
+    return imageSnapshot(job);
+  }
+  const job = await readSequenceJob(id);
+  if (job === undefined) throw new Error(`找不到序列帧任务：${id}`);
+  return sequenceSnapshot(job);
+}
+
+/** 猜一个目标属于哪个模块：显式声明优先，其次按 id 前缀。 */
+function resolveTarget(module: unknown, id: string): ModuleKey {
+  const declared = moduleOf(module);
+  if (declared !== undefined) return declared;
+  const guessed = moduleForId(id);
+  if (guessed === undefined) throw new Error(`无法判断 "${id}" 属于哪个模块，请显式给 module`);
+  return guessed;
+}
+
+/** 目标 → 深链接意图。 */
+function intentOf(module: ModuleKey, id: string, extra: { stage?: string; direction?: string } = {}): OpenIntent {
+  if (module === "sprite") return { module, projectId: id, ...extra };
+  return { module, jobId: id, ...extra };
+}
+
+/** 结果里统一带上的「打开界面」信息。 */
+function openInfo(intent: OpenIntent, hint: string) {
+  return { panel: PANEL_KEY, openUrl: buildOpenLink(intent), openHint: hint };
+}
+
+/**
+ * 从一次远程调用的入参里推断该打开哪个界面。
+ * 推断不出来（例如 listProjects）就不给链接，免得把用户带到一个空页面上。
+ */
+function intentFromCall(method: string, payload: Record<string, any>): OpenIntent | undefined {
+  const projectId = asString(payload.projectId);
+  const jobId = asString(payload.jobId);
+  const stage = typeof payload.stage === "string" ? payload.stage : undefined;
+  if (projectId !== "") return { module: "sprite", projectId, stage };
+  if (jobId !== "") {
+    const module = moduleForId(jobId);
+    return module === undefined ? undefined : { module, jobId };
+  }
+  if (method.startsWith("listImageJob") || method.startsWith("createImageJob")) return { module: "image" };
+  if (method.startsWith("listSequenceJob") || method.startsWith("createSequenceJob")) return { module: "sequence" };
+  if (method.startsWith("listProject") || method.startsWith("createProject")) return { module: "sprite" };
+  return undefined;
+}
+
+// ── 工具注册 ────────────────────────────────────────────────────────────
+
+/** `game_material_call` 的描述：把 45 个方法的用途与入参写清楚。 */
+const CALL_DESCRIPTION = [
+  "调用「游戏素材大师」插件的任意远程方法——插件界面上的每个功能都能在这里调用。",
+  "配置：getConfig() / saveConfig(payload: 任意配置字段，如 arkApiKey、arkModel、minimaxModel、cellWidth…) / testArk() / testMinimax()",
+  "八方向图：listProjects() / createProject({name}) / getProject({projectId}) / deleteProject({projectId}) / renameProject({projectId,name}) /",
+  "  uploadSource({projectId,name,data:base64}) / savePrompts({projectId,images?,video?,videoPerDirection?,suffix?,resetImagesToDefault?,resetVideoToDefault?}) /",
+  "  saveSettings({projectId,settings}) / setApproved({projectId,stage:images|videos|frames|sheet,key?,approved}) / revealProject({projectId}) /",
+  "  runImage({projectId,key,prompt?}) / runImages({projectId,force?}) / runVideos({projectId,keys?,regenerate?}) / pollVideos({projectId}) /",
+  "  clearVideos({projectId,keys?}) / runFrames({projectId,keys?}) / rekey({projectId}) / compose({projectId})",
+  "图片生成：listImageJobs() / createImageJob({name}) / getImageJob({jobId}) / deleteImageJob({jobId}) /",
+  "  saveImageJob({jobId,name?,prompt?,suffix?,settings?,keying?,approved?,index?}) / uploadImageRef({jobId,name,data}) / removeImageRef({jobId,file}) /",
+  "  addImageItem({jobId,name,data}) / removeImageItem({jobId,index}) / runImageJob({jobId,count?}) / keyImageJob({jobId})",
+  "序列帧：listSequenceJobs() / createSequenceJob({name}) / getSequenceJob({jobId}) / deleteSequenceJob({jobId}) /",
+  "  saveSequenceJob({jobId,name?,mode?,prompt?,suffix?,settings?,keying?,approved?,step?}) / uploadSequenceRef({jobId,kind:firstFrame|lastFrame|referenceImage|referenceVideo,name,data}) /",
+  "  removeSequenceRef({jobId,kind,file?}) / runSequenceVideo({jobId}) / pollSequenceVideo({jobId}) / clearSequenceVideo({jobId}) /",
+  "  runSequenceFrames({jobId,count?}) / keySequenceFrames({jobId}) / composeSequence({jobId})",
+  "说明：key 是方向英文字面量（front/back/downLeft/downRight/upLeft/upRight/left/right）；data 是原始文件字节的 base64（不带 data: 前缀）；",
+  "生成类方法立刻返回 {started:true}，接着用 game_material_wait 等它跑完，再用 game_material_review 拿验收包。",
+  "调用结果里若带 openUrl，请把它作为 Markdown 链接贴给用户，用户点击即切换到插件对应页面。"
+].join("\n");
+
+export interface StudioToolHost {
+  /** 模型工具服务；缺失时不注册（例如最小化的测试组合）。 */
+  tools?: { register: (definition: any) => () => void };
+  /** 系统提示词服务；缺失时不注册工作流说明。 */
+  systemPrompt?: { section: (section: { name: string; order: number; text: string }) => () => void };
+}
+
+/**
+ * 注册对话调用面。
+ *
+ * @param host - 可选服务（tools / systemPrompt）
+ * @param gateway - 已经注册成 typert 远程服务的网关实例，工具直接复用它的方法
+ * @returns 每个贡献的 disposer 列表（按注册顺序）
+ */
+export function registerStudioTools(host: StudioToolHost, gateway: GameStudioGateway): Array<() => void> {
+  const disposers: Array<() => void> = [];
+  const tools = host.tools;
+
+  /** 统一的注册包装：把 output schema 与 render 固定下来。 */
+  const register = (definition: Record<string, any>): void => {
+    if (tools === undefined) return;
+    disposers.push(tools.register(definition));
+  };
+
+  if (tools !== undefined) {
+    register({
+      name: `${PREFIX}call`,
+      description: CALL_DESCRIPTION,
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          method: { type: "string", enum: TOOL_METHODS.map((entry) => entry.method), description: "要调用的远程方法名。" },
+          payload: { type: "object", additionalProperties: true, description: "方法入参对象；无参方法可省略。" }
+        },
+        required: ["method"]
+      },
+      output: {
+        schema: OBJECT_SCHEMA,
+        render: (_args: unknown, value: any) => textBlocks(renderCallResult(value))
+      },
+      async execute(args: any) {
+        const method = asString(args?.method);
+        const spec = TOOL_METHODS.find((entry) => entry.method === method);
+        if (spec === undefined) throw new Error(`未知方法：${method}`);
+        const payload = args?.payload === undefined ? undefined : asRecord(args.payload);
+        if (spec.payload && payload === undefined) throw new Error(`${method} 需要一个 payload 对象`);
+        if (!spec.payload && payload !== undefined && Object.keys(payload).length > 0) {
+          throw new Error(`${method} 不接受 payload`);
+        }
+        const fn = (gateway as any)[method];
+        if (typeof fn !== "function") throw new Error(`方法未实现：${method}`);
+        let value: unknown;
+        try {
+          value = payload === undefined ? await fn.call(gateway) : await fn.call(gateway, payload);
+        } catch (error) {
+          throw new Error(`${method} 调用失败：${error instanceof Error ? error.message : String(error)}`);
+        }
+        const result: Record<string, any> = { method, ok: true, value: value ?? null };
+        const intent = intentFromCall(method, payload ?? {});
+        if (intent !== undefined) Object.assign(result, openInfo(intent, "点开可以看到这一步的实际产物并打「通过」"));
+        return result;
+      }
+    });
+
+    register({
+      name: `${PREFIX}status`,
+      description: [
+        "看一眼「游戏素材大师」的当前进度。",
+        "不给 id 时列出全部项目 / 图片任务 / 序列帧任务；给了 id 就返回该目标的阶段进度、每个产物的状态与绝对 URL、是否有任务在跑。",
+        "任何时候想确认「现在该做哪一步」都先调它。返回值里的 openUrl 请以 Markdown 链接贴给用户。"
+      ].join("\n"),
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          module: { type: "string", enum: [...MODULES], description: "目标所属模块；给了 id 时可省略，宿主按 id 前缀判断。" },
+          id: { type: "string", description: "项目 id（p…）/ 图片任务 id（i…）/ 序列帧任务 id（s…）。" }
+        }
+      },
+      output: { schema: OBJECT_SCHEMA, render: (_args: unknown, value: any) => textBlocks(renderStatus(value)) },
+      async execute(args: any) {
+        const id = asString(args?.id);
+        if (id === "") {
+          const [projects, images, sequences] = await Promise.all([listProjects(), listImageJobs(), listSequenceJobs()]);
+          return {
+            module: moduleOf(args?.module) ?? null,
+            projects,
+            imageJobs: images,
+            sequenceJobs: sequences,
+            links: {
+              sprite: buildOpenLink({ module: "sprite" }),
+              image: buildOpenLink({ module: "image" }),
+              sequence: buildOpenLink({ module: "sequence" })
+            },
+            hint: "用 game_material_status({module,id}) 看某个目标的细节；八方向图的四步是 images → videos → frames → sheet。"
+          };
+        }
+        const module = resolveTarget(args?.module, id);
+        const snapshot = await snapshotOf(module, id);
+        const stage = typeof args?.stage === "string" ? args.stage : undefined;
+        return { ...snapshot, ...openInfo(intentOf(module, id, { stage }), "点开可以看到产物并打「通过」") };
+      }
+    });
+
+    register({
+      name: `${PREFIX}intake`,
+      description: [
+        "【固定流程第 0 步】用户一说要用「游戏素材大师」的某个功能，先调它，再动手。",
+        "返回三样东西：① `blockers` —— 必须先解决的阻塞（例如还没配 API Key）；② `questions` —— 用户还没告知的关键参数，逐条问；",
+        "③ `reviewModeQuestion` —— 必须问清楚「自动审核结果」还是「每一步人工审核」。",
+        "在 `questions` 与 `reviewModeQuestion` 都得到用户答复之前，**不要**调用任何生成类 / 删除类方法。",
+        "用户答复后：用 `game_material_reviewMode` 把审核模式记下来，用 `game_material_call` 把参数写进目标，再开始生成。",
+        "已经明确告知过的参数不用重复问——只问这个工具列出来的、且用户确实没说的。"
+      ].join("\n"),
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          module: { type: "string", enum: [...MODULES], description: "用户想用的是哪个模块。" },
+          id: { type: "string", description: "已有目标的 id（想在它基础上继续时给）。" },
+          told: {
+            type: "array",
+            items: { type: "string" },
+            description: "用户已经明确告知过的参数名（如 prompt、count、mode、direction），这些不再重复问。"
+          }
+        },
+        required: ["module"]
+      },
+      output: { schema: OBJECT_SCHEMA, render: (_args: unknown, value: any) => textBlocks(renderIntake(value)) },
+      async execute(args: any) {
+        const module = moduleOf(args?.module);
+        if (module === undefined) throw new Error(`未知模块：${String(args?.module)}`);
+        const id = asString(args?.id);
+        const told = new Set<string>(Array.isArray(args?.told) ? args.told.map((entry: unknown) => String(entry)) : []);
+        const config = await (gateway as any).getConfig();
+        // 已有目标时先读它的真实状态：源图 / 提示词 / 素材已经在的项目里就不再问一遍。
+        const target = id === "" ? undefined : await snapshotOf(module, id);
+        return intakeFor(module, id, told, config, target);
+      }
+    });
+
+    register({
+      name: `${PREFIX}upload`,
+      description: [
+        "把本机文件上传进「游戏素材大师」——界面上那些「上传」框的对话等价物。",
+        "参数 `path` 是文件的绝对路径或相对当前工作目录的路径，宿主自己读盘，**不要把 base64 贴进来**。",
+        "kind 取值：sprite=source（源设定图）；image=ref（参考图，最多 10 张）| item（直接加一张图，只做抠像用）；",
+        "sequence=firstFrame | lastFrame | referenceImage | referenceVideo。",
+        "限制：图片 ≤30MB，参考视频 ≤40MB（平台请求体上限 64MB），图片类型按文件头嗅探。"
+      ].join("\n"),
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          module: { type: "string", enum: [...MODULES], description: "目标所属模块。" },
+          id: { type: "string", description: "项目 id（p…）或任务 id（i… / s…）。" },
+          kind: { type: "string", enum: ["source", "ref", "item", "firstFrame", "lastFrame", "referenceImage", "referenceVideo"], description: "上传到哪个槽位。" },
+          path: { type: "string", description: "本机文件路径。" },
+          name: { type: "string", description: "可选：展示用的文件名。" }
+        },
+        required: ["module", "id", "kind", "path"]
+      },
+      output: { schema: OBJECT_SCHEMA, render: (_args: unknown, value: any) => textBlocks(renderUpload(value)) },
+      async execute(args: any) {
+        const module = moduleOf(args?.module);
+        if (module === undefined) throw new Error(`未知模块：${String(args?.module)}`);
+        const id = asString(args?.id);
+        const kind = asString(args?.kind);
+        const path = asString(args?.path);
+        if (path === "") throw new Error("path 不能为空");
+        return uploadFromPath(gateway, module, id, kind, path, asString(args?.name) || undefined);
+      }
+    });
+
+    register({
+      name: `${PREFIX}reviewMode`,
+      description: [
+        "记录用户选的审核模式（固定流程必问项之一）：`auto` = agent 自己审完结果就往下走；`manual` = 每一步产出后停下来等用户打「通过」。",
+        "记在目标自己身上，之后每一轮都按它走，不必再问。重复调用即改选。",
+        "用户明确说「自动跑完就行」→ auto；说「每步我看一下 / 我要审核」→ manual。用户没表态就不要猜，先问。"
+      ].join("\n"),
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          module: { type: "string", enum: [...MODULES], description: "目标所属模块。" },
+          id: { type: "string", description: "项目 id（p…）或任务 id（i… / s…）。" },
+          reviewMode: { type: "string", enum: ["auto", "manual"], description: "审核模式。" }
+        },
+        required: ["module", "id", "reviewMode"]
+      },
+      output: { schema: OBJECT_SCHEMA, render: (_args: unknown, value: any) => textBlocks(renderReviewMode(value)) },
+      async execute(args: any) {
+        const module = moduleOf(args?.module);
+        if (module === undefined) throw new Error(`未知模块：${String(args?.module)}`);
+        const result = await (gateway as any).setReviewMode({
+          module,
+          id: asString(args?.id),
+          reviewMode: asString(args?.reviewMode)
+        });
+        return { ...result, ...openInfo(intentOf(module, asString(args?.id)), "点开看验收结果") };
+      }
+    });
+
+    register({
+      name: `${PREFIX}wait`,
+      description: [
+        "等待某个目标跑完当前这一步。",
+        "每 1.5 秒读一次状态，直到「没有任务在跑」或超时；返回等待结束时的完整状态（含 openUrl 与验收信息）。",
+        "生成类调用（runImages / runVideos / runFrames / compose / runImageJob / runSequenceVideo …）之后紧接着调它，",
+        "拿到 settled=true 再判断下一步。超时不算失败——超时后可以再调一次，或先把 openUrl 贴给用户。",
+        "注意：等待期间不要同时提交同一个目标的新任务，重复提交会被宿主拒绝。"
+      ].join("\n"),
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          module: { type: "string", enum: [...MODULES], description: "目标所属模块；可省略，按 id 前缀判断。" },
+          id: { type: "string", description: "项目 id（p…）/ 图片任务 id（i…）/ 序列帧任务 id（s…）。" },
+          timeoutSeconds: { type: "integer", description: "最长等待秒数，默认 120，上限 900。超时后返回当前状态。" }
+        },
+        required: ["id"]
+      },
+      output: { schema: OBJECT_SCHEMA, render: (_args: unknown, value: any) => textBlocks(renderWait(value)) },
+      async execute(args: any, exec: any) {
+        const id = asString(args?.id);
+        if (id === "") throw new Error("id 不能为空");
+        const module = resolveTarget(args?.module, id);
+        const timeoutMs = clampInt(args?.timeoutSeconds, 120, 1, 900) * 1000;
+        const startedAt = Date.now();
+        let snapshot = await snapshotOf(module, id);
+        while (snapshot.busy === true && Date.now() - startedAt < timeoutMs) {
+          exec?.signal?.throwIfAborted?.();
+          await sleep(1500, exec?.signal);
+          snapshot = await snapshotOf(module, id);
+        }
+        const settled = snapshot.busy !== true;
+        return {
+          settled,
+          timedOut: !settled,
+          elapsedMs: Date.now() - startedAt,
+          ...snapshot,
+          ...openInfo(intentOf(module, id), "点开可以看到产物并打「通过」")
+        };
+      }
+    });
+
+    register({
+      name: `${PREFIX}review`,
+      description: [
+        "出验收包：把某一步的每个产物连成可直接打开的绝对 URL，附状态、通过标记与报错，再给出建议的下一步。",
+        "用户说「我看看」「验收一下」时用它，然后把 openUrl 以 Markdown 链接贴给用户，用户点击即切到插件对应页面。",
+        "用自己的判断验收时：逐项看 status 与 error，全部 ready 才继续下一步；有 error 就按 hint 里的方法重跑那一步。",
+        "阶段约定：八方向图 stage=images|videos|frames|sheet；图片/序列帧任务只看某一个产物时用 index / step 过滤。"
+      ].join("\n"),
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          module: { type: "string", enum: [...MODULES], description: "目标所属模块；可省略，按 id 前缀判断。" },
+          id: { type: "string", description: "项目 id（p…）/ 图片任务 id（i…）/ 序列帧任务 id（s…）。" },
+          stage: { type: "string", enum: ["images", "videos", "frames", "sheet"], description: "八方向图专用：只看某一个阶段。" },
+          direction: { type: "string", description: "八方向图专用：只看某一个方位（front/back/…）。" },
+          index: { type: "integer", description: "图片任务专用：只看第几张（从 0 开始）。" },
+          step: { type: "string", enum: ["video", "frames", "sheet"], description: "序列帧任务专用：只看某一步。" }
+        },
+        required: ["id"]
+      },
+      output: { schema: OBJECT_SCHEMA, render: (_args: unknown, value: any) => textBlocks(renderReview(value)) },
+      async execute(args: any) {
+        const id = asString(args?.id);
+        if (id === "") throw new Error("id 不能为空");
+        const module = resolveTarget(args?.module, id);
+        const snapshot = await snapshotOf(module, id);
+        const stage = typeof args?.stage === "string" ? args.stage : undefined;
+        const direction = typeof args?.direction === "string" ? args.direction : undefined;
+        const index = args?.index === undefined ? undefined : clampInt(args.index, 0, 0, 99);
+        const step = typeof args?.step === "string" ? args.step : undefined;
+
+        const packet: Record<string, any> = {
+          module,
+          id,
+          name: snapshot.name,
+          busy: snapshot.busy === true,
+          ...openInfo(intentOf(module, id, { stage, direction }), "点开直接看产物并打「通过」")
+        };
+
+        if (module === "sprite") {
+          const stages = (snapshot.stages as any[]).filter((entry) => stage === undefined || entry.stage === stage);
+          if (stages.length === 0) throw new Error(`未知阶段：${stage}`);
+          packet.stages = stages.map((entry) => ({
+            ...entry,
+            cells: entry.cells.filter((cell: any) => direction === undefined || cell.direction === direction)
+          }));
+          packet.nextActions = spriteNextActions(snapshot, stage, direction);
+        } else if (module === "image") {
+          const items = (snapshot.items as any[]).filter((item) => index === undefined || item.index === index);
+          if (items.length === 0) throw new Error(index === undefined ? "这个任务还没有产物" : `没有第 ${index} 张`);
+          packet.items = items;
+          packet.nextActions = imageNextActions(snapshot);
+        } else {
+          const steps = (snapshot.steps as any[]).filter((entry) => step === undefined || entry.step === step);
+          if (steps.length === 0) throw new Error(`未知步骤：${step}`);
+          packet.steps = steps;
+          packet.nextActions = sequenceNextActions(snapshot);
+        }
+        return packet;
+      }
+    });
+
+    register({
+      name: `${PREFIX}approve`,
+      description: [
+        "给某一步的产物打「通过」或取消通过（等价于界面上的验收按钮）。",
+        "只有在用户明确说「这步可以」「通过」时才自动调用；用户要求逐步确认时，先贴 openUrl 停下来等回复。",
+        "八方向图：module=sprite，id=项目 id，stage=images|videos|frames|sheet，key 可只对某个方位生效（省略即整阶段）。",
+        "图片任务：module=image，id=任务 id，index 可只对某一张生效（省略即全任务）。",
+        "序列帧：module=sequence，id=任务 id，step=video|frames|sheet（省略即全部三步）。"
+      ].join("\n"),
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          module: { type: "string", enum: [...MODULES], description: "目标所属模块；可省略，按 id 前缀判断。" },
+          id: { type: "string", description: "项目 / 任务 id。" },
+          stage: { type: "string", enum: ["images", "videos", "frames", "sheet"], description: "八方向图：阶段。" },
+          key: { type: "string", description: "八方向图：只对某个方位生效（front/back/…）。" },
+          index: { type: "integer", description: "图片任务：只对某一张生效。" },
+          step: { type: "string", enum: ["video", "frames", "sheet"], description: "序列帧：只对某一步生效。" },
+          approved: { type: "boolean", description: "true = 通过，false = 取消通过。" }
+        },
+        required: ["id", "approved"]
+      },
+      output: { schema: OBJECT_SCHEMA, render: (_args: unknown, value: any) => textBlocks(renderApprove(value)) },
+      async execute(args: any) {
+        const id = asString(args?.id);
+        if (id === "") throw new Error("id 不能为空");
+        if (typeof args?.approved !== "boolean") throw new Error("approved 必须是布尔值");
+        const module = resolveTarget(args?.module, id);
+        const approved = args.approved === true;
+
+        if (module === "sprite") {
+          const stage = asString(args?.stage, "images");
+          if (!["images", "videos", "frames", "sheet"].includes(stage)) throw new Error(`未知阶段：${stage}`);
+          const key = asString(args?.key) || undefined;
+          if (key !== undefined && directionOf(key) === undefined) throw new Error(`未知方位：${key}`);
+          await (gateway as any).setApproved({ projectId: id, stage, key, approved });
+          return { module, id, stage, key: key ?? null, approved, ...openInfo({ module, projectId: id, stage }, "点开看验收结果") };
+        }
+
+        if (module === "image") {
+          const job = await readImageJob(id);
+          if (job === undefined) throw new Error(`找不到图片任务：${id}`);
+          const index = args?.index === undefined ? undefined : clampInt(args.index, 0, 0, 99);
+          const targets = (job.items ?? []).filter((item) => index === undefined || item.index === index);
+          if (targets.length === 0) throw new Error(index === undefined ? "这个任务还没有产物" : `没有第 ${index} 张`);
+          // 走 saveImageJob 而不是直接写文件：生图模型是全局设置，保存时由宿主对齐当前模型。
+          await (gateway as any).saveImageJob(index === undefined ? { jobId: id, approved } : { jobId: id, approved, index });
+          return { module, id, index: index ?? null, approved, count: targets.length, ...openInfo({ module: "image", jobId: id }, "点开看验收结果") };
+        }
+
+        const job = await readSequenceJob(id);
+        if (job === undefined) throw new Error(`找不到序列帧任务：${id}`);
+        const step = asString(args?.step) || undefined;
+        if (step !== undefined && !["video", "frames", "sheet"].includes(step)) throw new Error(`未知步骤：${step}`);
+        await (gateway as any).saveSequenceJob(step === undefined ? { jobId: id, approved } : { jobId: id, approved, step });
+        return { module, id, step: step ?? null, approved, ...openInfo({ module: "sequence", jobId: id }, "点开看验收结果") };
+      }
+    });
+  }
+
+  const systemPrompt = host.systemPrompt;
+  if (systemPrompt !== undefined) {
+    disposers.push(
+      systemPrompt.section({
+        name: "game-material-master",
+        order: 8600,
+        text: PROMPT_SECTION
+      })
+    );
+  }
+
+  return disposers;
+}
+
+const PROMPT_SECTION = [
+  "## 游戏素材大师（game-material-master）",
+  "本机已挂载「游戏素材大师」插件：八方向图生成 / 图片生成 / 序列帧生成三个模块，界面在侧栏「游戏素材大师」面板。",
+  "工具：`game_material_intake`（固定流程第 0 步）、`game_material_call`（万能通道，插件全部方法）、`game_material_upload`（按路径上传素材）、",
+  "`game_material_reviewMode`、`game_material_status`、`game_material_wait`、`game_material_review`、`game_material_approve`。",
+  "一律走这些工具，不要用 bash/shell 直接改 `<DSH_HOME>/game-material-master/` 下的 JSON——那会绕过宿主的复用与校验。",
+  "",
+  "### 固定流程（必须按这个顺序走）",
+  "第 0 步 · 先问，再动手：用户一说要用某个功能，**先调用 `game_material_intake`**，把它返回的 `questions` 逐条问清楚，",
+  "并且**必须问同一个问题**：「结果要自动审核，还是每一步人工审核？」——两者合并成一次提问，不要挤牙膏式地一问一停。",
+  "在关键参数与审核模式都拿到答复之前，**不要调用任何生成类 / 删除类方法**。",
+  "用户已经明确告知过的参数不必重复问；答复用 `game_material_call` 写进目标，审核模式用 `game_material_reviewMode` 记下来。",
+  "第 1 步 · 逐阶段推进：八方向图是 images → videos → frames → sheet；图片生成是 prompt → runImageJob → keyImageJob；",
+  "序列帧是 video → frames → sheet。每次提交类调用之后**立刻** `game_material_wait`。",
+  "第 2 步 · 每步都要审：`game_material_review` 拿验收包，逐项看 status / error / 绝对 URL。",
+  "第 3 步 · 按审核模式分岔：`auto` → 自己判断没问题就 `game_material_approve` 打通过并进入下一步；",
+  "`manual` → 贴出 openUrl 并**停下等用户回复**，只有用户明确说「通过 / 可以」才 `game_material_approve` 并继续。",
+  "失败只重跑失败的那一项（`runImage` / `runVideos({regenerate:true, keys:[…]})` / `runFrames({keys:[…]})`），不要整批重来。",
+  "",
+  "### 验收链接",
+  "`game_material_intake` / `status` / `wait` / `review` / `upload` 等返回的 `openUrl` 是给用户点的深链接。",
+  "输出时必须原样写成 Markdown 链接（例如 `[查看第 2 步验收](http://…/?dsh-gmm=1&module=sprite&project=…&stage=videos)`）；",
+  "用户点击后界面会原地切到插件对应页面。不要改写成裸文本，也不要自己编 URL。",
+  "`manual` 模式下每完成一步都要贴一次；`auto` 模式下至少在全部完成或需要用户决策时贴。",
+  "",
+  "### 计费与重复提交",
+  "生图与生视频都真实计费：不要为了确认状态而重复提交同一个目标；提交类调用返回后一律先 `game_material_wait`。"
+].join("\n");
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted === true) {
+      reject(new Error("已取消"));
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener?.("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new Error("已取消"));
+    };
+    signal?.addEventListener?.("abort", onAbort, { once: true });
+  });
+}
+
+// ── 固定流程第 0 步：问清楚再动手 ────────────────────────────────────────
+//
+// 用户只说「用八方向图做个角色」的时候，缺的信息其实很多：源图、统一附加
+// 提示词、要不要改默认参数、以及最关键的一条——**结果谁来审核**。
+// 这些一律由 `game_material_intake` 按真实状态算出来，而不是让模型凭感觉问：
+// 已经配好的 / 有默认值的进 `known`，真正缺的进 `questions`，
+// 必须先解决的进 `blockers`。这样「问了什么」是可复现、可测的。
+
+const REVIEW_MODE_QUESTION = {
+  id: "reviewMode",
+  question: "结果要「自动审核」还是「每一步人工审核」？",
+  options: [
+    { value: "auto", label: "自动审核", detail: "agent 自己检查每步产出与报错，直接往下推进；只在失败或全部完成时才找你" },
+    { value: "manual", label: "每一步人工审核", detail: "每步产出后 agent 把验收链接贴给你，你说「通过」它才进入下一步" }
+  ],
+  how: "用户答复后用 game_material_reviewMode 记下来（module + id + reviewMode）。"
+};
+
+function intakeFor(module: ModuleKey, id: string, told: Set<string>, config: any, target: any) {
+  const reviewModeQuestion = REVIEW_MODE_QUESTION;
+  const blockers: string[] = [];
+  const questions: Array<Record<string, any>> = [];
+  const known: Record<string, any> = {};
+  /** 已经存在的事实（源图 / 提示词 / 素材）就不再问，直接列进 known。 */
+  const hasSource = target !== undefined && target.sourceFile !== null && target.sourceFile !== undefined;
+  const hasPrompt = target !== undefined && typeof target.prompt === "string" && target.prompt.trim() !== "";
+
+  const ask = (key: string, question: string, why: string, how: string) => {
+    if (told.has(key)) return;
+    questions.push({ key, question, why, how });
+  };
+
+  if (module === "sprite" || module === "image") {
+    if (config?.arkApiKeySet !== true) {
+      blockers.push("还没配置火山方舟 API Key（生图必需）：设置 → 游戏素材大师 → 火山方舟 API Key，配好点「测试连接」。");
+    }
+    known.生图模型 = config?.arkModel;
+    known.出图尺寸 = config?.arkSize;
+  }
+  if (module === "sequence") {
+    if (config?.minimaxApiKeySet !== true) {
+      blockers.push("还没配置 MiniMax API Key（生视频必需）：设置 → 游戏素材大师 → MiniMax API Key，配好点「测试连接」。");
+    }
+    known.视频模型 = config?.minimaxModel;
+    known.BaseURL = config?.minimaxBaseUrl;
+  }
+  if (module === "sprite") {
+    known.默认单格尺寸 = `${config?.cellWidth ?? "?"}×${config?.cellHeight ?? "?"}`;
+    known.默认每段抽帧数 = config?.frameCount;
+    known.默认像素块 = config?.pixelSize;
+    known.默认行序 = config?.rowOrder;
+    known.四个阶段 = "① 八方向绿幕图 → ② 行走动作视频 → ③ 提取序列帧 → ④ 抠绿幕合成整图";
+  }
+  if (module === "image") {
+    known.默认张数范围 = "1~8（Seedream 约 0.2 元/张）";
+    known.参考图上限 = "10 张，可在提示词里写「图一」「图二」";
+  }
+  if (module === "sequence") {
+    known.两种输入模式 = "首尾帧模式（必须给首帧图）/ 多模态参考模式（参考图 ≤9 张 + 参考视频 ≤3 段），平台规定互斥";
+    known.分辨率与时长档位 = config?.minimaxCapabilities;
+  }
+
+  if (id === "") {
+    questions.push({
+      key: "target",
+      question:
+        module === "sprite"
+          ? "新建一个项目，还是在已有项目上继续？"
+          : module === "image"
+            ? "新建一个图片任务，还是在已有任务上继续？"
+            : "新建一个序列帧任务，还是在已有任务上继续？",
+      why: "后面的参数都挂在项目 / 任务上。",
+      how: "新建：game_material_call({method:'createProject'|'createImageJob'|'createSequenceJob', payload:{name}})，返回的 id 就是后续 payload 里的 projectId / jobId。"
+    });
+  }
+
+  if (module === "sprite") {
+    if (hasSource) known.源图 = target.sourceFile;
+    else {
+      ask(
+        "source",
+        "用哪张角色设定图作为源图？（PNG / JPG，≤30MB）",
+        "八方向图从这一张出发派生其余七个方位，没有它无法开始。",
+        "给我文件路径后我用 game_material_upload({module:'sprite', id, kind:'source', path}) 上传。"
+      );
+    }
+    if (target?.reviewMode) known.审核模式 = target.reviewMode;
+    ask("suffix", "有没有跨方向都要遵守的统一要求？（例如「必须穿同一双靴子」「不要出现文字」；可留空）", "会追加到每一张生图提示词末尾，改一次八个方向全生效。", "用 game_material_call 的 savePrompts({projectId, suffix}) 保存。");
+    ask("scope", "八个方向全做，还是只做指定方向？", "只做部分方向能明显省钱省时间。", "开始生成时 runImage({projectId,key}) 做单个方向，runImages({projectId}) 做全部。");
+    ask("tuning", "默认参数要改吗？（单格尺寸 / 每段抽帧数 / 像素块大小 / 行序 / 并发数；不改就用默认）", "这些决定了最终精灵图的规格。", "要改就用 saveSettings({projectId, settings})。");
+    ask("prompts", "每个方向的生图/视频提示词要用默认模板，还是你自己写？（默认模板已经把方位与可见部位写对了，建议先用默认）", "方位写错会导致八个方向看起来是抬头 / 低头而不是转身。", "要改就用 savePrompts。");
+  }
+
+  if (module === "image") {
+    if (hasPrompt) known.提示词 = target.prompt;
+    else ask("prompt", "想要什么画面？请给一句具体的中文提示词。", "生图的唯一必填项。", "saveImageJob({jobId, prompt}) 后 runImageJob({jobId, count})。");
+    ask("count", "生成几张？（1~8，默认 1）", "按张计费。", "runImageJob({jobId, count})。");
+    ask("refs", "要不要参考图？需要的话给我文件路径（最多 10 张）。", "带参考图时可以在提示词里写「图一」「图二」。", "game_material_upload({module:'image', id, kind:'ref', path})。");
+    ask("keying", "生成后要不要自动抠绿幕导出透明 PNG？", "抠像是本地做的、不额外收费。", "saveImageJob({jobId, keying:{enabled:true}}) 再 keyImageJob({jobId})。");
+  }
+
+  if (module === "sequence") {
+    ask("mode", "用「首尾帧模式」还是「多模态参考模式」？（平台规定只能二选一）", "两种模式的素材要求完全不同。", "saveSequenceJob({jobId, mode:'frames'|'reference'})。");
+    if (target !== undefined && (target.refs?.firstFrame !== null || target.refs?.referenceImages > 0 || target.refs?.referenceVideos > 0)) {
+      known.已上传素材 = target.refs;
+    } else {
+      ask("material", "对应模式要用的素材：首尾帧模式给首帧图（尾帧可选）；参考模式给参考图（≤9 张）和/或参考视频（≤3 段，每段 2~15 秒）。", "没有素材无法提交。", "game_material_upload({module:'sequence', id, kind:'firstFrame'|'lastFrame'|'referenceImage'|'referenceVideo', path})。");
+    }
+    if (hasPrompt) known.提示词 = target.prompt;
+    else ask("prompt", "希望这段动作是什么样的？请给一句提示词。", "视频生成的必填项。", "saveSequenceJob({jobId, prompt})。");
+    ask("duration", "时长和分辨率用当前模型档位里的哪个？（不改就用默认）", "不同模型支持的档位不同。", "saveSequenceJob({jobId, settings:{duration, resolution}})。");
+    ask("frames", "抽几帧、单格多大？（默认按全局配置）", "决定最终横向条图的规模。", "saveSequenceJob({jobId, settings:{frameCount, cellWidth, cellHeight}})。");
+  }
+
+  return {
+    module,
+    id: id === "" ? null : id,
+    blockers,
+    questions,
+    reviewModeQuestion,
+    known,
+    nextStep:
+      blockers.length > 0
+        ? "先把 blockers 告诉用户并等它处理；同时把 questions 与 reviewModeQuestion 一起问掉，别分多轮挤牙膏。"
+        : "把 questions 与 reviewModeQuestion 合并成一次提问（能一次问完就别拆开），等用户答复后再动手。",
+    afterAnswered: "用户答复后：game_material_reviewMode 记审核模式 → game_material_call 写参数 → 开始生成 → game_material_wait。"
+  };
+}
+
+// ── 上传：宿主自己读盘，模型只给路径 ────────────────────────────────────
+
+const IMAGE_MAX_BYTES = 30 * 1024 * 1024;
+const VIDEO_MAX_BYTES = 40 * 1024 * 1024;
+
+/** 各模块允许的 kind，避免把「源图」传到「参考视频」这类错位。 */
+const UPLOAD_KINDS: Record<ModuleKey, string[]> = {
+  sprite: ["source"],
+  image: ["ref", "item"],
+  sequence: ["firstFrame", "lastFrame", "referenceImage", "referenceVideo"]
+};
+
+async function uploadFromPath(
+  gateway: GameStudioGateway,
+  module: ModuleKey,
+  id: string,
+  kind: string,
+  path: string,
+  name?: string
+): Promise<Record<string, any>> {
+  if (id === "") throw new Error("id 不能为空");
+  if (!UPLOAD_KINDS[module].includes(kind)) {
+    throw new Error(`${module} 不支持 kind=${kind}（可用：${UPLOAD_KINDS[module].join(" / ")}）`);
+  }
+  const absolute = resolve(path);
+  let info;
+  try {
+    info = await stat(absolute);
+  } catch {
+    throw new Error(`读不到文件：${absolute}`);
+  }
+  if (!info.isFile()) throw new Error(`不是文件：${absolute}`);
+  const isVideo = kind === "referenceVideo";
+  const limit = isVideo ? VIDEO_MAX_BYTES : IMAGE_MAX_BYTES;
+  if (info.size > limit) {
+    throw new Error(`文件 ${(info.size / 1024 / 1024).toFixed(1)}MB 超过上限 ${(limit / 1024 / 1024).toFixed(0)}MB：${absolute}`);
+  }
+  const bytes = await readFile(absolute);
+  const base64 = bytes.toString("base64");
+  const fileName = name ?? basename(absolute);
+
+  if (!isVideo && sniffImage(base64) === undefined) {
+    throw new Error(`无法识别的图片格式（支持 PNG / JPEG / WebP / GIF / BMP）：${absolute}`);
+  }
+
+  const call = gateway as any;
+  if (module === "sprite") {
+    await call.uploadSource({ projectId: id, name: fileName, data: base64 });
+  } else if (module === "image") {
+    if (kind === "ref") await call.uploadImageRef({ jobId: id, name: fileName, data: base64 });
+    else await call.addImageItem({ jobId: id, name: fileName, data: base64 });
+  } else {
+    await call.uploadSequenceRef({ jobId: id, kind, name: fileName, data: base64 });
+  }
+
+  return {
+    module,
+    id,
+    kind,
+    name: fileName,
+    path: absolute,
+    bytes: info.size,
+    ...openInfo(module === "sprite" ? { module, projectId: id } : { module, jobId: id }, "点开确认素材已就位")
+  };
+}
+
+function renderIntake(value: any): string {
+  const lines: string[] = [`【固定流程第 0 步】${value.module}${value.id === null ? "（新目标）" : ` · ${value.id}`}`];
+  if (value.blockers.length > 0) {
+    lines.push("必须先解决：");
+    for (const blocker of value.blockers) lines.push(`  ✗ ${blocker}`);
+  }
+  lines.push("要问用户的参数：");
+  if (value.questions.length === 0) lines.push("  （没有遗漏——用户已经说清了，可以直接动手）");
+  for (const question of value.questions) {
+    lines.push(`  ? [${question.key}] ${question.question}`);
+    lines.push(`      ${question.why}`);
+  }
+  lines.push(`必须问：${value.reviewModeQuestion.question}`);
+  for (const option of value.reviewModeQuestion.options) lines.push(`  - ${option.label}：${option.detail}`);
+  const knownKeys = Object.keys(value.known ?? {});
+  if (knownKeys.length > 0) {
+    lines.push("已知 / 有默认值（不必问，除非用户主动要改）：");
+    for (const key of knownKeys) {
+      const entry = value.known[key];
+      lines.push(`  · ${key}：${typeof entry === "object" ? JSON.stringify(entry) : entry}`);
+    }
+  }
+  lines.push(value.nextStep);
+  lines.push(value.afterAnswered);
+  return lines.join("\n");
+}
+
+function renderUpload(value: any): string {
+  const tail = typeof value.openUrl === "string" ? `\n打开界面：[${value.openHint}](${value.openUrl})` : "";
+  return `已上传 ${value.name}（${(value.bytes / 1024).toFixed(0)} KB）→ ${value.module} · ${value.id} · ${value.kind}${tail}`;
+}
+
+function renderReviewMode(value: any): string {
+  const tail = typeof value.openUrl === "string" ? `\n打开界面：[${value.openHint}](${value.openUrl})` : "";
+  return `${value.id} 的审核模式已记为「${value.reviewMode === "manual" ? "每一步人工审核" : "自动审核"}」。${
+    value.reviewMode === "manual" ? "之后每一步产出后都要贴验收链接并停下等用户说通过。" : "之后 agent 自己审完即可继续。"
+  }${tail}`;
+}
+
+// ── 工具结果的文字渲染 ──────────────────────────────────────────────────
+// 模型看到的是这段文本；链接与关键计数必须一眼可见。
+
+function renderCallResult(value: any): string {
+  const head = `${value.method} → ok`;
+  const body = JSON.stringify(value.value, null, 2);
+  const clipped = body.length > 4000 ? `${body.slice(0, 4000)}\n…（已截断）` : body;
+  const link = typeof value.openUrl === "string" ? `\n打开界面：[${value.openHint}](${value.openUrl})` : "";
+  return `${head}\n${clipped}${link}`;
+}
+
+function renderStatus(value: any): string {
+  if (Array.isArray(value.projects)) {
+    const lines = [
+      `项目（${value.projects.length}）：`,
+      ...value.projects.map((p: any) => `  - ${p.id} ${p.name} — 图 ${p.imageReady}/8 · 视频 ${p.videoReady}/8 · 帧 ${p.framesReady}/8${p.sheetReady ? " · 整图✓" : ""}`),
+      `图片任务（${value.imageJobs.length}）：`,
+      ...value.imageJobs.map((j: any) => `  - ${j.id} ${j.name} — ${j.ready}/${j.total} 张（抠像 ${j.keyed}）`),
+      `序列帧任务（${value.sequenceJobs.length}）：`,
+      ...value.sequenceJobs.map((j: any) => `  - ${j.id} ${j.name} — 视频${j.videoReady ? "✓" : "✗"} 帧${j.frameReady ? "✓" : "✗"} 条图${j.sheetReady ? "✓" : "✗"}`),
+      value.hint
+    ];
+    return lines.join("\n");
+  }
+  const lines = [`${value.name}（${value.id}）${value.busy ? " — ⏳ 有任务在跑" : ""}`];
+  if (Array.isArray(value.stages)) {
+    for (const stage of value.stages) {
+      lines.push(`  ${stage.title}：ready ${stage.ready}/${stage.total}，running ${stage.running}，error ${stage.error}，已通过 ${stage.approved}`);
+    }
+  }
+  if (Array.isArray(value.items)) lines.push(`  图片 ${value.review.ready} 张就绪，已通过 ${value.review.approved}，失败 ${value.review.error}`);
+  if (Array.isArray(value.steps)) {
+    for (const step of value.steps) lines.push(`  ${step.title}：${step.status}${step.approved ? " · 已通过" : ""}${step.error ? ` · ${step.error}` : ""}`);
+  }
+  if (typeof value.openUrl === "string") lines.push(`打开界面：[${value.openHint}](${value.openUrl})`);
+  return lines.join("\n");
+}
+
+function renderWait(value: any): string {
+  const head = value.settled ? `已跑完（${(value.elapsedMs / 1000).toFixed(1)}s）` : `仍在跑（等待 ${(value.elapsedMs / 1000).toFixed(1)}s 后超时）`;
+  return `${head}\n${renderStatus(value)}`;
+}
+
+function renderReview(value: any): string {
+  const lines = [`${value.name}（${value.id}）验收包${value.busy ? " — ⏳ 仍有任务在跑" : ""}`];
+  if (Array.isArray(value.stages)) {
+    for (const stage of value.stages) {
+      lines.push(`${stage.title}${stage.stage === value.stage ? "" : ""}`);
+      for (const cell of stage.cells) {
+        lines.push(`  - ${cell.label}：${cell.status}${cell.approved ? " · 已通过" : ""}${cell.stale ? " · 需重做" : ""}${cell.error ? ` · ${cell.error}` : ""}`);
+        if (typeof cell.url === "string") lines.push(`      ${cell.url}`);
+      }
+    }
+  }
+  if (Array.isArray(value.items)) {
+    for (const item of value.items) {
+      lines.push(`  - 第 ${item.index} 张：${item.status}${item.approved ? " · 已通过" : ""}${item.error ? ` · ${item.error}` : ""}`);
+      if (typeof item.url === "string") lines.push(`      ${item.url}`);
+      if (typeof item.keyedUrl === "string") lines.push(`      ${item.keyedUrl}（透明 PNG）`);
+    }
+  }
+  if (Array.isArray(value.steps)) {
+    for (const step of value.steps) {
+      lines.push(`  - ${step.title}：${step.status}${step.approved ? " · 已通过" : ""}${step.stale ? " · 需重做" : ""}${step.error ? ` · ${step.error}` : ""}`);
+      if (typeof step.url === "string") lines.push(`      ${step.url}`);
+      for (const url of step.keyed ?? []) lines.push(`      ${url}`);
+    }
+  }
+  for (const action of value.nextActions ?? []) lines.push(`建议：${action}`);
+  if (typeof value.openUrl === "string") lines.push(`打开界面验收：[${value.openHint}](${value.openUrl})`);
+  return lines.join("\n");
+}
+
+function renderApprove(value: any): string {
+  const where = [value.stage, value.step, value.key, value.index === null || value.index === undefined ? undefined : `第 ${value.index} 张`]
+    .filter((part) => part !== undefined && part !== null)
+    .join(" / ");
+  const tail = typeof value.openUrl === "string" ? `\n打开界面：[${value.openHint}](${value.openUrl})` : "";
+  return `${value.id}${where === "" ? "" : ` · ${where}`} → ${value.approved ? "已标记通过" : "已取消通过"}${tail}`;
+}
+
+// ── 「下一步该做什么」的推荐 ────────────────────────────────────────────
+
+function spriteNextActions(snapshot: any, stage: string | undefined, direction: string | undefined): string[] {
+  const byStage = Object.fromEntries((snapshot.stages as any[]).map((entry) => [entry.stage, entry]));
+  const actions: string[] = [];
+  const pick = (key: string) => (stage === undefined || stage === key ? byStage[key] : undefined);
+
+  const images = pick("images");
+  if (images !== undefined && images.ready < images.total) {
+    actions.push(
+      snapshot.sourceFile === null
+        ? "还没有源图：先用 game_material_call({method:'uploadSource', payload:{projectId,name,data}}) 上传一张设定图"
+        : `绿幕图还差 ${images.total - images.ready} 张：game_material_call({method:'runImages', payload:{projectId}}) 然后 game_material_wait`
+    );
+  }
+  const videos = pick("videos");
+  if (videos !== undefined && videos.ready < videos.total && (images === undefined || images.ready === images.total)) {
+    actions.push(`视频还差 ${videos.total - videos.ready} 段：game_material_call({method:'runVideos', payload:{projectId}}) 然后 game_material_wait（这一步最贵，约几分钟）`);
+  }
+  const frames = pick("frames");
+  if (frames !== undefined && frames.ready < frames.total && (videos === undefined || videos.ready === videos.total)) {
+    actions.push("序列帧还没抽完：game_material_call({method:'runFrames', payload:{projectId}}) 然后 game_material_wait");
+  }
+  const sheet = pick("sheet");
+  if (sheet !== undefined && sheet.ready < sheet.total && (frames === undefined || frames.ready === frames.total)) {
+    actions.push("整图还没合成：game_material_call({method:'compose', payload:{projectId}}) 然后 game_material_wait");
+  }
+  const stageEntry = byStage[stage ?? ""];
+  if (stageEntry !== undefined && stageEntry.error > 0) {
+    actions.push(`有 ${stageEntry.error} 个产物失败：先看返回里的 error，再对失败项用 runImage / runVideos({regenerate:true, keys:[…]}) / runFrames({keys:[…]}) 重跑`);
+  }
+  if (direction !== undefined) actions.push(`只看方位 ${direction} 的重跑：game_material_call({method:'runVideos', payload:{projectId, keys:['${direction}'], regenerate:true}})`);
+  if (actions.length === 0) actions.push("这一步已全部就绪：可以 game_material_approve 打通过，或进入下一阶段");
+  return actions;
+}
+
+function imageNextActions(snapshot: any): string[] {
+  const actions: string[] = [];
+  if (snapshot.review.ready === 0 && snapshot.review.error === 0) {
+    actions.push("还没有产物：确认 prompt 非空后 game_material_call({method:'runImageJob', payload:{jobId,count}}) 然后 game_material_wait");
+  }
+  if (snapshot.review.error > 0) actions.push(`有 ${snapshot.review.error} 张失败：看 error 后调整提示词或参考图再重跑`);
+  if (snapshot.keying?.enabled !== true) actions.push("还没开抠像：saveImageJob({jobId, keying:{enabled:true}}) 再 keyImageJob({jobId})");
+  if (snapshot.review.approved === snapshot.review.ready && snapshot.review.ready > 0) actions.push("全部已通过：可以 game_material_call({method:'revealProject'|'getImageJob'}) 取用产物");
+  return actions;
+}
+
+function sequenceNextActions(snapshot: any): string[] {
+  const byStep = Object.fromEntries((snapshot.steps as any[]).map((entry: any) => [entry.step, entry]));
+  const actions: string[] = [];
+  if (byStep.video?.status !== "ready") {
+    actions.push("视频还没好：game_material_call({method:'runSequenceVideo', payload:{jobId}}) 然后 game_material_wait（先确认首帧图或参考素材已上传）");
+  }
+  if (byStep.video?.status === "ready" && byStep.frames?.status !== "ready") {
+    actions.push("视频已就绪但还没抽帧：game_material_call({method:'runSequenceFrames', payload:{jobId,count}})");
+  }
+  if (byStep.frames?.status === "ready" && byStep.sheet?.status !== "ready") {
+    actions.push("帧已就绪但条图还没合成：game_material_call({method:'composeSequence', payload:{jobId}})");
+  }
+  if (byStep.frames?.stale === true) actions.push("抽帧参数改过，需要重抽：saveSequenceJob 保存参数后 runSequenceFrames");
+  if (actions.length === 0) actions.push("三步都已就绪：可以 game_material_approve 打通过，或把 openUrl 贴给用户验收");
+  return actions;
+}

@@ -35,6 +35,8 @@ export interface ImageItem {
   /** 判定为背景的像素占比，用来判断抠像是否可信。 */
   backgroundFraction?: number;
   source: "generated" | "uploaded";
+  /** 验收打标：用户（或 agent 按用户指示）确认这一张可用。 */
+  approved?: boolean;
   error?: string;
   updatedAt?: number;
 }
@@ -65,6 +67,8 @@ export interface ImageJob {
   };
   keying: KeyingSettings;
   items: ImageItem[];
+  /** 固定流程里问过用户的审核模式；没问过就是 undefined。 */
+  reviewMode?: "auto" | "manual";
   log: JobLogEntry[];
 }
 
@@ -194,6 +198,7 @@ function normalizeImageJob(raw: any): ImageJob {
         keyedFile: typeof item?.keyedFile === "string" ? item.keyedFile : undefined,
         backgroundFraction: typeof item?.backgroundFraction === "number" ? item.backgroundFraction : undefined,
         source: item?.source === "uploaded" ? "uploaded" : "generated",
+        approved: item?.approved === true,
         error: typeof item?.error === "string" ? item.error : undefined,
         updatedAt: typeof item?.updatedAt === "number" ? item.updatedAt : undefined
       }))
@@ -223,6 +228,7 @@ function normalizeImageJob(raw: any): ImageJob {
       edgeShrink: num(raw?.keying?.edgeShrink, 0)
     },
     items,
+    reviewMode: raw?.reviewMode === "manual" ? "manual" : raw?.reviewMode === "auto" ? "auto" : undefined,
     log: Array.isArray(raw?.log) ? raw.log.slice(-200) : []
   };
 }

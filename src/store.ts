@@ -120,6 +120,9 @@ export interface ProjectSettings {
   concurrency: number;
 }
 
+/** 审核模式：agent 自动审 / 每一步人工审。见 src/tools.ts 的固定流程。 */
+export type ReviewMode = "auto" | "manual";
+
 export interface Project {
   id: string;
   name: string;
@@ -145,6 +148,11 @@ export interface Project {
   frames: Record<string, FramesNode>;
   sheet: SheetState;
   settings: ProjectSettings;
+  /**
+   * 固定流程里问过用户的审核模式；没问过就是 undefined。
+   * `manual` = 每一步产出后都停下来等用户打「通过」再继续。
+   */
+  reviewMode?: ReviewMode;
   log: LogEntry[];
 }
 
@@ -426,6 +434,7 @@ function normalizeProject(raw: any): Project {
       frameCount: raw?.sheet?.frameCount
     },
     settings: merged,
+    reviewMode: raw?.reviewMode === "manual" ? "manual" : raw?.reviewMode === "auto" ? "auto" : undefined,
     log: Array.isArray(raw?.log) ? raw.log.slice(-200) : []
   };
 }

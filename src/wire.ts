@@ -46,6 +46,15 @@ const approvedSchema = z.object({
   key: z.string().optional(),
   approved: z.boolean()
 });
+/**
+ * 审核模式：`auto` = agent 自己审完就往下走；`manual` = 每一步都停下来等用户看。
+ * 固定流程里必须先问用户选哪个，选完记在目标上，之后所有步骤都按它走。
+ */
+const setReviewModeSchema = z.object({
+  id: z.string(),
+  module: z.enum(["sprite", "image", "sequence"]),
+  reviewMode: z.enum(["auto", "manual"])
+});
 const runImageSchema = z.object({ projectId: z.string(), key: z.string(), prompt: z.string().optional() });
 const runImagesSchema = z.object({ projectId: z.string(), force: z.boolean().optional() });
 const runKeysSchema = z.object({ projectId: z.string(), keys: z.array(z.string()).optional() });
@@ -72,7 +81,10 @@ const saveImageJobSchema = z.object({
   prompt: z.string().optional(),
   suffix: z.string().optional(),
   settings: z.record(z.string(), z.unknown()).optional(),
-  keying: z.record(z.string(), z.unknown()).optional()
+  keying: z.record(z.string(), z.unknown()).optional(),
+  /** 验收打标：不带 index 就是整个任务，带 index 只改那一张。 */
+  approved: z.boolean().optional(),
+  index: z.number().nullable().optional()
 });
 const uploadSchema2 = z.object({ jobId: z.string(), name: z.string().optional(), data: z.string() });
 const removeRefSchema2 = z.object({ jobId: z.string(), file: z.string() });
@@ -89,7 +101,10 @@ const saveSequenceJobSchema = z.object({
   prompt: z.string().optional(),
   suffix: z.string().optional(),
   settings: z.record(z.string(), z.unknown()).optional(),
-  keying: z.record(z.string(), z.unknown()).optional()
+  keying: z.record(z.string(), z.unknown()).optional(),
+  /** 验收打标：不带 step 就是三步全打，带 step 只改那一步。 */
+  approved: z.boolean().optional(),
+  step: z.enum(["video", "frames", "sheet"]).nullable().optional()
 });
 const uploadSequenceRefSchema = z.object({
   jobId: z.string(),
@@ -105,10 +120,23 @@ const removeSequenceRefSchema = z.object({
 const runSequenceFramesSchema = z.object({ jobId: z.string(), count: z.number().optional() });
 const projectOnlySchema = z.object({ projectId: z.string() });
 
+/**
+ * 浏览器半区上报自己真实的 `location.origin`。
+ *
+ * 宿主不知道对外 origin（可能被反代改写过），而模型要在回复里贴出可点的
+ * 深链接，只能由页面自己上报一次。见 src/links.ts。
+ */
+const reportOriginSchema = z.object({ origin: z.string() });
+
 interface MethodSpec {
   method: string;
   payload?: z.ZodType;
   result: z.ZodType;
+  /**
+   * 只给浏览器半区用、**不暴露给模型工具**的方法。
+   * `game_material_call` 的 method 枚举会跳过它们。
+   */
+  clientOnly?: boolean;
 }
 
 export const METHODS: MethodSpec[] = [
@@ -116,6 +144,8 @@ export const METHODS: MethodSpec[] = [
   { method: "saveConfig", payload: saveConfigSchema, result: configViewSchema },
   { method: "testArk", result: jsonObject },
   { method: "testMinimax", result: jsonObject },
+  // 浏览器半区在挂载时上报 origin，供宿主拼深链接；不是用户可调用的功能。
+  { method: "reportClientOrigin", payload: reportOriginSchema, result: okSchema, clientOnly: true },
 
   { method: "listProjects", result: projectListSchema },
   { method: "createProject", payload: createProjectSchema, result: jsonObject },
@@ -126,6 +156,7 @@ export const METHODS: MethodSpec[] = [
   { method: "savePrompts", payload: promptsSchema, result: okSchema },
   { method: "saveSettings", payload: settingsSchema, result: okSchema },
   { method: "setApproved", payload: approvedSchema, result: okSchema },
+  { method: "setReviewMode", payload: setReviewModeSchema, result: okSchema },
   { method: "revealProject", payload: projectIdSchema, result: okSchema },
 
   { method: "runImage", payload: runImageSchema, result: startedSchema },
@@ -197,7 +228,16 @@ export const MANIFEST = {
 };
 
 /** 客户端只需要方法名与是否有 payload；这里导出给浏览器半区复用同一张清单。 */
-export const METHOD_NAMES: Array<{ method: string; payload: boolean }> = METHODS.map((spec) => ({
+export const METHOD_NAMES: Array<{ method: string; payload: boolean; clientOnly: boolean }> = METHODS.map((spec) => ({
   method: spec.method,
-  payload: spec.payload !== undefined
+  payload: spec.payload !== undefined,
+  clientOnly: spec.clientOnly === true
 }));
+
+/**
+ * 暴露成模型工具的方法（`game_material_call` 的 method 枚举）。
+ * 顺序即清单顺序，方便在工具描述里按模块分组。
+ */
+export const TOOL_METHODS: Array<{ method: string; payload: boolean }> = METHODS.filter(
+  (spec) => spec.clientOnly !== true
+).map((spec) => ({ method: spec.method, payload: spec.payload !== undefined }));
