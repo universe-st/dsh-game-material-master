@@ -53,25 +53,29 @@ dsh plugin --profile web add /path/to/dsh-game-material-master
 | 火山方舟 API Key | 「测试连接」会**真实生成一张 1K 小图**（产生少量费用），同时验证 Key 与模型 / 接入点 |
 | 生图模型 | 默认 `doubao-seedream-4-0-250828`；也可选 4.5 / 5.0 Lite / Pro，或填自定义接入点 ID |
 | MiniMax API Key | 「测试连接」只查一个不存在的任务，**免费**，能区分 Key 无效与其它错误 |
-| 视频模型 | 默认 `MiniMax-H3`。选 H3/H3-Max 自动走 v2 协议，选 Hailuo/I2V 走 v1 |
-| Base URL | **主机根**，不含 `/v1`、`/v2`、`/minimax`。国内站 `https://api.minimax.cn`，国际站 `https://api.minimaxi.com`；优云智算（MiniMax H3）用 `https://cp.compshare.cn`，请求会自动多一层 `/minimax` 前缀 |
+| 视频模型 | 默认 `MiniMax-H3`。选 H3/H3-Max 自动走 v2 协议，选 Hailuo/I2V 走 v1；**优云智算版 H3** 在同一个下拉里显式选择 |
+| Base URL | **主机根**，不含 `/v1`、`/v2`。国内站 `https://api.minimax.cn`，国际站 `https://api.minimaxi.com`。选中「优云智算版 H3」时该字段固定为 `https://cp.compshare.cn`、不可编辑 |
 | 默认参数 | 单格宽高、抽帧张数与工作尺寸、像素块边长、抠像阈值等 |
 
 Key 只写入本机 `<DSH_HOME>/game-material-master/config.json`，回传界面时始终脱敏（只给尾号）。
 
 ### 视频参数与模型的对应关系
 
-| 模型 | 协议 | 分辨率 | 时长 |
+| 视频模型（下拉选项） | 协议 | 分辨率 | 时长 |
 |---|---|---|---|
 | `MiniMax-H3` | v2 | `2K` / `768P` | 4~15 秒 |
-| `MiniMax-H3`（优云智算） | v2 | `2K` / `1080P` / `768P` | 4~30 秒 |
+| `MiniMax-H3 优云智算` | v2 | `2K` / `1080P` / `768P` | 4~30 秒 |
 | `MiniMax-H3-Max` | v2 | `768P` / `480P`（不支持 2K） | 5~15 秒 |
 | `MiniMax-Hailuo-02` | v1 | `768P` / `1080P` | 6 / 10 秒 |
 | `I2V-01` / `I2V-01-Director` | v1 | `720P` | 6 秒 |
 
-> 优云智算（`https://cp.compshare.cn`）是 MiniMax H3 的第三方网关：模型名仍是
-> `MiniMax-H3`，请求体与官方 v2 一致，只是路径多一层 `/minimax`；分辨率支持
-> 1080P/2K 后置超分，时长放宽到 4~30 秒。在设置里选好主机后，时长/分辨率档位会自动跟着放宽。
+> **优云智算版 H3** 是 MiniMax H3 的第三方网关版：与官方 H3 是同一个模型，但走
+> `https://cp.compshare.cn`，请求路径多一层 `/minimax`（`/minimax/v2/video_generation`），
+> 分辨率支持 1080P 后置超分，时长放宽到 4~30 秒。
+>
+> 它是一个**显式选项**：在「视频模型」下拉里选择 `MiniMax-H3 优云智算` 即启用，
+> 插件**不会**根据 Base URL 或 Key 前缀自动判断。选中后 Base URL、路径前缀、
+> 分辨率/时长档位全部自动跟着它走；切回官方模型时 Base URL 自动还原。
 
 切换模型时非法值会被自动收敛（例如从 Hailuo 换到 H3 时 `1080P` → `2K`）。
 **参考图 / 参考视频模式是 v2 才有的能力**，选 v1 模型时会明确报错而不是静默失败。
@@ -253,7 +257,7 @@ node scripts/retry-video.mjs <项目 id> <方向> [--soft]         # 单方向�
 | `src/directions.ts` | 八方向定义、依赖关系、默认提示词 |
 | `src/config.ts` | 全局配置、数据目录迁移 |
 | `src/ark.ts` | 火山方舟生图客户端 |
-| `src/minimax.ts` | MiniMax 视频客户端（v1/v2 双协议、首尾帧与多模态参考、优云智算 `/minimax` 网关） |
+| `src/minimax.ts` | MiniMax 视频客户端（v1/v2 双协议、首尾帧与多模态参考、优云智算版 `/minimax` 网关） |
 | `src/media.ts` | ffmpeg / ffprobe 封装 |
 | `src/chroma.ts` | 背景分割、绿色抠像、裁剪、像素量化、合成 |
 | `src/png.ts` | 极简 PNG 编码器（RGBA8，基于 node:zlib） |

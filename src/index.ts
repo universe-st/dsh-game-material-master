@@ -17,7 +17,14 @@ import { ARK_MODEL_PRESETS, DEFAULT_CONFIG, ROW_ORDER_VERSION, MINIMAX_HOST_PRES
 import { DEFAULT_ROW_ORDER, DEFAULT_VIDEO_PROMPT, DIRECTION_KEYS, defaultImagePrompts, directionOf } from "./directions.js";
 import { checkFfmpeg } from "./media.js";
 import { testArk } from "./ark.js";
-import { capabilityOf, pathPrefixOf, testMiniMax } from "./minimax.js";
+import {
+  COMP_SHARE_BASE_URL,
+  COMP_SHARE_MODEL_ID,
+  capabilityOf,
+  isCompshareModel,
+  pathPrefixOf,
+  testMiniMax
+} from "./minimax.js";
 import { disposePipeline, ensurePoller, listJobs, pollVideosOnce, startAllImages, startCompose, startExtract, startImage, startRekey, startVideos, clearVideos } from "./pipeline.js";
 import { assetPath, createProject, deleteProject, listProjects, log, patchProject, projectDir, projectExists, readProject, } from "./store.js";
 import * as imagegen from "./imagegen.js";
@@ -141,11 +148,16 @@ export class GameStudioGateway extends TypertRemoteService {
       arkModels: ARK_MODEL_PRESETS,
       minimaxModels: MINIMAX_MODEL_PRESETS,
       minimaxHosts: MINIMAX_HOST_PRESETS,
+      // 「优云智算版 H3」由用户在模型下拉里显式选择，选中后网关地址/路径/档位全部跟着它走。
+      minimaxCompshareModelId: COMP_SHARE_MODEL_ID,
+      minimaxCompshareBaseUrl: COMP_SHARE_BASE_URL,
+      // 选中优云智算版时，界面显示的 Base URL 就是插件真正会用的那个地址。
+      minimaxBaseUrl: isCompshareModel(config.minimaxModel) ? COMP_SHARE_BASE_URL : config.minimaxBaseUrl,
       // 优云智算网关的请求路径多一层 /minimax，界面据此展示真实端点。
-      minimaxPathPrefix: pathPrefixOf(config.minimaxBaseUrl),
-      // 分辨率档位与时长区间都跟着模型走，界面据此渲染控件；优云智算的 H3 更宽。
-      minimaxCapabilities: capabilityOf(config.minimaxModel, config.minimaxBaseUrl),
-      minimaxCapabilitiesByModel: Object.fromEntries(MINIMAX_MODEL_PRESETS.map((preset) => [preset.id, capabilityOf(preset.id, config.minimaxBaseUrl)])),
+      minimaxPathPrefix: pathPrefixOf(config.minimaxModel),
+      // 分辨率档位与时长区间都跟着模型走，界面据此渲染控件；优云智算版更宽。
+      minimaxCapabilities: capabilityOf(config.minimaxModel),
+      minimaxCapabilitiesByModel: Object.fromEntries(MINIMAX_MODEL_PRESETS.map((preset) => [preset.id, capabilityOf(preset.id)])),
       directions: DIRECTION_KEYS.map((key) => {
         const direction = directionOf(key);
         return { key, label: direction?.label ?? key, refs: direction?.refs ?? [] };

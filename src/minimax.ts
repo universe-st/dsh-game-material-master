@@ -13,9 +13,10 @@
  *   2. `GET  {root}/v1/query/video_generation`        → status / file_id
  *   3. `GET  {root}/v1/files/retrieve`                → download_url
  *
- * **优云智算（cp.compshare.cn）** —— H3 的第三方网关，请求体与官方 v2 完全一致，
- * 只是路径多一层 `/minimax` 前缀（`{root}/minimax/v2/...`），模型名仍是
- * `MiniMax-H3`；分辨率多支持 1080P/4K 后置超分，时长放宽到 4~30 秒。
+ * **优云智算版 H3（`MiniMax-H3（优云智算）`）** —— H3 的第三方网关，请求体与官方 v2
+ * 完全一致，只是路径多一层 `/minimax` 前缀（`{root}/minimax/v2/...`），模型名仍是
+ * `MiniMax-H3`；分辨率多支持 1080P/4K 后置超分，时长放宽到 4~30 秒。它由用户在设置里
+ * **显式选择**，本模块不从 Base URL 或 Key 前缀去猜。
  *
  * 提交与轮询分开，是因为 8 个视频要并发提交、统一轮询；一次生成通常需要
  * 1~6 分钟，绝不能同步阻塞一次远程调用。
@@ -27,7 +28,10 @@ export type MiniMaxProtocol = "v1" | "v2";
 export type VideoStatus = "pending" | "running" | "succeeded" | "failed";
 
 export interface MiniMaxRequest {
-  /** 主机根地址：`https://api.minimaxi.com`、`https://api.minimax.cn` 或优云智算 `https://cp.compshare.cn`。 */
+  /**
+   * 主机根地址：`https://api.minimaxi.com` 或 `https://api.minimax.cn`。
+   * 选择「优云智算版 H3」时该值被忽略，一律走 `https://cp.compshare.cn`。
+   */
   baseUrl: string;
   apiKey: string;
   model: string;
@@ -70,6 +74,15 @@ export interface ModelCapability {
   note: string;
 }
 
+/**
+ * 优云智算（Compshare）版 H3：与官方 H3 是**同一个模型**，只是走第三方网关。
+ * 因此把它做成一个独立的可选项，由用户在设置里显式选择——不从 Base URL 或
+ * Key 前缀去猜。请求体里的 `model` 仍然是 `MiniMax-H3`，只有路径多一层 `/minimax`。
+ */
+export const COMP_SHARE_MODEL_ID = "MiniMax-H3 优云智算";
+export const COMP_SHARE_BASE_URL = "https://cp.compshare.cn";
+export const COMP_SHARE_PATH_PREFIX = "/minimax";
+
 export const MODEL_CAPABILITIES: Record<string, ModelCapability> = {
   "MiniMax-H3": {
     protocol: "v2",
@@ -77,6 +90,13 @@ export const MODEL_CAPABILITIES: Record<string, ModelCapability> = {
     durationMin: 4,
     durationMax: 15,
     note: "v2 · 768P/2K · 4~15 秒"
+  },
+  [COMP_SHARE_MODEL_ID]: {
+    protocol: "v2",
+    resolutions: ["2K", "1080P", "768P"],
+    durationMin: 4,
+    durationMax: 30,
+    note: "v2 优云智算 · 768P/1080P/2K · 4~30 秒"
   },
   "MiniMax-H3-Max": {
     protocol: "v2",
@@ -121,42 +141,35 @@ export function protocolOf(model: string): MiniMaxProtocol {
   return /^MiniMax-H3/i.test(model.trim()) ? "v2" : "v1";
 }
 
-/** 优云智算（Compshare）MiniMax H3 网关主机，请求路径要多一层 `/minimax`。 */
-export const COMP_SHARE_HOST = "cp.compshare.cn";
-export const COMP_SHARE_PATH_PREFIX = "/minimax";
+/** 这个模型选择是不是「优云智算版 H3」。 */
+export function isCompshareModel(model: string): boolean {
+  return model.trim() === COMP_SHARE_MODEL_ID;
+}
 
-/** 判断某个主机是不是优云智算网关。 */
-export function isCompshareHost(baseUrl: string): boolean {
-  const host = /^https?:\/\/([^/:]+)/i.exec(baseUrl.trim())?.[1]?.toLowerCase() ?? "";
-  return host === COMP_SHARE_HOST;
+/** 发给远端的 `model` 字段：优云智算版对外的模型名仍然是 `MiniMax-H3`。 */
+export function apiModelOf(model: string): string {
+  return isCompshareModel(model) ? "MiniMax-H3" : model.trim();
+}
+
+/** 优云智算版固定走自己的网关，其余模型用配置里的 Base URL。 */
+export function gatewayOf(model: string, baseUrl: string): string {
+  return isCompshareModel(model) ? COMP_SHARE_BASE_URL : rootOf(baseUrl);
 }
 
 /**
- * 依据主机返回 MiniMax 网关的路径前缀。
+ * 依据模型选择返回路径前缀。
  * 官方站（api.minimaxi.com / api.minimax.cn）直接挂 `/v1`、`/v2`；
- * 优云智算（cp.compshare.cn）把 MiniMax 的接口放在 `/minimax/v1`、`/minimax/v2` 下。
+ * 优云智算版（cp.compshare.cn）把 MiniMax 的接口放在 `/minimax/v1`、`/minimax/v2` 下。
  */
-export function pathPrefixOf(baseUrl: string): string {
-  return isCompshareHost(baseUrl) ? COMP_SHARE_PATH_PREFIX : "";
+export function pathPrefixOf(model: string): string {
+  return isCompshareModel(model) ? COMP_SHARE_PATH_PREFIX : "";
 }
 
-/** 某个模型的能力；未知模型按协议给一套宽松区间。baseUrl 用于识别优云智算网关。 */
-export function capabilityOf(model: string, baseUrl?: string): ModelCapability {
+/** 某个模型的能力；未知模型按协议给一套宽松区间。 */
+export function capabilityOf(model: string): ModelCapability {
   const trimmed = model.trim();
   const known = MODEL_CAPABILITIES[trimmed];
-  if (known !== undefined) {
-    // 优云智算的 H3：分辨率多支持 1080P（后置超分），时长放宽到 4~30 秒。
-    if (baseUrl !== undefined && isCompshareHost(baseUrl) && /^MiniMax-H3$/i.test(trimmed)) {
-      return {
-        protocol: "v2",
-        resolutions: ["2K", "1080P", "768P"],
-        durationMin: 4,
-        durationMax: 30,
-        note: "v2（优云智算）· 768P/1080P/2K · 4~30 秒"
-      };
-    }
-    return known;
-  }
+  if (known !== undefined) return known;
   const protocol = protocolOf(trimmed);
   return protocol === "v2"
     ? { protocol, resolutions: ["2K", "768P"], durationMin: 4, durationMax: 15, note: "v2（自定义模型）" }
@@ -176,8 +189,8 @@ export function rootOf(baseUrl: string): string {
 }
 
 /** 按模型能力把时长收敛到合法值。 */
-export function normalizeDuration(model: string, value: unknown, baseUrl?: string): number {
-  const capability = capabilityOf(model, baseUrl);
+export function normalizeDuration(model: string, value: unknown): number {
+  const capability = capabilityOf(model);
   const n = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
   const wanted = Number.isFinite(n) ? Math.round(n) : capability.durationMin;
   if (capability.durations !== undefined && capability.durations.length > 0) {
@@ -195,8 +208,8 @@ export function normalizeDuration(model: string, value: unknown, baseUrl?: strin
 }
 
 /** 按模型能力把分辨率收敛到合法档位。 */
-export function normalizeResolution(model: string, value: unknown, baseUrl?: string): string {
-  const capability = capabilityOf(model, baseUrl);
+export function normalizeResolution(model: string, value: unknown): string {
+  const capability = capabilityOf(model);
   const wanted = String(value ?? "").trim();
   return capability.resolutions.includes(wanted) ? wanted : capability.resolutions[0];
 }
@@ -300,10 +313,10 @@ function buildV2Body(input: SubmitVideoInput): Record<string, unknown> {
   }
 
   const body: Record<string, unknown> = {
-    model: input.model,
+    model: apiModelOf(input.model),
     content,
-    resolution: normalizeResolution(input.model, input.resolution, input.baseUrl),
-    duration: normalizeDuration(input.model, input.duration, input.baseUrl),
+    resolution: normalizeResolution(input.model, input.resolution),
+    duration: normalizeDuration(input.model, input.duration),
     // 首尾帧模式的宽高比由首帧图决定，官方规定恒为 adaptive；
     // 参考模式可选；纯文生视频必须给具体比例（默认 16:9）。
     ratio: input.ratio ?? (mode === "text" ? "16:9" : "adaptive")
@@ -332,8 +345,8 @@ function buildV1Body(input: SubmitVideoInput): Record<string, unknown> {
   };
   // duration / resolution 是 Hailuo 系列的参数，I2V-01 传了会报错。
   if (/hailuo/i.test(input.model)) {
-    if (input.duration !== undefined) body.duration = normalizeDuration(input.model, input.duration, input.baseUrl);
-    if (input.resolution !== undefined) body.resolution = normalizeResolution(input.model, input.resolution, input.baseUrl);
+    if (input.duration !== undefined) body.duration = normalizeDuration(input.model, input.duration);
+    if (input.resolution !== undefined) body.resolution = normalizeResolution(input.model, input.resolution);
   }
   if (input.promptOptimizer !== undefined) body.prompt_optimizer = input.promptOptimizer;
   return body;
@@ -344,8 +357,9 @@ export async function submitVideo(input: SubmitVideoInput): Promise<string> {
   assertKey(input.apiKey);
   if ((input.prompt ?? "").trim() === "") throw new MiniMaxError("提示词不能为空");
 
-  const root = rootOf(input.baseUrl);
-  const prefix = pathPrefixOf(root);
+  // 优云智算版固定走它自己的网关；其余模型用配置里的 Base URL。
+  const root = gatewayOf(input.model, input.baseUrl);
+  const prefix = pathPrefixOf(input.model);
   const isV2 = protocolOf(input.model) === "v2";
   const url = isV2 ? `${root}${prefix}/v2/video_generation` : `${root}${prefix}/v1/video_generation`;
   const body = isV2 ? buildV2Body(input) : buildV1Body(input);
@@ -409,8 +423,8 @@ function mapV1Status(raw: string): VideoStatus {
 
 export async function queryVideo(input: MiniMaxRequest & { taskId: string }): Promise<VideoQuery> {
   assertKey(input.apiKey);
-  const root = rootOf(input.baseUrl);
-  const prefix = pathPrefixOf(root);
+  const root = gatewayOf(input.model, input.baseUrl);
+  const prefix = pathPrefixOf(input.model);
 
   if (protocolOf(input.model) === "v2") {
     const payload = await requestJson(
@@ -444,7 +458,7 @@ export async function queryVideo(input: MiniMaxRequest & { taskId: string }): Pr
 export async function retrieveFile(input: MiniMaxRequest & { fileId: string }): Promise<string> {
   assertKey(input.apiKey);
   const payload = await requestJson(
-    `${rootOf(input.baseUrl)}${pathPrefixOf(input.baseUrl)}/v1/files/retrieve?file_id=${encodeURIComponent(input.fileId)}`,
+    `${gatewayOf(input.model, input.baseUrl)}${pathPrefixOf(input.model)}/v1/files/retrieve?file_id=${encodeURIComponent(input.fileId)}`,
     { method: "GET", headers: headers(input.apiKey) },
     input.timeoutMs,
     "获取视频下载地址"

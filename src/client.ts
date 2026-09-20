@@ -2628,6 +2628,21 @@
           note: ""
         };
 
+      // 模型决定网关：选中「优云智算版 H3」时顺带把 Base URL 切到它的网关；
+      // 从该模型切走时，若 Base URL 还停在优云智算网关，则还原成官方默认地址。
+      const compshareModelId = config.minimaxCompshareModelId;
+      const compshareBaseUrl = config.minimaxCompshareBaseUrl;
+      const onModelChange = (nextModel) => {
+        const values: Record<string, unknown> = { minimaxModel: nextModel };
+        if (compshareModelId !== undefined && nextModel === compshareModelId) {
+          values.minimaxBaseUrl = compshareBaseUrl;
+        } else if (config.minimaxModel === compshareModelId && config.minimaxBaseUrl === compshareBaseUrl) {
+          values.minimaxBaseUrl = config.defaults?.minimaxBaseUrl ?? "https://api.minimaxi.com";
+        }
+        void patch(values);
+      };
+      const usingCompshare = compshareModelId !== undefined && config.minimaxModel === compshareModelId;
+
       return h(
         "section",
         { className: "SPR_settings" },
@@ -2757,7 +2772,7 @@
                 {
                   className: "SPR_input",
                   value: config.minimaxModel,
-                  onChange: (event) => void patch({ minimaxModel: event.target.value })
+                  onChange: (event) => onModelChange(event.target.value)
                 },
                 (config.minimaxModels ?? []).map((model) =>
                   h("option", { key: model.id, value: model.id }, `${model.label}（${model.id}）`)
@@ -2809,11 +2824,18 @@
             h(
               "label",
               { className: "SPR_field" },
-              h("span", { className: "SPR_fieldLabel" }, "Base URL（主机根，不含 /v1、/v2、/minimax）"),
+              h(
+                "span",
+                { className: "SPR_fieldLabel" },
+                usingCompshare
+                  ? "Base URL（优云智算版 H3 固定使用，无需修改）"
+                  : "Base URL（主机根，不含 /v1、/v2）"
+              ),
               h("input", {
                 className: "SPR_input",
                 list: "SPR_minimax_hosts",
                 value: config.minimaxBaseUrl,
+                disabled: usingCompshare,
                 onChange: (event) => void patch({ minimaxBaseUrl: event.target.value })
               }),
               h(

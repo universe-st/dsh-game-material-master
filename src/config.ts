@@ -31,7 +31,7 @@ export function isLegacyRowOrder(order: unknown): boolean {
     order.every((key, index) => key === LEGACY_ROW_ORDER[index])
   );
 }
-import { capabilityOf, normalizeDuration, normalizeResolution, rootOf } from "./minimax.js";
+import { COMP_SHARE_MODEL_ID, normalizeDuration, normalizeResolution, rootOf } from "./minimax.js";
 
 export function dshHome(): string {
   const raw = process.env.DSH_HOME?.trim();
@@ -102,11 +102,14 @@ export interface Config {
   /** MiniMax API Key。 */
   minimaxApiKey: string;
   /**
-   * **主机根地址**（不含 /v1、/v2）。CN 平台是 https://api.minimax.cn，
-   * 优云智算（MiniMax H3）是 https://cp.compshare.cn（路径自动多一层 /minimax）。
+   * **主机根地址**（不含 /v1、/v2）。CN 平台是 https://api.minimax.cn。
+   * 选「优云智算版 H3」时该值被忽略，插件固定走 https://cp.compshare.cn。
    */
   minimaxBaseUrl: string;
-  /** 图生视频模型：MiniMax-H3 / H3-Max 走 v2 协议，Hailuo / I2V 走 v1。 */
+  /**
+   * 图生视频模型：MiniMax-H3 / H3-Max 走 v2 协议，Hailuo / I2V 走 v1；
+   * 「优云智算版 H3」是独立选项，走优云智算网关（多一层 /minimax 路径）。
+   */
   minimaxModel: string;
   /** 时长（秒）。官方 H3 为 4~15（优云智算版放宽到 4~30），Hailuo 只能是 6 或 10。 */
   minimaxDuration: number;
@@ -210,12 +213,16 @@ export const ARK_MODEL_PRESETS = [
 
 export const MINIMAX_HOST_PRESETS = [
   { id: "https://api.minimaxi.com", label: "国际站 api.minimaxi.com" },
-  { id: "https://api.minimax.cn", label: "国内站 api.minimax.cn" },
-  { id: "https://cp.compshare.cn", label: "优云智算 cp.compshare.cn（MiniMax H3）" }
+  { id: "https://api.minimax.cn", label: "国内站 api.minimax.cn" }
 ];
 
+/**
+ * 视频模型下拉。优云智算版 H3 与官方 H3 是同一个模型，只是走第三方网关，
+ * 所以做成一个独立的可选项——由用户显式选择，而不是从 Base URL / Key 前缀去猜。
+ */
 export const MINIMAX_MODEL_PRESETS = [
   { id: "MiniMax-H3", label: "MiniMax-H3（v2 · 768P/2K · 4~15 秒，推荐）" },
+  { id: COMP_SHARE_MODEL_ID, label: "优云智算网关 · 768P/1080P/2K · 4~30 秒" },
   { id: "MiniMax-H3-Max", label: "MiniMax-H3-Max（v2 极速 · 480P/768P · 5~15 秒）" },
   { id: "MiniMax-Hailuo-02", label: "MiniMax-Hailuo-02（v1 · 6/10 秒）" },
   { id: "I2V-01-Director", label: "I2V-01-Director（v1 · 支持运镜指令）" },
@@ -255,12 +262,12 @@ export function normalizeConfig(input: unknown): Config {
   // 上限必须严格大于下限，否则抠像区间为空；单独改任一项时自动让路。
   const keyHigh = Math.min(255, Math.max(keyLow + 1, asInt(raw.keyHigh, DEFAULT_CONFIG.keyHigh, 1, 255)));
 
-  // 视频参数都跟着模型走：换到 H3 之后旧的 `1080P` / `6 秒` 未必合法。
-  // 分辨率/时长同时受主机影响（优云智算的 H3 支持 1080P、4~30 秒）。
+  // 视频参数都跟着模型走：换到 H3 之后旧的 `1080P` / `6 秒` 未必合法；
+  // 选「优云智算版 H3」时档位放宽到 1080P、4~30 秒。
   const minimaxModel = asString(raw.minimaxModel, DEFAULT_CONFIG.minimaxModel);
   const minimaxBaseUrl = rootOf(asString(raw.minimaxBaseUrl, DEFAULT_CONFIG.minimaxBaseUrl)) || DEFAULT_CONFIG.minimaxBaseUrl;
-  const minimaxDuration = normalizeDuration(minimaxModel, raw.minimaxDuration ?? DEFAULT_CONFIG.minimaxDuration, minimaxBaseUrl);
-  const minimaxResolution = normalizeResolution(minimaxModel, raw.minimaxResolution ?? DEFAULT_CONFIG.minimaxResolution, minimaxBaseUrl);
+  const minimaxDuration = normalizeDuration(minimaxModel, raw.minimaxDuration ?? DEFAULT_CONFIG.minimaxDuration);
+  const minimaxResolution = normalizeResolution(minimaxModel, raw.minimaxResolution ?? DEFAULT_CONFIG.minimaxResolution);
 
   return {
     arkApiKey: asString(raw.arkApiKey, DEFAULT_CONFIG.arkApiKey),
