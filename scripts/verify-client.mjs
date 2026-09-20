@@ -443,6 +443,13 @@ function checkRigContracts(text, label) {
   check(`${label}：装配结果可拖动微调`, text.includes("SPR_rigBox"));
   check(`${label}：骨骼预览内联在 iframe 里`, text.includes("SPR_rigPreview"));
   check(`${label}：低置信度部件有提示`, text.includes("相似度偏低"));
+  // 面板根必须自己是滚动容器。SPR_root 是定高 flex 列，子元素默认不滚动，
+  // 内容一多就被裁掉——实测表现是「骨骼动画生成这一页没法下滑」。
+  check(
+    `${label}：骨骼动画面板自带滚动`,
+    /\.SPR_rigPanel\{[^}]*overflow:auto/.test(text),
+    /\.SPR_rigPanel\{([^}]*)\}/.exec(text)?.[1] ?? "(找不到 .SPR_rigPanel)"
+  );
 
   // 最容易漏的一条：REMOTE_METHODS 只是「向宿主声明方法名」，真正的方法体要
   // 在下面那个 api 对象里逐条挂上去。只加声明不加实现，界面一点就报
