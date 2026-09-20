@@ -1,4 +1,20 @@
+# 依赖与锁文件
+# 本包没有运行时依赖：zod / cordis / dsh-typert-protocol 都从 DSH 自身安装树解析。
+# 构建用的 node_modules 与锁文件都不入库，避免不同包管理器各带一份。
 node_modules/
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+
+# 构建缓存
+*.tsbuildinfo
+
+# 本地自检产物（scripts/verify-*.mjs、e2e-*.mjs 的输出与截图）
 .verify/
+
+# 日志与系统文件
 *.log
+npm-debug.log*
 .DS_Store
+Thumbs.db
+desktop.ini
