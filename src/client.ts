@@ -547,7 +547,7 @@
       };
 
       if (api === undefined) {
-        return h("div", { className: "SPR_root" }, h("p", { className: "SPR_empty" }, "正在挂载八方向图工坊…"));
+        return h("div", { className: "SPR_root" }, h("p", { className: "SPR_empty" }, "正在挂载游戏素材大师…"));
       }
 
       const activeStageIndex = STAGES.findIndex((s) => s.key === stage);
@@ -2631,7 +2631,7 @@
       return h(
         "section",
         { className: "SPR_settings" },
-        h("h2", { style: { margin: 0, fontSize: 15 } }, "八方向图工坊"),
+        h("h2", { style: { margin: 0, fontSize: 15 } }, "游戏素材大师"),
         h("p", { className: "SPR_hint" }, "配置两家模型的 API Key 与整条流水线的默认参数。Key 只保存在本机 DSH 数据目录下的 game-material-master/config.json（真实路径见文末「数据位置」），界面里始终脱敏显示。"),
 
         notice !== null
@@ -2809,7 +2809,7 @@
             h(
               "label",
               { className: "SPR_field" },
-              h("span", { className: "SPR_fieldLabel" }, "Base URL（主机根，不含 /v1）"),
+              h("span", { className: "SPR_fieldLabel" }, "Base URL（主机根，不含 /v1、/v2、/minimax）"),
               h("input", {
                 className: "SPR_input",
                 list: "SPR_minimax_hosts",
@@ -2824,7 +2824,7 @@
               h(
                 "span",
                 { className: "SPR_fieldLabel" },
-                `当前协议：${minimaxCaps.protocol === "v2" ? "v2（/v2/video_generation）" : "v1（/v1/video_generation）"}`
+                `当前协议：${minimaxCaps.protocol === "v2" ? `v2（${config.minimaxPathPrefix ?? ""}/v2/video_generation）` : `v1（${config.minimaxPathPrefix ?? ""}/v1/video_generation）`}`
               )
             )
           ),
@@ -3057,7 +3057,7 @@
             name: "sidebar.panellist",
             id: "gameStudio",
             order: 40,
-            label: () => "八方向图"
+            label: () => "游戏素材大师"
           },
           StudioGlyph
         )
@@ -3080,7 +3080,7 @@
             name: "settings.section",
             id: "gameStudio",
             order: 18,
-            label: () => "八方向图工坊",
+            label: () => "游戏素材大师",
             inject: () => ({ api })
           },
           ConfigSection

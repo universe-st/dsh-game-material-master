@@ -7,9 +7,8 @@
  * 这几处一旦出错，表现是远端 400，很难从错误信息反推。
  */
 
-const { protocolOf, capabilityOf, rootOf, normalizeDuration, normalizeResolution, MODEL_CAPABILITIES } = await import(
-  "../lib/minimax.js"
-);
+const { protocolOf, capabilityOf, rootOf, normalizeDuration, normalizeResolution, MODEL_CAPABILITIES, pathPrefixOf, isCompshareHost } =
+  await import("../lib/minimax.js");
 
 const failures = [];
 let checks = 0;
@@ -60,6 +59,19 @@ check("H3 保留合法的 768P", normalizeResolution("MiniMax-H3", "768P") === "
 check("H3 收到非法的 1080P → 回落到 2K", normalizeResolution("MiniMax-H3", "1080P") === "2K", normalizeResolution("MiniMax-H3", "1080P"));
 check("H3-Max 收到 2K → 回落到 768P", normalizeResolution("MiniMax-H3-Max", "2K") === "768P", normalizeResolution("MiniMax-H3-Max", "2K"));
 check("Hailuo 保留 1080P", normalizeResolution("MiniMax-Hailuo-02", "1080P") === "1080P");
+
+console.log("4b) 优云智算（cp.compshare.cn）网关");
+check("识别优云智算主机", isCompshareHost("https://cp.compshare.cn") === true && isCompshareHost("https://api.minimaxi.com") === false);
+check("优云智算路径前缀 /minimax", pathPrefixOf("https://cp.compshare.cn") === "/minimax");
+check("官方站无前缀", pathPrefixOf("https://api.minimaxi.com") === "" && pathPrefixOf("https://api.minimax.cn") === "");
+const cpCaps = capabilityOf("MiniMax-H3", "https://cp.compshare.cn");
+check("优云智算 H3 支持 1080P/2K/768P", cpCaps.resolutions.includes("1080P") && cpCaps.resolutions.includes("2K"), cpCaps.resolutions.join(","));
+check("优云智算 H3 时长放宽到 4~30", cpCaps.durationMin === 4 && cpCaps.durationMax === 30);
+check("官方 H3 能力不受影响", capabilityOf("MiniMax-H3").resolutions.join(",") === "2K,768P" && capabilityOf("MiniMax-H3").durationMax === 15);
+check("优云智算 H3 保留 1080P", normalizeResolution("MiniMax-H3", "1080P", "https://cp.compshare.cn") === "1080P");
+check("官方 H3 的 1080P 仍回落到 2K", normalizeResolution("MiniMax-H3", "1080P") === "2K");
+check("优云智算 H3 时长 20 保持 20", normalizeDuration("MiniMax-H3", 20, "https://cp.compshare.cn") === 20);
+check("官方 H3 时长 20 仍收到 15", normalizeDuration("MiniMax-H3", 20) === 15);
 
 // ── 5. 请求体构造（拦截 fetch，不产生任何费用）────────────────────────
 console.log("5) 请求体构造与响应解析（假 fetch 拦截）");
@@ -154,6 +166,26 @@ calls = []; nextPayload = { file: { download_url: "https://cdn.example.com/v1.mp
 const dl = await retrieveFile({ ...BASE, model: "MiniMax-Hailuo-02", fileId: "file-9" });
 check("v1 取件走 /v1/files/retrieve", calls[0].url === "https://api.minimaxi.com/v1/files/retrieve?file_id=file-9", calls[0].url);
 check("v1 取件拿到下载地址", dl === "https://cdn.example.com/v1.mp4");
+
+// 优云智算：同 H3 模型、同请求体，只是路径多一层 /minimax
+calls = []; nextPayload = { task_id: "task-cp" };
+await submitVideo({
+  ...BASE,
+  baseUrl: "https://cp.compshare.cn/v1", // 历史 …/v1 也应被剥掉
+  model: "MiniMax-H3",
+  prompt: "原地走三步",
+  firstFrameImage: "data:image/jpeg;base64,AAAA",
+  duration: 20,
+  resolution: "1080P"
+});
+check("优云智算 H3 打到 /minimax/v2/video_generation", calls[0].url === "https://cp.compshare.cn/minimax/v2/video_generation", calls[0].url);
+check("优云智算 H3 保留 1080P 与 20 秒", calls[0].body.resolution === "1080P" && calls[0].body.duration === 20, JSON.stringify({ r: calls[0].body.resolution, d: calls[0].body.duration }));
+check("优云智算请求体结构同官方 v2", calls[0].body.content?.[0]?.type === "text" && calls[0].body.content?.[1]?.role === "first_frame" && calls[0].body.ratio === "adaptive");
+
+calls = []; nextPayload = { task: { status: "succeeded", content: { url: "https://cdn.example.com/cp.mp4" } } };
+const qcp = await queryVideo({ ...BASE, baseUrl: "https://cp.compshare.cn", model: "MiniMax-H3", taskId: "cp-1" });
+check("优云智算查询走 /minimax/v2/query/video_generation/{id}", calls[0].url === "https://cp.compshare.cn/minimax/v2/query/video_generation/cp-1", calls[0].url);
+check("优云智算 succeeded 直接拿视频地址", qcp.status === "succeeded" && qcp.videoUrl === "https://cdn.example.com/cp.mp4");
 
 // 鉴权失败必须被认出来
 globalThis.fetch = async () =>

@@ -69,7 +69,7 @@ async function readErrorBody(response: Response): Promise<{ message: string; cod
  * 无论远端返回 url 还是 b64_json，都统一返回图片字节。
  */
 export async function generateImage(request: ArkRequest, signal?: AbortSignal): Promise<ArkResult> {
-  if (request.apiKey.trim() === "") throw new ArkError("尚未配置火山方舟 API Key（设置 → 八方向图工坊）");
+  if (request.apiKey.trim() === "") throw new ArkError("尚未配置火山方舟 API Key（设置 → 游戏素材大师）");
   if (request.model.trim() === "") throw new ArkError("尚未配置生图模型 ID");
 
   const body: Record<string, unknown> = {

@@ -12,12 +12,13 @@
 
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { extractFrames, probeDuration, probeSize, workingSize } from "../lib/media.js";
 import { composeSheet, keyGreen, segmentBackground, unionBoundingBox } from "../lib/chroma.js";
 import { encodePng } from "../lib/png.js";
 
-const ROOT = new URL("../.verify/", import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL("../.verify/", import.meta.url));
 const CELL = 64;
 const FRAMES = 8;
 const DIRECTIONS = ["front", "back", "downLeft", "downRight", "upLeft", "upRight", "left", "right"];

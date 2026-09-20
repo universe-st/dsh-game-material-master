@@ -101,11 +101,14 @@ export interface Config {
 
   /** MiniMax API Key。 */
   minimaxApiKey: string;
-  /** **主机根地址**（不含 /v1、/v2）。CN 平台是 https://api.minimax.cn。 */
+  /**
+   * **主机根地址**（不含 /v1、/v2）。CN 平台是 https://api.minimax.cn，
+   * 优云智算（MiniMax H3）是 https://cp.compshare.cn（路径自动多一层 /minimax）。
+   */
   minimaxBaseUrl: string;
   /** 图生视频模型：MiniMax-H3 / H3-Max 走 v2 协议，Hailuo / I2V 走 v1。 */
   minimaxModel: string;
-  /** 时长（秒）。H3 为 4~15，Hailuo 只能是 6 或 10。 */
+  /** 时长（秒）。官方 H3 为 4~15（优云智算版放宽到 4~30），Hailuo 只能是 6 或 10。 */
   minimaxDuration: number;
   /** `480P` / `768P` / `1080P` / `2K`，实际有效档位取决于模型。 */
   minimaxResolution: string;
@@ -207,7 +210,8 @@ export const ARK_MODEL_PRESETS = [
 
 export const MINIMAX_HOST_PRESETS = [
   { id: "https://api.minimaxi.com", label: "国际站 api.minimaxi.com" },
-  { id: "https://api.minimax.cn", label: "国内站 api.minimax.cn" }
+  { id: "https://api.minimax.cn", label: "国内站 api.minimax.cn" },
+  { id: "https://cp.compshare.cn", label: "优云智算 cp.compshare.cn（MiniMax H3）" }
 ];
 
 export const MINIMAX_MODEL_PRESETS = [
@@ -252,10 +256,11 @@ export function normalizeConfig(input: unknown): Config {
   const keyHigh = Math.min(255, Math.max(keyLow + 1, asInt(raw.keyHigh, DEFAULT_CONFIG.keyHigh, 1, 255)));
 
   // 视频参数都跟着模型走：换到 H3 之后旧的 `1080P` / `6 秒` 未必合法。
+  // 分辨率/时长同时受主机影响（优云智算的 H3 支持 1080P、4~30 秒）。
   const minimaxModel = asString(raw.minimaxModel, DEFAULT_CONFIG.minimaxModel);
   const minimaxBaseUrl = rootOf(asString(raw.minimaxBaseUrl, DEFAULT_CONFIG.minimaxBaseUrl)) || DEFAULT_CONFIG.minimaxBaseUrl;
-  const minimaxDuration = normalizeDuration(minimaxModel, raw.minimaxDuration ?? DEFAULT_CONFIG.minimaxDuration);
-  const minimaxResolution = normalizeResolution(minimaxModel, raw.minimaxResolution ?? DEFAULT_CONFIG.minimaxResolution);
+  const minimaxDuration = normalizeDuration(minimaxModel, raw.minimaxDuration ?? DEFAULT_CONFIG.minimaxDuration, minimaxBaseUrl);
+  const minimaxResolution = normalizeResolution(minimaxModel, raw.minimaxResolution ?? DEFAULT_CONFIG.minimaxResolution, minimaxBaseUrl);
 
   return {
     arkApiKey: asString(raw.arkApiKey, DEFAULT_CONFIG.arkApiKey),

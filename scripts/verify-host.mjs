@@ -173,6 +173,24 @@ async function main() {
   check("默认开启背景空间分割", initial.bgTolerance === 90, String(initial.bgTolerance));
   check("初始未配置 Key", initial.arkApiKeySet === false && initial.minimaxApiKeySet === false);
 
+  // ── 2b. 优云智算（MiniMax H3）出现在配置视图里 ─────────────────────
+  check(
+    "主机预设包含优云智算 cp.compshare.cn",
+    Array.isArray(initial.minimaxHosts) && initial.minimaxHosts.some((host) => host.id === "https://cp.compshare.cn"),
+    JSON.stringify((initial.minimaxHosts ?? []).map((host) => host.id))
+  );
+  check("默认主机（api.minimaxi.com）无 /minimax 前缀", initial.minimaxPathPrefix === "");
+  check("默认 H3 能力仍是官方档位", initial.minimaxCapabilities?.resolutions?.join(",") === "2K,768P");
+  const cpSaved = await studio.saveConfig({ minimaxBaseUrl: "https://cp.compshare.cn" });
+  check("切到优云智算后路径前缀为 /minimax", cpSaved.minimaxPathPrefix === "/minimax", cpSaved.minimaxPathPrefix);
+  check(
+    "优云智算 H3 能力放宽到 1080P/4~30",
+    cpSaved.minimaxCapabilities?.resolutions?.join(",") === "2K,1080P,768P" && cpSaved.minimaxCapabilities?.durationMax === 30,
+    JSON.stringify(cpSaved.minimaxCapabilities)
+  );
+  const cpBack = await studio.saveConfig({ minimaxBaseUrl: "https://api.minimaxi.com" });
+  check("切回官方站后前缀还原为空", cpBack.minimaxPathPrefix === "");
+
   const saved = await studio.saveConfig({ arkApiKey: "test-ark-key-1234", cellWidth: 300 });
   check("保存后标记为已配置", saved.arkApiKeySet === true);
   check("Key 只回传尾号提示", saved.arkApiKeyHint === "…1234", saved.arkApiKeyHint);
