@@ -1010,8 +1010,145 @@ async function main() {
   check("图片任务已删除", !imageJobsAfter.jobs.some((item) => item.id === imageId));
   check("序列帧任务已删除", !seqJobsAfter.jobs.some((item) => item.id === seqId));
 
-  // ── 12. 删除 ───────────────────────────────────────────────────────────
-  console.log("12) 删除项目");
+
+  // ── 12. 骨骼动画生成模块（本地链路，不调 API）──────────────────────────
+  console.log("12) 骨骼动画生成模块");
+  const createdRig = await studio.createRigJob({ name: "测试骨骼动画任务" });
+  const rigId = createdRig.jobId;
+  check("骨骼动画任务 id 形如 r…", /^r[a-z0-9]+$/.test(rigId), rigId);
+
+  // 参考图与部件都用合成素材，走真实的上传 → 装配 → 骨骼 → 图集链路。
+  {
+    const W = 240;
+    const H = 360;
+    const ref = Buffer.alloc(W * H * 4);
+    const part = (x, y, w, h, rgb) => {
+      const data = Buffer.alloc(w * h * 4);
+      for (let py = 0; py < h; py++) {
+        for (let px = 0; px < w; px++) {
+          const i = (py * w + px) * 4;
+          const shade = Math.round(28 * Math.sin((px / w) * 6) + 20 * Math.cos((py / h) * 7));
+          data[i] = Math.max(0, Math.min(255, rgb[0] + shade));
+          data[i + 1] = Math.max(0, Math.min(255, rgb[1] + shade));
+          data[i + 2] = Math.max(0, Math.min(255, rgb[2] + shade));
+          data[i + 3] = 255;
+        }
+      }
+      return { data, w, h, x, y };
+    };
+    const blit = (canvas, cw, source) => {
+      for (let py = 0; py < source.h; py++) {
+        for (let px = 0; px < source.w; px++) {
+          const tx = source.x + px;
+          const ty = source.y + py;
+          if (tx < 0 || ty < 0 || tx >= cw) continue;
+          const di = (ty * cw + tx) * 4;
+          if (di + 3 >= canvas.length) continue;
+          const si = (py * source.w + px) * 4;
+          canvas[di] = source.data[si];
+          canvas[di + 1] = source.data[si + 1];
+          canvas[di + 2] = source.data[si + 2];
+          canvas[di + 3] = 255;
+        }
+      }
+    };
+    // 参考图：白底 + 三个互不重叠的色块（头/躯干/腿）。
+    for (let i = 0; i < W * H; i++) {
+      ref[i * 4] = 250;
+      ref[i * 4 + 1] = 250;
+      ref[i * 4 + 2] = 248;
+      ref[i * 4 + 3] = 255;
+    }
+    const boxes = [
+      { name: "head", x: 95, y: 30, w: 50, h: 55, rgb: [232, 196, 156] },
+      { name: "torso", x: 85, y: 100, w: 70, h: 120, rgb: [72, 110, 190] },
+      { name: "left-upper-leg", x: 90, y: 230, w: 26, h: 90, rgb: [60, 70, 92] }
+    ];
+    for (const box of boxes) blit(ref, W, part(box.x, box.y, box.w, box.h, box.rgb));
+
+    await studio.uploadRigSource({ jobId: rigId, name: "character.png", data: encodePng(ref, W, H).toString("base64") });
+    for (const box of boxes) {
+      const raster = part(0, 0, Math.round(box.w * 1.4), Math.round(box.h * 1.4), box.rgb);
+      await studio.uploadRigPart({ jobId: rigId, name: `${box.name}.png`, data: encodePng(raster.data, raster.w, raster.h).toString("base64") });
+    }
+
+    const rigView = await studio.getRigJob({ jobId: rigId });
+    check("任务视图带相对 URL（浏览器直接用）", typeof rigView.sourceUrl === "string" && rigView.sourceUrl.startsWith("/"), String(rigView.sourceUrl));
+    check("任务视图带四个阶段", rigView.stages.length === 4 && rigView.stages[0].stage === "parts");
+    check("任务视图带逐部件清单", rigView.parts.length === boxes.length && typeof rigView.parts[0].url === "string");
+    check("Renaming 之后 id 前缀仍被识别", /^r/.test(rigView.id));
+
+    // 上传的部件名取自文件名——骨骼层级完全依赖它。
+    check("部件名取自文件名", boxes.every((box) => rigView.parts.some((part) => part.name === box.name)), rigView.parts.map((p) => p.name).join(","));
+
+    // 生成类是后台任务：立刻返回 {started:true}，要等它落盘再断言。
+    const settleRig = async (stage, timeoutMs = 120000) => {
+      const deadline = Date.now() + timeoutMs;
+      let view = await studio.getRigJob({ jobId: rigId });
+      while (Date.now() < deadline) {
+        const entry = view.stages.find((item) => item.stage === stage);
+        if (entry !== undefined && entry.status !== "running" && view.busy !== true) return view;
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        view = await studio.getRigJob({ jobId: rigId });
+      }
+      return view;
+    };
+
+    await studio.runRigLayout({ jobId: rigId });
+    let rigState = await settleRig("layout");
+    check("装配阶段完成", rigState.layout.status === "ready", rigState.layout.error ?? "");
+    check("装配出对比图", typeof rigState.layout.comparison === "string");
+    check("装配结果逐部件都有坐标", Object.keys(rigState.layout.items).length === boxes.length);
+
+    await studio.runRigBones({ jobId: rigId });
+    rigState = await settleRig("rig");
+    check("骨骼阶段完成", rigState.rig.status === "ready", rigState.rig.error ?? "");
+    check("骨骼数 = 部件数 + root", rigState.rig.bones === boxes.length + 1, String(rigState.rig.bones));
+    check("六个动画齐全", rigState.rig.animations.length === 6, rigState.rig.animations.join(","));
+
+    await studio.runRigAtlas({ jobId: rigId });
+    rigState = await settleRig("atlas");
+    check("图集阶段完成", rigState.atlas.status === "ready", rigState.atlas.error ?? "");
+    check("图集区域数 = 部件数", rigState.atlas.regions === boxes.length, String(rigState.atlas.regions));
+
+    // 资源路由：预览页必须是 text/html，否则 iframe 只会下载文件。
+    {
+      const server3 = createServer((req, res) => void handler(req, res));
+      await new Promise((resolve) => server3.listen(0, "127.0.0.1", resolve));
+      const port3 = server3.address().port;
+      try {
+        const base = `http://127.0.0.1:${port3}/dsh-game-material-master/rig-assets/${rigId}`;
+        const preview = await fetch(`${base}/rig/preview.html`).catch(() => null);
+        check("预览页可经资源路由取得", preview !== null && preview.status === 200, preview === null ? "请求失败" : String(preview.status));
+        check(
+          "预览页的 Content-Type 是 text/html（iframe 才能渲染）",
+          preview !== null && String(preview.headers.get("content-type")).startsWith("text/html"),
+          preview === null ? "无响应" : String(preview.headers.get("content-type"))
+        );
+        const html = preview === null ? "" : await preview.text();
+        check("预览页内联了骨架与部件图", html.includes("data:image/png;base64,") && html.includes("4.2.0"));
+        check("预览页没有外部依赖", !/<script[^>]+src=/.test(html) && !/<link[^>]+href=/.test(html));
+
+        const skeleton = await fetch(`${base}/rig/skeleton.json`).catch(() => null);
+        check("骨架 JSON 可取得且是 JSON 类型", skeleton !== null && skeleton.status === 200 && String(skeleton.headers.get("content-type")).includes("json"), skeleton === null ? "请求失败" : String(skeleton.status));
+        const atlasText = await fetch(`${base}/atlas/skeleton.atlas`).catch(() => null);
+        check("图集文本可取得", atlasText !== null && atlasText.status === 200, atlasText === null ? "请求失败" : String(atlasText.status));
+        const escape = await fetch(`${base}/parts/../../../project.json`).catch(() => null);
+        check("骨骼动画模块同样挡住目录穿越", escape !== null && [400, 403, 404].includes(escape.status), escape === null ? "请求失败" : String(escape.status));
+        const badPrefix = await fetch(`http://127.0.0.1:${port3}/dsh-game-material-master/rig-assets/p000000000000/rig/preview.html`).catch(() => null);
+        check("骨骼动画：跨模块用错 id 前缀会被拒绝", badPrefix !== null && badPrefix.status === 400, badPrefix === null ? "请求失败" : String(badPrefix.status));
+      } finally {
+        await new Promise((resolve) => server3.close(resolve));
+      }
+    }
+
+    await studio.deleteRigJob({ jobId: rigId });
+    const rigJobsAfter = await studio.listRigJobs();
+    check("骨骼动画任务已删除", !rigJobsAfter.jobs.some((item) => item.id === rigId));
+  }
+
+  // ── 13. 删除 ───────────────────────────────────────────────────────────
+  console.log("13) 删除项目");
   await studio.deleteProject({ projectId });
   const after = await studio.listProjects();
   check("项目已从列表移除", !after.projects.some((p) => p.id === projectId));

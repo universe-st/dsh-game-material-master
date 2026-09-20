@@ -214,7 +214,61 @@ check("图集区域数 = 部件数", state.atlas.regions === state.parts.length,
   check("挂点尺寸与图集区域一致", mismatch.length === 0, mismatch.join(" | "));
 }
 
-console.log("=== 6. 验收打标与列表 ===");
+console.log("=== 6. 任务视图契约（界面与对话工具共用同一份） ===");
+state = await riggen.readRigJob(job.id);
+const view = riggen.rigSnapshot(state);
+check("视图带相对 URL", typeof view.sourceUrl === "string" && view.sourceUrl.startsWith("/"), String(view.sourceUrl));
+check("视图带 assetBase", typeof view.assetBase === "string" && view.assetBase.startsWith("/"), view.assetBase);
+check("URL 里不含 http（浏览器直接用相对路径）", !JSON.stringify(view).includes("http://"));
+check("四个阶段都有 stage 字段", ["parts", "layout", "rig", "atlas"].every((key) => view.stages.some((entry) => entry.stage === key)));
+check("阶段顺序与界面一致", view.stages.map((entry) => entry.stage).join(",") === "parts,layout,rig,atlas");
+check("界面要的 prompts/settings 都在", typeof view.prompts.sheet === "string" && typeof view.settings.gridColumns === "number");
+check("layout.items 是逐部件记录", typeof view.layout.items === "object" && Object.keys(view.layout.items).length === state.parts.length);
+check("rig.preview / skeleton 都是可打开的 URL", typeof view.rig.preview === "string" && view.rig.preview.endsWith(".html"));
+check("atlas.url / text 都在", typeof view.atlas.url === "string" && typeof view.atlas.text === "string");
+check("parts 带 url / placed / score", view.parts.every((part) => "url" in part && "placed" in part && "score" in part));
+check("review.unmatched 是数组", Array.isArray(view.review.unmatched));
+check("带运行日志", Array.isArray(view.log));
+
+// 这是最容易漏的一类 bug（实测踩过两次）：
+//   · 客户端声明了远程方法却忘了挂到 api 上 → 一点就 “is not a function”；
+//   · 客户端按派生字段写，网关却返回原始任务 → 按钮一直是灰的、图片 404。
+// 两处都是**编译期看不出来**的隐式 any。这里把「客户端读了哪些字段」直接扫出来，
+// 逐条对着真实视图核对，字段改名 / 少返回都会立刻失败。
+{
+  const clientSource = await readFile(new URL("../src/client.ts", import.meta.url), "utf8");
+  const start = clientSource.indexOf("function RigModule(");
+  const body = clientSource.slice(start, clientSource.indexOf("// ── 设置页", start));
+  const topLevel = new Set(Object.keys(view));
+  const containers = { parts: view.parts[0], layout: view.layout, rig: view.rig, atlas: view.atlas, stages: view.stages[0], sheet: view.sheet, review: view.review };
+  const missing = [];
+  for (const match of body.matchAll(/\bjob(?:\?\.)?\.([A-Za-z_][A-Za-z0-9_]*)/g)) {
+    const field = match[1];
+    if (!topLevel.has(field)) missing.push(`job.${field}`);
+  }
+  check(
+    `RigModule 读取的 job.* 字段视图里都有（${topLevel.size} 个顶层字段）`,
+    missing.length === 0,
+    missing.length === 0 ? "" : `缺：${[...new Set(missing)].join("、")}`
+  );
+  const missingNested = [];
+  for (const [container, sample] of Object.entries(containers)) {
+    if (sample === undefined) continue;
+    const keys = new Set(Object.keys(sample));
+    const pattern = new RegExp(`(?:$\\{)?(?:part|stage|entry|item|current|pt)\\?\\.([A-Za-z_][A-Za-z0-9_]*)`, "g");
+    for (const match of body.matchAll(pattern)) {
+      const field = match[1];
+      if (!keys.has(field)) missingNested.push(`${container}.${field}`);
+    }
+  }
+  check(
+    "RigModule 读取的子字段视图里也都有",
+    missingNested.length === 0,
+    missingNested.length === 0 ? "" : `可能缺：${[...new Set(missingNested)].join("、")}`
+  );
+}
+
+console.log("=== 7. 验收打标与列表 ===");
 await riggen.setRigStageApproved(job.id, "rig", true);
 await riggen.setRigPartApproved(job.id, "head", true);
 state = await riggen.readRigJob(job.id);
@@ -226,7 +280,7 @@ const summaries = await riggen.listRigJobs();
 check("任务列表能读到本任务", summaries.length === 1 && summaries[0].id === job.id);
 check("列表统计部件数正确", summaries[0].partCount === state.parts.length, String(summaries[0].partCount));
 
-console.log("=== 7. 删除部件会让下游作废 ===");
+console.log("=== 8. 删除部件会让下游作废 ===");
 let threw = false;
 try {
   await riggen.removeRigPart(job.id, "neck");
@@ -240,7 +294,7 @@ check("部件已删除", !state.parts.some((part) => part.name === "left-foot"))
 check("删除后装配记录被清空", Object.keys(state.layout.items).length === 0);
 check("删除后骨骼与图集重置", state.rig.status === "empty" && state.atlas.status === "empty");
 
-console.log("=== 8. 清理 ===");
+console.log("=== 9. 清理 ===");
 await riggen.deleteRigJob(job.id);
 check("任务目录已删除", !(await exists(riggen.rigJobDir(job.id))));
 await rm(sandbox, { recursive: true, force: true });

@@ -3694,8 +3694,9 @@
       const canvasH = job.source?.height ?? 1;
       const items = job.layout?.items ?? {};
       const parts = (job.parts ?? []).filter((part) => part.status === "ready" && part.hidden !== true);
-      const compositeUrl = assetUrl(job, job.layout?.composite, job.layout?.updatedAt);
-      const referenceUrl = assetUrl(job, job.source?.file, job.updatedAt);
+      // 任务视图里的 URL 已经是拼好的（宿主与对话工具共用同一份），这里直接用。
+      const compositeUrl = job.layout?.composite ?? null;
+      const referenceUrl = job.sourceUrl ?? null;
 
       const onImageLoad = (event) => {
         const width = event.target.clientWidth;
@@ -3840,6 +3841,14 @@
           if (api === undefined || id === null) return;
           try {
             const next = await api.getRigJob({ jobId: id });
+            // 宿主半区是进程启动时冻结的模块图：如果它还是旧版本，返回的是原始任务
+            // 而不是统一视图，界面会以各种「读不到字段」的形式坏掉。与其让用户对着
+            // 一个灰按钮猜，不如直说。
+            if (next !== null && next !== undefined && next.sourceUrl === undefined && (next.stages ?? []).every((entry) => entry.stage === undefined)) {
+              setNotice({ kind: "error", text: "宿主半区版本过旧（缺少骨骼动画模块的字段）。请重启 DSH Desktop 后重试。" });
+              setJob(null);
+              return;
+            }
             setJob(next);
             setPromptDraft(next.prompts?.sheet ?? "");
             setSuffixDraft(next.prompts?.suffix ?? "");
@@ -4891,7 +4900,29 @@
         keySequenceFrames: (payload) => call("keySequenceFrames", payload),
         composeSequence: (payload) => call("composeSequence", payload),
         setReviewMode: (payload) => call("setReviewMode", payload),
-        reportClientOrigin: (payload) => call("reportClientOrigin", payload)
+        reportClientOrigin: (payload) => call("reportClientOrigin", payload),
+
+        // 模块④：骨骼动画生成。
+        // 注意：这张表必须与上面的 REMOTE_METHODS 逐条对应——REMOTE_METHODS 只负责
+        // 向宿主的远程服务**声明**方法名，真正的方法体是在这里逐个挂到 api 上的。
+        // 只加声明、忘了加这里，界面就会在调用时报 “api.xxx is not a function”。
+        // scripts/verify-client.mjs 里有一条契约专门盯这件事。
+        listRigJobs: () => call("listRigJobs"),
+        createRigJob: (payload) => call("createRigJob", payload),
+        getRigJob: (payload) => call("getRigJob", payload),
+        deleteRigJob: (payload) => call("deleteRigJob", payload),
+        saveRigJob: (payload) => call("saveRigJob", payload),
+        uploadRigSource: (payload) => call("uploadRigSource", payload),
+        uploadRigPart: (payload) => call("uploadRigPart", payload),
+        removeRigPart: (payload) => call("removeRigPart", payload),
+        renameRigPart: (payload) => call("renameRigPart", payload),
+        setRigPartVisibility: (payload) => call("setRigPartVisibility", payload),
+        saveRigLayoutItem: (payload) => call("saveRigLayoutItem", payload),
+        runRigSheet: (payload) => call("runRigSheet", payload),
+        runRigSegment: (payload) => call("runRigSegment", payload),
+        runRigLayout: (payload) => call("runRigLayout", payload),
+        runRigBones: (payload) => call("runRigBones", payload),
+        runRigAtlas: (payload) => call("runRigAtlas", payload)
       };
 
       // ── 深链接：会话里的链接点一下切到本插件页面 ─────────────────────

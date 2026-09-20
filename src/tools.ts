@@ -32,7 +32,7 @@ import { listJobs } from "./pipeline.js";
 import { listProjects, readProject } from "./store.js";
 import { listImageJobs, readImageJob, sniffImage } from "./imagegen.js";
 import { listSequenceJobs, readSequenceJob, listSequenceTasks } from "./seqgen.js";
-import { listRigJobs, readRigJob, listRigTasks } from "./riggen.js";
+import { listRigJobs, readRigJob, rigSnapshot } from "./riggen.js";
 import { TOOL_METHODS } from "./wire.js";
 import { PANEL_KEY, buildOpenLink, originForLinks, type OpenIntent } from "./links.js";
 
@@ -238,105 +238,6 @@ function sequenceSnapshot(job: any) {
   };
 }
 
-function rigSnapshot(job: any) {
-  const assetBase = `${ROUTE_PREFIX}/rig-assets/${job.id}/`;
-  const items = (job.layout?.items ?? {}) as Record<string, any>;
-  const parts = (job.parts ?? []).map((part: any) => {
-    const item = items[part.name];
-    return {
-      name: part.name,
-      label: part.label,
-      status: part.status,
-      source: part.source,
-      hidden: part.hidden === true,
-      approved: part.approved === true,
-      width: part.width,
-      height: part.height,
-      opacity: part.opacity,
-      file: part.file,
-      url: assetUrl(assetBase, part.file),
-      placed: item !== undefined && item.matched === true,
-      manual: item?.manual === true,
-      score: item?.score,
-      // 装配结果：像素框 + 缩放 + 层级。用户可以据此判断「这块摆对没有」。
-      layout: item === undefined ? null : { x: item.x, y: item.y, width: item.width, height: item.height, scale: item.scale, rotation: item.rotation, z: item.z },
-      ...(typeof part.error === "string" && part.error !== "" ? { error: part.error } : {})
-    };
-  });
-  const stages = [
-    {
-      stage: "parts",
-      title: "① 拆件",
-      status: job.sheet?.status,
-      approved: job.sheet?.approved === true,
-      url: assetUrl(assetBase, job.sheet?.file),
-      partReady: parts.filter((part: any) => part.status === "ready").length,
-      error: job.sheet?.error
-    },
-    {
-      stage: "layout",
-      title: "② 装配定位",
-      status: job.layout?.status,
-      approved: job.layout?.approved === true,
-      composite: assetUrl(assetBase, job.layout?.composite),
-      comparison: assetUrl(assetBase, job.layout?.comparison),
-      hint: job.layout?.hint ?? null,
-      moved: job.layout?.moved ?? [],
-      resolved: job.layout?.resolved ?? [],
-      unmatched: parts.filter((part: any) => !part.placed).map((part: any) => part.name),
-      error: job.layout?.error
-    },
-    {
-      stage: "rig",
-      title: "③ 骨骼与动画",
-      status: job.rig?.status,
-      approved: job.rig?.approved === true,
-      skeleton: assetUrl(assetBase, job.rig?.skeleton),
-      preview: assetUrl(assetBase, job.rig?.preview),
-      bones: job.rig?.bones,
-      slots: job.rig?.slots,
-      animations: job.rig?.animations ?? [],
-      warnings: job.rig?.warnings ?? [],
-      error: job.rig?.error
-    },
-    {
-      stage: "atlas",
-      title: "④ 图集",
-      status: job.atlas?.status,
-      approved: job.atlas?.approved === true,
-      image: assetUrl(assetBase, job.atlas?.image),
-      text: assetUrl(assetBase, job.atlas?.text),
-      width: job.atlas?.width,
-      height: job.atlas?.height,
-      regions: job.atlas?.regions,
-      error: job.atlas?.error
-    }
-  ];
-  return {
-    module: "rig" as const,
-    id: job.id,
-    name: job.name,
-    reviewMode: job.reviewMode ?? null,
-    sourceFile: job.source?.file ?? null,
-    sourceUrl: assetUrl(assetBase, job.source?.file),
-    canvas: job.source === undefined ? null : { width: job.source.width, height: job.source.height },
-    prompt: job.prompts?.sheet ?? "",
-    suffix: job.prompts?.suffix ?? "",
-    settings: job.settings,
-    busy: stages.some((stage) => stage.status === "running") || listRigTasks(job.id).length > 0,
-    stages,
-    parts,
-    review: {
-      parts: parts.filter((part: any) => part.status === "ready").length,
-      approved: parts.filter((part: any) => part.approved).length,
-      placed: parts.filter((part: any) => part.placed).length,
-      unmatched: parts.filter((part: any) => part.status === "ready" && !part.placed).map((part: any) => part.name),
-      errors: stages.filter((stage) => stage.status === "error").map((stage) => stage.stage)
-    },
-    runningTasks: listRigTasks(job.id)
-  };
-}
-
 /** 读一个目标（项目 / 图片任务 / 序列帧任务 / 骨骼动画任务）的快照。 */
 async function snapshotOf(module: ModuleKey, id: string): Promise<any> {
   if (module === "sprite") {
@@ -356,7 +257,8 @@ async function snapshotOf(module: ModuleKey, id: string): Promise<any> {
   }
   const job = await readRigJob(id);
   if (job === undefined) throw new Error(`找不到骨骼动画任务：${id}`);
-  return rigSnapshot(job);
+  // 工具侧要的是**绝对** URL（会直接贴给用户点），所以带上已上报的 origin。
+  return rigSnapshot(job, originForLinks());
 }
 
 /** 猜一个目标属于哪个模块：显式声明优先，其次按 id 前缀。 */

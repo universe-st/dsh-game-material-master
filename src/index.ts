@@ -890,12 +890,11 @@ export class GameStudioGateway extends TypertRemoteService {
     const jobId = asString(asRecord(payload).jobId);
     const job = await riggen.readRigJob(jobId);
     if (job === undefined) throw new Error(`任务不存在：${jobId}`);
+    // 界面拿的是**与对话工具同一份**任务视图（相对 URL），字段不会再各拼一份。
     return {
-      ...job,
-      tasks: riggen.listRigTasks(jobId),
-      stages: riggen.RIG_STAGES,
-      animations: riggen.RIG_ANIMATIONS,
-      assetBase: `${ROUTE_PREFIX}/rig-assets/${jobId}/`
+      ...riggen.rigSnapshot(job),
+      stageList: riggen.RIG_STAGES,
+      animationPresets: riggen.RIG_ANIMATIONS
     };
   }
 

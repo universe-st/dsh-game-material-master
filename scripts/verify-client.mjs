@@ -443,6 +443,19 @@ function checkRigContracts(text, label) {
   check(`${label}：装配结果可拖动微调`, text.includes("SPR_rigBox"));
   check(`${label}：骨骼预览内联在 iframe 里`, text.includes("SPR_rigPreview"));
   check(`${label}：低置信度部件有提示`, text.includes("相似度偏低"));
+
+  // 最容易漏的一条：REMOTE_METHODS 只是「向宿主声明方法名」，真正的方法体要
+  // 在下面那个 api 对象里逐条挂上去。只加声明不加实现，界面一点就报
+  // “api.xxx is not a function”——编译期完全看不出来（api 是隐式 any）。
+  const declared = [...text.matchAll(/\["([A-Za-z0-9_]+)",\s*(?:true|false)\]/g)].map((m) => m[1]);
+  const unique = [...new Set(declared)];
+  // 实现侧的判据是「出现了 call("方法名")」，与缩进无关（src 与打包后的 lib 缩进不同）。
+  const missing = unique.filter((name) => !text.includes(`call("${name}"`));
+  check(
+    `${label}：REMOTE_METHODS 的每个方法都有 api 实现（共 ${unique.length} 个）`,
+    missing.length === 0,
+    missing.length === 0 ? "" : `缺实现：${missing.join("、")}`
+  );
   check(
     `${label}：生成类调用都带 loading 文案`,
     [

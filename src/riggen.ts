@@ -522,6 +522,164 @@ function normalizeRigJob(raw: any): RigJob {
   };
 }
 
+// ── 对外视图 ────────────────────────────────────────────────────────────
+
+/**
+ * 任务视图：界面与对话工具用的是**同一份形状**。
+ *
+ * 这里刻意做成「原始任务 + 算好的派生字段」的超集：
+ *   - 界面需要原始字段（`settings` / `prompts` / `layout.items`）来编辑；
+ *   - 对话工具需要派生字段（每个产物的绝对 URL、逐阶段状态、未命中清单）。
+ * 两处各拼一份的话，字段名迟早会漂移——实测就踩过：界面按派生字段写、
+ * 网关却返回原始任务，结果按钮因为读不到 `sourceUrl` 一直是灰的。
+ *
+ * `origin` 为空时返回**相对路径**（浏览器直接用）；工具侧传 origin，
+ * 拿到的是可以直接贴给用户的绝对 URL。
+ */
+export function rigSnapshot(job: RigJob, origin = "") {
+  const assetBase = `${origin}/dsh-game-material-master/rig-assets/${job.id}/`;
+  const url = (relative: string | undefined): string | undefined =>
+    typeof relative === "string" && relative !== "" ? `${assetBase}${relative}` : undefined;
+  const items = job.layout.items;
+
+  const parts = job.parts.map((part) => {
+    const item = items[part.name];
+    return {
+      name: part.name,
+      label: part.label,
+      status: part.status,
+      source: part.source,
+      hidden: part.hidden === true,
+      approved: part.approved === true,
+      width: part.width,
+      height: part.height,
+      opacity: part.opacity,
+      gridX: part.gridX,
+      gridY: part.gridY,
+      file: part.file,
+      url: url(part.file),
+      placed: item !== undefined && item.matched === true,
+      manual: item?.manual === true,
+      score: item?.score,
+      coverage: item?.coverage,
+      error: part.error
+    };
+  });
+
+  const stages = [
+    {
+      stage: "parts" as const,
+      title: "① 拆件",
+      status: job.sheet.status,
+      approved: job.sheet.approved === true,
+      url: url(job.sheet.file),
+      file: job.sheet.file,
+      error: job.sheet.error,
+      partReady: parts.filter((part) => part.status === "ready").length
+    },
+    {
+      stage: "layout" as const,
+      title: "② 装配定位",
+      status: job.layout.status,
+      approved: job.layout.approved === true,
+      composite: url(job.layout.composite),
+      comparison: url(job.layout.comparison),
+      hint: job.layout.hint ?? null,
+      moved: job.layout.moved ?? [],
+      resolved: job.layout.resolved ?? [],
+      unmatched: parts.filter((part) => part.status === "ready" && !part.placed).map((part) => part.name),
+      error: job.layout.error
+    },
+    {
+      stage: "rig" as const,
+      title: "③ 骨骼与动画",
+      status: job.rig.status,
+      approved: job.rig.approved === true,
+      skeleton: url(job.rig.skeleton),
+      preview: url(job.rig.preview),
+      bones: job.rig.bones,
+      slots: job.rig.slots,
+      animations: job.rig.animations ?? [],
+      warnings: job.rig.warnings ?? [],
+      error: job.rig.error
+    },
+    {
+      stage: "atlas" as const,
+      title: "④ 图集",
+      status: job.atlas.status,
+      approved: job.atlas.approved === true,
+      image: url(job.atlas.image),
+      text: url(job.atlas.text),
+      width: job.atlas.width,
+      height: job.atlas.height,
+      regions: job.atlas.regions,
+      error: job.atlas.error
+    }
+  ];
+
+  return {
+    module: "rig" as const,
+    id: job.id,
+    name: job.name,
+    reviewMode: job.reviewMode ?? null,
+    assetBase,
+    sourceFile: job.source?.file ?? null,
+    sourceUrl: url(job.source?.file),
+    canvas: job.source === undefined ? null : { width: job.source.width, height: job.source.height },
+    prompts: { sheet: job.prompts.sheet, suffix: job.prompts.suffix },
+    prompt: job.prompts.sheet,
+    suffix: job.prompts.suffix,
+    settings: job.settings,
+    // 拆件图阶段单独给一份，界面要直接拿 url 显示原图。
+    sheet: { status: job.sheet.status, approved: job.sheet.approved === true, url: url(job.sheet.file), file: job.sheet.file, error: job.sheet.error },
+    layout: {
+      status: job.layout.status,
+      approved: job.layout.approved === true,
+      error: job.layout.error,
+      items,
+      composite: url(job.layout.composite),
+      comparison: url(job.layout.comparison),
+      hint: job.layout.hint ?? null,
+      moved: job.layout.moved ?? [],
+      resolved: job.layout.resolved ?? []
+    },
+    rig: {
+      status: job.rig.status,
+      approved: job.rig.approved === true,
+      error: job.rig.error,
+      skeleton: url(job.rig.skeleton),
+      preview: url(job.rig.preview),
+      bones: job.rig.bones,
+      slots: job.rig.slots,
+      animations: job.rig.animations ?? [],
+      warnings: job.rig.warnings ?? []
+    },
+    atlas: {
+      status: job.atlas.status,
+      approved: job.atlas.approved === true,
+      error: job.atlas.error,
+      image: url(job.atlas.image),
+      text: url(job.atlas.text),
+      url: url(job.atlas.image),
+      width: job.atlas.width,
+      height: job.atlas.height,
+      regions: job.atlas.regions
+    },
+    busy: stages.some((stage) => stage.status === "running") || listRigTasks(job.id).length > 0,
+    stages,
+    parts,
+    review: {
+      parts: parts.filter((part) => part.status === "ready").length,
+      approved: parts.filter((part) => part.approved).length,
+      placed: parts.filter((part) => part.placed).length,
+      unmatched: parts.filter((part) => part.status === "ready" && !part.placed).map((part) => part.name),
+      errors: stages.filter((stage) => stage.status === "error").map((stage) => stage.stage)
+    },
+    runningTasks: listRigTasks(job.id),
+    log: job.log
+  };
+}
+
 // ── 素材上传 ────────────────────────────────────────────────────────────
 
 export async function setRigSource(jobId: string, name: string, base64: string): Promise<{ width: number; height: number }> {

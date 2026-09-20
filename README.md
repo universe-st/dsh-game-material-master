@@ -410,6 +410,23 @@ row 4: left-lower-leg| right-lower-leg| left-foot        | right-foot
 
 ## 开发
 
+### 改了代码之后怎么生效
+
+| 改了哪里 | 怎么生效 |
+|---|---|
+| `src/client.ts`（浏览器半区） | 刷新页面即可——客户端 bundle 由宿主按请求从磁盘读，带上 `rev` 指纹 |
+| `src/*.ts` 的宿主半区（网关、路由、工具、流水线） | **必须重启 Harness**（菜单 `Harness → 重启 Harness`，快捷键 `⌘⇧R`）。宿主半区是进程启动时冻结的模块图，改 YAML / 碰文件都不会让它重新 import |
+
+这一点会真实地咬人：宿主半区是旧版而客户端是新版时，界面会以各种「读不到字段」的形式
+坏掉（按钮一直是灰的、图片 404），而不是报一个明确的错。所以：
+
+- 客户端在 `RigModule` 里对形状做了显式检查，版本对不上会直接提示「请重启 DSH Desktop」；
+- `scripts/verify-rig-module.mjs` 有一条契约扫描 `RigModule` 读了哪些 `job.*` / `part.*`
+  字段，逐条对着真实视图核对；
+- `scripts/verify-client.mjs` 有一条契约核对 `REMOTE_METHODS` 里的**每个**方法都在
+  `api` 对象上有实现——`REMOTE_METHODS` 只负责向宿主声明方法名，忘了挂实现时
+  编译期完全看不出来（`api` 是隐式 any），一点就报 `api.xxx is not a function`。
+
 ### 自检脚本
 
 | 脚本 | 覆盖 |
@@ -417,7 +434,8 @@ row 4: left-lower-leg| right-lower-leg| left-foot        | right-foot
 | `node scripts/verify-rig.mjs` | 模块四算法层：拆件分割、装配定位精度、遮挡排序、骨骼初始姿态逐像素还原、Spine 4.2 wire format、图集装箱、预览 HTML（合成图像素级断言） |
 | `node scripts/verify-rig-module.mjs` | 模块四端到端：建任务 → 上传 → 装配 → 骨骼 → 图集 → 打标 → 删除级联（走真实模块代码，数据落在临时 DSH_HOME） |
 | `node scripts/e2e-rig-live.mjs <角色整图>` | 模块四真实链路：**真的调一次生图模型**拆件，再跑完装配/骨骼/图集（约 0.2 元） |
-| `node scripts/verify-host.mjs` / `verify-tools.mjs` / `verify-client.mjs` / `verify-pipeline.mjs` | 宿主、对话调用面、浏览器半区契约、抠像回归 |
+| `node scripts/verify-host.mjs` | 宿主半区全链路（**225 项**）：四个模块的本地链路、资源路由、预览页的 `text/html`、目录穿越与 id 前缀校验 |
+| `node scripts/verify-tools.mjs` / `verify-client.mjs` / `verify-pipeline.mjs` | 对话调用面、浏览器半区契约（含「每个远程方法都有 api 实现」）、抠像回归 |
 
 
 
