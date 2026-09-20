@@ -441,6 +441,24 @@ function checkRigContracts(text, label) {
     ["① 拆件", "② 装配定位", "③ 骨骼与动画", "④ 图集"].every((entry) => text.includes(entry))
   );
   check(`${label}：装配结果可拖动微调`, text.includes("SPR_rigBox"));
+  // 手动装配编辑器：拖拽 / 缩放 / 键盘 / 吸附 / 撤销 / 图层 / 部件栏，缺一样就是残的。
+  for (const [feature, token] of [
+    ["画布是客户端自己叠的分层", ".SPR_asmLayer"],
+    ["选中后有缩放手柄", ".SPR_asmHandle"],
+    ["未放置部件有部件栏（可拖进画布）", ".SPR_asmPalette"],
+    ["有图层列表", ".SPR_asmLayers"],
+    ["有对齐参考线", ".SPR_asmGuide"],
+    ["键盘方向键微调", "ArrowLeft"],
+    ["Delete 收回部件", "Delete"],
+    ["Ctrl/Cmd+Z 撤销", 'toLowerCase() === "z"'],
+    ["吸附开关", "吸附"],
+    ["锁等比开关", "锁等比"],
+    ["撤销/重做", "重做"],
+    ["参考图做底图对位", "参考图底图"],
+    ["图层置顶置底", "置顶"]
+  ]) {
+    check(`${label}：手动装配有${feature}`, text.includes(token));
+  }
   check(`${label}：骨骼预览内联在 iframe 里`, text.includes("SPR_rigPreview"));
   check(`${label}：低置信度部件有提示`, text.includes("相似度偏低"));
   // 面板根必须自己是滚动容器。SPR_root 是定高 flex 列，子元素默认不滚动，
@@ -462,6 +480,23 @@ function checkRigContracts(text, label) {
     `${label}：REMOTE_METHODS 的每个方法都有 api 实现（共 ${unique.length} 个）`,
     missing.length === 0,
     missing.length === 0 ? "" : `缺实现：${missing.join("、")}`
+  );
+  // 「从部件栏拖进画布」必须由**它自己**那个 mouseup 收尾，不能被更早注册的
+  // 移动/缩放 mouseup 抢走：那个 effect 先跑、把 drag 置空，React 同步重渲染后
+  // 就把后面的监听器当清理函数摘掉了——实测表现是拖进去毫无反应、撤销也不亮。
+  check(
+    `${label}：移动/缩放 effect 不吞「拖进画布」`,
+    /drag\.kind !== "move"\s*&&\s*drag\.kind !== "resize"/.test(text) && /drag\.kind !== "place"/.test(text),
+    "移动/缩放 mouseup 必须过滤 kind，否则 place 拖放不生效"
+  );
+  // 本地草稿写的是 `placed`（操作意图），而图层显隐/已放置计数读的是 `matched`
+  // （宿主也是读 placed 写 matched 的）。合并时不把两个键对齐，Delete 收回、
+  // 部件栏拖入这类纯本地改动就要等宿主回包才看得见——通信一失败界面就一动不动，
+  // 实测会被当成「整个手动装配是坏的」。
+  check(
+    `${label}：本地草稿把 placed 折算成 matched`,
+    /matched:\s*local\.placed !== false/.test(text),
+    "items 合并处必须由 placed 推导 matched"
   );
   check(
     `${label}：生成类调用都带 loading 文案`,

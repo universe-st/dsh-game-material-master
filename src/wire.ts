@@ -153,6 +153,23 @@ const rigLayoutItemSchema = z.object({
   z: z.number().optional()
 });
 const runRigLayoutSchema = z.object({ jobId: z.string(), names: z.array(z.string()).optional() });
+const saveRigLayoutItemsSchema = z.object({
+  jobId: z.string(),
+  /** 一次手动装配动作里的全部改动（拖动 / 缩放 / 键盘微调 / 改层级）。 */
+  items: z.array(
+    z.object({
+      name: z.string(),
+      x: z.number().optional(),
+      y: z.number().optional(),
+      width: z.number().optional(),
+      height: z.number().optional(),
+      rotation: z.number().optional(),
+      z: z.number().optional(),
+      /** false = 收回未摆放状态（从画布上取下来）。 */
+      placed: z.boolean().optional()
+    })
+  )
+});
 const setRigLayoutHintsSchema = z.object({
   jobId: z.string(),
   /**
@@ -255,6 +272,7 @@ export const METHODS: MethodSpec[] = [
   { method: "renameRigPart", payload: renameRigPartSchema, result: okSchema },
   { method: "setRigPartVisibility", payload: rigPartFlagSchema, result: okSchema },
   { method: "saveRigLayoutItem", payload: rigLayoutItemSchema, result: okSchema },
+  { method: "saveRigLayoutItems", payload: saveRigLayoutItemsSchema, result: okSchema },
   { method: "setRigLayoutHints", payload: setRigLayoutHintsSchema, result: okSchema },
   { method: "runRigSheet", payload: rigJobIdSchema, result: startedSchema },
   { method: "runRigSegment", payload: rigJobIdSchema, result: startedSchema },

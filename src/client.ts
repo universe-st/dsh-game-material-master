@@ -99,6 +99,7 @@
       ["renameRigPart", true],
       ["setRigPartVisibility", true],
       ["saveRigLayoutItem", true],
+      ["saveRigLayoutItems", true],
       ["setRigLayoutHints", true],
       ["runRigSheet", true],
       ["runRigSegment", true],
@@ -478,6 +479,35 @@
 .SPR_rigCanvasWrap[data-drag=true]{cursor:grabbing}
 .SPR_rigBox{position:absolute;border:1.5px solid rgba(63,111,255,.85);border-radius:3px;box-sizing:border-box;cursor:grab;background:rgba(63,111,255,.10)}
 .SPR_rigBox[data-selected=true]{border-color:#ff9f2e;background:rgba(255,159,46,.18);box-shadow:0 0 0 1px rgba(255,159,46,.6)}
+/* ── 手动装配编辑器 ──────────────────────────────────────────────────── */
+.SPR_asm{display:flex;flex-direction:column;gap:10px}
+.SPR_asmBar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 10px;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;background:var(--dsw-alias-bg-layer-1)}
+.SPR_asmGroup{display:flex;align-items:center;gap:5px}
+.SPR_asmHint{font-size:11px;color:var(--dsw-alias-label-tertiary)}
+.SPR_asmBody{display:flex;gap:12px;align-items:flex-start}
+.SPR_asmStage{flex:1;min-width:0;max-height:70vh;overflow:auto;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;background:#fff;padding:8px;display:flex;justify-content:center}
+.SPR_asmCanvas{position:relative;flex:none;background:#fff;background-image:linear-gradient(45deg,rgba(128,128,128,.12) 25%,transparent 25%,transparent 75%,rgba(128,128,128,.12) 75%),linear-gradient(45deg,rgba(128,128,128,.12) 25%,transparent 25%,transparent 75%,rgba(128,128,128,.12) 75%);background-size:20px 20px;background-position:0 0,10px 10px;user-select:none}
+.SPR_asmRef{position:absolute;left:0;top:0;width:100%;height:100%;opacity:.3;pointer-events:none;object-fit:fill}
+.SPR_asmLayer{position:absolute;transform-origin:center center;pointer-events:none;image-rendering:auto}
+.SPR_asmGuide{position:absolute;top:0;bottom:0;width:1px;background:rgba(255,159,46,.9);pointer-events:none}
+.SPR_asmHandle{position:absolute;width:9px;height:9px;margin:-5px 0 0 -5px;border:1.5px solid #ff9f2e;background:#fff;border-radius:2px;cursor:pointer}
+.SPR_asmHandle[data-handle=nw],.SPR_asmHandle[data-handle=se]{cursor:nwse-resize}
+.SPR_asmHandle[data-handle=ne],.SPR_asmHandle[data-handle=sw]{cursor:nesw-resize}
+.SPR_asmHandle[data-handle=n],.SPR_asmHandle[data-handle=s]{cursor:ns-resize}
+.SPR_asmHandle[data-handle=e],.SPR_asmHandle[data-handle=w]{cursor:ew-resize}
+.SPR_asmSide{width:292px;flex:none;display:flex;flex-direction:column;gap:10px;max-height:70vh;overflow:auto}
+.SPR_asmPalette{display:flex;flex-wrap:wrap;gap:6px;min-height:36px;padding:6px;border:1px dashed var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-1)}
+.SPR_asmChip{display:flex;flex-direction:column;align-items:center;gap:2px;width:62px;padding:4px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-3);cursor:grab;font-size:10px;line-height:12px;text-align:center;overflow:hidden}
+.SPR_asmChip img{width:52px;height:52px;object-fit:contain;pointer-events:none}
+.SPR_asmChip span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.SPR_asmPanel{border:1px solid var(--dsw-alias-border-l2);border-radius:10px;padding:10px;background:var(--dsw-alias-bg-layer-1);display:flex;flex-direction:column;gap:8px}
+.SPR_asmFields{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.SPR_asmFields .SPR_field{max-width:none}
+.SPR_asmRow{display:flex;gap:6px;flex-wrap:wrap}
+.SPR_asmLayers{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px;max-height:220px;overflow:auto}
+.SPR_asmLayers li{display:flex;align-items:center;gap:6px;padding:3px 6px;border-radius:6px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);font-size:11px;cursor:pointer}
+.SPR_asmLayers li[data-active=true]{border-color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-bg-layer-1)}
+.SPR_asmLayerBtns{margin-left:auto;display:flex;gap:3px}
 .SPR_rigHintBox{position:absolute;border:1px dashed rgba(255,159,46,.85);border-radius:4px;pointer-events:none;box-sizing:border-box}
 .SPR_rigBoxLabel{position:absolute;left:0;top:-15px;font-size:10px;line-height:14px;padding:0 4px;border-radius:4px;background:rgba(20,22,30,.72);color:#fff;white-space:nowrap;pointer-events:none;font-family:inherit}
 .SPR_rigSideBySide{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
@@ -3685,125 +3715,643 @@
       );
     }
 
-    /**
-     * 装配可视化编辑器。
-     *
-     * 把 layout 里每个部件的像素框画成可拖动的方块叠在合成图上——装配正确与否
-     * 一眼就能看出来，摆错的直接拖，不必去猜数字。拖动结束才提交（一次请求），
-     * 中间过程纯本地。
-     */
-    function RigLayoutEditor({ job, selected, onSelect, onCommit, showReference }) {
-      const [scale, setScale] = React.useState(1);
-      const [drag, setDrag] = React.useState(null);
-      const wrapRef = React.useRef(null);
-      const canvasW = job.source?.width ?? 1;
-      const canvasH = job.source?.height ?? 1;
-      const items = job.layout?.items ?? {};
-      const parts = (job.parts ?? []).filter((part) => part.status === "ready" && part.hidden !== true);
-      // 任务视图里的 URL 已经是拼好的（宿主与对话工具共用同一份），这里直接用。
-      const hints = job.layout?.hints ?? {};
-      const compositeUrl = job.layout?.composite ?? null;
-      const referenceUrl = job.sourceUrl ?? null;
+    // ── 手动装配编辑器 ──────────────────────────────────────────────────
+    //
+    // 自动定位只保证「大致对」，收尾必须靠人。这里把装配页做成一个真正的分层编辑器：
+    //
+    //   · **拖拽**：画布上直接拖部件；四角/四边手柄缩放；部件栏里的部件拖进画布即放置
+    //   · **键盘**：方向键微调 1px（Shift = 10px），Delete 收回部件，Esc 取消选中
+    //   · **吸附**：拖动时自动吸附到其它部件的边/中线与画布中线，并画出参考线
+    //   · **图层**：置顶/置底/上移/下移，画出层级列表
+    //   · **撤销/重做**：每一次落位都进历史栈（Ctrl+Z / Ctrl+Shift+Z）
+    //   · **配置**：选中部件的 x/y/宽/高/旋转/层级数值精调，宽高可锁等比
+    //
+    // 关键实现选择：画布是**客户端自己叠出来的**（每层一个 <img>），不是等宿主回传
+    // 合成图。拖动时只有本地 state 变化，松手才提交一次批量改动——否则每拖一帧都要
+    // 一次往返 + 一次重出合成图（要解码参考图与全部部件），手感会烂掉。
 
-      const onImageLoad = (event) => {
-        const width = event.target.clientWidth;
-        if (width > 0) setScale(width / canvasW);
-      };
+    const RIG_HANDLES = [
+      ["nw", 0, 0], ["n", 0.5, 0], ["ne", 1, 0],
+      ["e", 1, 0.5], ["se", 1, 1], ["s", 0.5, 1],
+      ["sw", 0, 1], ["w", 0, 0.5]
+    ];
+    const RIG_SNAP_PX = 6;
+
+    function RigAssemblyEditor({ job, api, run, busy, activeKey }) {
+      const canvasW = Math.max(1, job.canvas?.width ?? 1);
+      const canvasH = Math.max(1, job.canvas?.height ?? 1);
+      const serverItems = job.layout?.items ?? {};
+      const scaleHint = job.layout?.hint ?? 0.5;
+
+      const [draft, setDraft] = React.useState({} as any);
+      const [selected, setSelected] = React.useState(null);
+      const [drag, setDrag] = React.useState(null as any);
+      const [zoom, setZoom] = React.useState(1);
+      const [stageWidth, setStageWidth] = React.useState(0);
+      const [showReference, setShowReference] = React.useState(false);
+      const [showBoxes, setShowBoxes] = React.useState(true);
+      const [snapEnabled, setSnapEnabled] = React.useState(true);
+      const [guides, setGuides] = React.useState([] as any[]);
+      const [history, setHistory] = React.useState([] as any[]);
+      const [future, setFuture] = React.useState([] as any[]);
+      const [lockRatio, setLockRatio] = React.useState(true);
+      const wrapRef = React.useRef(null);
+      const stageRef = React.useRef(null);
+
+      // 服务器状态变了（提交完成 / 换了任务）就把本地草稿清掉，避免旧草稿盖住新结果。
+      React.useEffect(() => {
+        setDraft({});
+        setHistory([]);
+        setFuture([]);
+      }, [job.id, job.updatedAt]);
+
+      // 本地草稿里写的 `placed` 是「操作意图」，而决定图层显隐、已放置计数的是
+      // `matched`（宿主也是读 `placed` 再写回 `matched` 的，见 riggen.saveRigLayoutItems）。
+      // 不在合并时对齐这两个键，Delete 收回、从部件栏拖入这类**纯本地**改动就完全看不出效果：
+      // commit 写了 placed，过滤条件读的却是 matched。宿主回包之前界面一动不动，
+      // 而一旦通信失败（比如宿主半区还没重启）用户就会以为整个手动装配是坏的。
+      const withLocalIntent = (local: any) =>
+        local === undefined || local.placed === undefined ? local : { ...local, matched: local.placed !== false };
+
+      /** 合并后的摆放表：服务器结果 + 本地未提交的改动。 */
+      const items: any = React.useMemo(() => {
+        const merged = {};
+        for (const part of job.parts ?? []) {
+          const base = serverItems[part.name];
+          const local = withLocalIntent(draft[part.name]);
+          if (base === undefined && local === undefined) continue;
+          merged[part.name] = {
+            x: 0, y: 0, width: 1, height: 1, rotation: 0, z: 0, matched: true, manual: false,
+            ...(base ?? defaultItemOf(part, scaleHint)),
+            ...(local ?? {})
+          };
+        }
+        for (const [name, raw] of Object.entries(draft as Record<string, any>)) {
+          if (merged[name] !== undefined) continue;
+          const part = (job.parts ?? []).find((entry) => entry.name === name);
+          if (part === undefined) continue;
+          merged[name] = { ...defaultItemOf(part, scaleHint), ...withLocalIntent(raw) };
+        }
+        return merged;
+      }, [job.parts, serverItems, draft, scaleHint]);
+
+      const placedNames = Object.keys(items)
+        .filter((name) => items[name].matched !== false)
+        .sort((a, b) => (items[a].z ?? 0) - (items[b].z ?? 0) || a.localeCompare(b));
+      const unplaced = (job.parts ?? []).filter((part) => part.status === "ready" && items[part.name]?.matched === false);
+      const notYetPlaced = (job.parts ?? []).filter((part) => part.status === "ready" && items[part.name] === undefined);
 
       React.useEffect(() => {
-        if (drag === null) return undefined;
-        const move = (event) => {
+        const measure = () => {
+          if (stageRef.current !== null) setStageWidth(stageRef.current.clientWidth);
+        };
+        measure();
+        window.addEventListener("resize", measure);
+        return () => window.removeEventListener("resize", measure);
+      }, []);
+
+      // 「适应」要同时按宽和高算：只按宽的话，一张 550×978 的立绘在宽屏上会被放到
+      // 两倍宽、远超舞台可见高度，用户看到的是「画布一半在屏幕外」，连部件栏拖进去
+      // 都找不到落点。舞台的可见高度按视口估一个 62%（与 CSS 的 max-height 对齐）。
+      const stageHeight = typeof window === "undefined" ? 0 : window.innerHeight * 0.62;
+      const fitScale =
+        stageWidth > 0 && canvasH > 0
+          ? Math.min(stageWidth / canvasW, stageHeight > 0 ? stageHeight / canvasH : Number.POSITIVE_INFINITY)
+          : 0;
+      const scale = fitScale * zoom;
+      const selectedItem = selected === null ? undefined : items[selected];
+      const selectedPart = selected === null ? undefined : (job.parts ?? []).find((part) => part.name === selected);
+
+      /** 画布坐标（参考图像素）。 */
+      const toCanvas = (clientX: number, clientY: number) => {
+        const rect = wrapRef.current?.getBoundingClientRect();
+        if (rect === undefined || rect === null || scale <= 0) return { x: 0, y: 0 };
+        return { x: (clientX - rect.left) / scale, y: (clientY - rect.top) / scale };
+      };
+
+      /** 提交一次改动：进历史栈 + 批量写回。 */
+      const commit = (patches: any[], label: any) => {
+        if (patches.length === 0) return;
+        const snapshot: any = {};
+        for (const patch of patches) snapshot[patch.name] = items[patch.name] ?? null;
+        setHistory((stack) => [...stack.slice(-49), snapshot]);
+        setFuture([]);
+        const merged: any = {};
+        for (const patch of patches) merged[patch.name] = { ...(draft[patch.name] ?? {}), ...patch };
+        setDraft((current: any) => ({ ...current, ...merged }));
+        void run(
+          () => api.saveRigLayoutItems({ jobId: job.id, items: patches.map((patch) => ({ name: patch.name, ...patch })) }),
+          label,
+          activeKey
+        );
+      };
+
+      /** 撤销 / 重做：把某一批部件的状态整体换回去。 */
+      const applySnapshot = (snapshot: any) => {
+        const patches: any[] = [];
+        for (const [name, item] of Object.entries(snapshot as Record<string, any>)) {
+          if (item === null || item === undefined) continue;
+          patches.push({ name, x: item.x, y: item.y, width: item.width, height: item.height, rotation: item.rotation, z: item.z, placed: item.matched !== false });
+        }
+        if (patches.length === 0) return;
+        const merged: any = {};
+        for (const patch of patches) merged[patch.name] = { ...(draft[patch.name] ?? {}), ...patch };
+        setDraft((current: any) => ({ ...current, ...merged }));
+        void run(() => api.saveRigLayoutItems({ jobId: job.id, items: patches }), "已撤销", activeKey);
+      };
+      const undo = () => {
+        if (history.length === 0) return;
+        const last = history[history.length - 1];
+        setHistory((stack) => stack.slice(0, -1));
+        setFuture((stack) => [...stack, last]);
+        applySnapshot(last);
+      };
+      const redo = () => {
+        if (future.length === 0) return;
+        const next = future[future.length - 1];
+        setFuture((stack) => stack.slice(0, -1));
+        setHistory((stack) => [...stack, next]);
+        applySnapshot(next);
+      };
+
+      // ── 拖动：移动 / 缩放 ───────────────────────────────────────────
+      React.useEffect(() => {
+        // 只处理「移动 / 缩放」。**不能把 "place" 也吃进来**：这个 effect 注册得更早，
+        // 它的 mouseup 会先跑并把 drag 置空，React 随即同步重渲染、把后面那个
+        // 「从部件栏拖进画布」的 mouseup 监听器当清理函数摘掉——于是拖放永远不生效。
+        if (drag === null || (drag.kind !== "move" && drag.kind !== "resize")) return undefined;
+        const onMove = (event: any) => {
+          const point = toCanvas(event.clientX, event.clientY);
+          setDrag((current) => {
+            if (current === null) return current;
+            const dx = point.x - current.startX;
+            const dy = point.y - current.startY;
+            const next = { ...current, dx, dy, shift: event.shiftKey };
+            return next;
+          });
+          event.preventDefault();
+        };
+        const onUp = () => {
+          const current = drag;
+          setDrag(null);
+          setGuides([]);
+          const base = items[current.name];
+          if (base === undefined) return;
+          const patch = current.kind === "move" ? movePatch(base, current) : resizePatch(base, current);
+          if (patch === null) return;
+          commit([{ name: current.name, ...patch }], current.kind === "move" ? `已移动「${current.name}」` : `已缩放「${current.name}」`);
+        };
+        window.addEventListener("mousemove", onMove);
+        window.addEventListener("mouseup", onUp);
+        return () => {
+          window.removeEventListener("mousemove", onMove);
+          window.removeEventListener("mouseup", onUp);
+        };
+      }, [drag, items, draft, selected, snapEnabled]);
+
+      /** 拖动中的实时几何（未提交）。 */
+      const geometryOf = (name: string): any => {
+        const base = items[name];
+        if (base === undefined) return undefined;
+        if (drag === null || drag.name !== name) return base;
+        if (drag.kind === "move") {
+          let x = base.x + drag.dx;
+          let y = base.y + drag.dy;
+          if (drag.shift) {
+            if (Math.abs(drag.dx) > Math.abs(drag.dy)) y = base.y;
+            else x = base.x;
+          }
+          const snapped = snapEnabled ? applySnap({ ...base, x, y }, name, items) : { box: { ...base, x, y }, guides: [] };
+          return { ...base, x: snapped.box.x, y: snapped.box.y };
+        }
+        const resized = resizeBox(base, drag);
+        return resized;
+      };
+
+      // 拖动时算吸附参考线（放在 effect 里，避免在 render 中 setState）。
+      React.useEffect(() => {
+        if (drag === null || drag.kind !== "move" || !snapEnabled) {
+          setGuides([]);
+          return;
+        }
+        const base = items[drag.name];
+        if (base === undefined) return;
+        const candidate = { ...base, x: base.x + drag.dx, y: base.y + drag.dy };
+        const snapped = applySnap(candidate, drag.name, items);
+        setGuides(snapped.guides);
+      }, [drag, items, snapEnabled]);
+
+      // ── 键盘 ────────────────────────────────────────────────────────
+      React.useEffect(() => {
+        const onKey = (event: any) => {
+          const tag = event.target?.tagName;
+          if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+          const meta = event.metaKey || event.ctrlKey;
+          if (meta && event.key.toLowerCase() === "z") {
+            event.preventDefault();
+            if (event.shiftKey) redo();
+            else undo();
+            return;
+          }
+          if (selected === null) return;
+          const base = items[selected];
+          if (base === undefined) return;
+          const step = event.shiftKey ? 10 : 1;
+          const move = (dx, dy) => {
+            event.preventDefault();
+            commit([{ name: selected, x: base.x + dx, y: base.y + dy }], `已微调「${selected}」`);
+          };
+          if (event.key === "ArrowLeft") move(-step, 0);
+          else if (event.key === "ArrowRight") move(step, 0);
+          else if (event.key === "ArrowUp") move(0, -step);
+          else if (event.key === "ArrowDown") move(0, step);
+          else if (event.key === "Delete" || event.key === "Backspace") {
+            event.preventDefault();
+            commit([{ name: selected, placed: false }], `已收回「${selected}」`);
+          } else if (event.key === "Escape") setSelected(null);
+        };
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+      }, [selected, items, draft, history, future]);
+
+      // ── 部件栏拖进画布 ──────────────────────────────────────────────
+      const startPaletteDrag = (part: any, event: any) => {
+        event.preventDefault();
+        setDrag({
+          kind: "place",
+          name: part.name,
+          startX: 0,
+          startY: 0,
+          dx: 0,
+          dy: 0,
+          clientX: event.clientX,
+          clientY: event.clientY
+        });
+      };
+      React.useEffect(() => {
+        if (drag === null || drag.kind !== "place") return undefined;
+        const onUp = (event: any) => {
+          setDrag(null);
           const rect = wrapRef.current?.getBoundingClientRect();
           if (rect === undefined || rect === null) return;
-          const dx = (event.clientX - drag.startX) / scale;
-          const dy = (event.clientY - drag.startY) / scale;
-          event.preventDefault();
-          setDrag((current) => (current === null ? current : { ...current, dx, dy }));
+          const inside = event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom;
+          if (!inside) return;
+          const part = (job.parts ?? []).find((entry) => entry.name === drag.name);
+          if (part === undefined) return;
+          const existing = items[drag.name];
+          const width = existing?.width ?? Math.max(4, Math.round((part.width ?? 64) * scaleHint));
+          const height = existing?.height ?? Math.max(4, Math.round((part.height ?? 64) * scaleHint));
+          const point = toCanvas(event.clientX, event.clientY);
+          commit(
+            [{ name: drag.name, x: Math.round(point.x - width / 2), y: Math.round(point.y - height / 2), width, height, placed: true }],
+            `已放置「${drag.name}」`
+          );
+          setSelected(drag.name);
         };
-        const up = () => {
-          const dx = Math.round(drag.dx);
-          const dy = Math.round(drag.dy);
-          setDrag(null);
-          if (dx !== 0 || dy !== 0) {
-            const base = items[drag.name];
-            if (base !== undefined) void onCommit(drag.name, { x: base.x + dx, y: base.y + dy });
-          }
-        };
-        window.addEventListener("mousemove", move);
-        window.addEventListener("mouseup", up);
-        return () => {
-          window.removeEventListener("mousemove", move);
-          window.removeEventListener("mouseup", up);
-        };
-      }, [drag, items, onCommit, scale]);
+        window.addEventListener("mouseup", onUp);
+        return () => window.removeEventListener("mouseup", onUp);
+      }, [drag, items, scaleHint, scale, draft]);
 
-      if (compositeUrl === null) return h("p", { className: "SPR_hint" }, "还没有装配结果。");
+      // ── 缩放 / 图层 ────────────────────────────────────────────────
+      const resizePatch = (base: any, current: any): any => {
+        const box = resizeBox(base, current);
+        if (Math.round(box.x) === base.x && Math.round(box.y) === base.y && Math.round(box.width) === base.width && Math.round(box.height) === base.height) return null;
+        return { x: Math.round(box.x), y: Math.round(box.y), width: Math.round(box.width), height: Math.round(box.height) };
+      };
+      function resizeBox(base: any, current: any): any {
+        const handle = current.handle ?? "se";
+        const [hx, hy] = handlePosition(handle);
+        // 对角固定不动，被拖的那条边跟着走。
+        const left = base.x;
+        const top = base.y;
+        const right = base.x + base.width;
+        const bottom = base.y + base.height;
+        const minSize = 6;
+        let x0 = left;
+        let y0 = top;
+        let x1 = right;
+        let y1 = bottom;
+        if (hx === 0) x0 = left + current.dx;
+        if (hx === 2) x1 = right + current.dx;
+        if (hy === 0) y0 = top + current.dy;
+        if (hy === 2) y1 = bottom + current.dy;
+        if (x1 - x0 < minSize) {
+          if (hx === 0) x0 = x1 - minSize;
+          else x1 = x0 + minSize;
+        }
+        if (y1 - y0 < minSize) {
+          if (hy === 0) y0 = y1 - minSize;
+          else y1 = y0 + minSize;
+        }
+        let width = x1 - x0;
+        let height = y1 - y0;
+        if (lockRatio && current.kind === "resize" && handle.length === 2) {
+          const ratio = base.height / Math.max(1, base.width);
+          // 角手柄保持等比：以变化更大的一边为准。
+          if (Math.abs(current.dx) > Math.abs(current.dy)) height = width * ratio;
+          else width = height / ratio;
+          if (hx === 0) x0 = x1 - width;
+          else x1 = x0 + width;
+          if (hy === 0) y0 = y1 - height;
+          else y1 = y0 + height;
+        }
+        return { x: x0, y: y0, width, height };
+      }
+      function handlePosition(handle: string): [number, number] {
+        const found: any = RIG_HANDLES.find((entry: any) => entry[0] === handle);
+        const hx = found === undefined ? 1 : Math.round(found[1] * 2);
+        const hy = found === undefined ? 1 : Math.round(found[2] * 2);
+        return [hx, hy];
+      }
+      function movePatch(base: any, current: any): any {
+        let x = base.x + current.dx;
+        let y = base.y + current.dy;
+        if (current.shift) {
+          if (Math.abs(current.dx) > Math.abs(current.dy)) y = base.y;
+          else x = base.x;
+        }
+        const snapped = snapEnabled ? applySnap({ ...base, x, y }, current.name, items) : { box: { x, y } };
+        const nextX = Math.round(snapped.box.x);
+        const nextY = Math.round(snapped.box.y);
+        if (nextX === base.x && nextY === base.y) return null;
+        return { x: nextX, y: nextY };
+      }
+      function applySnap(candidate: any, name: string, all: any): any {
+        const threshold = RIG_SNAP_PX / Math.max(0.0001, scale);
+        const targets: any[] = [];
+        for (const [other, item] of Object.entries(all as Record<string, any>)) {
+          if (other === name || item.matched === false) continue;
+          targets.push({ x: [item.x, item.x + item.width / 2, item.x + item.width], y: [item.y, item.y + item.height / 2, item.y + item.height] });
+        }
+        targets.push({ x: [canvasW / 2], y: [canvasH / 2] });
+        const lines: any[] = [];
+        let best: any = { dx: null, dy: null, distX: threshold, distY: threshold };
+        const mineX = [candidate.x, candidate.x + candidate.width / 2, candidate.x + candidate.width];
+        const mineY = [candidate.y, candidate.y + candidate.height / 2, candidate.y + candidate.height];
+        for (const target of targets as any[]) {
+          for (const tx of target.x) {
+            for (const mx of mineX) {
+              const dist = Math.abs(mx - tx);
+              if (dist < best.distX) best = { ...best, dx: tx - mx, distX: dist };
+            }
+          }
+          for (const ty of target.y) {
+            for (const my of mineY) {
+              const dist = Math.abs(my - ty);
+              if (dist < best.distY) best = { ...best, dy: ty - my, distY: dist };
+            }
+          }
+        }
+        const box: any = {
+          ...candidate,
+          x: best.dx === null ? candidate.x : candidate.x + best.dx,
+          y: best.dy === null ? candidate.y : candidate.y + best.dy
+        };
+        if (best.dx !== null) lines.push({ axis: "x", at: box.x + (best.distX >= 0 ? 0 : 0) });
+        return { box, guides: lines };
+      }
+
+      const changeZ = (name: string, mode: string) => {
+        const ordered = Object.keys(items)
+          .filter((key) => items[key].matched !== false)
+          .sort((a, b) => (items[a].z ?? 0) - (items[b].z ?? 0));
+        const index = ordered.indexOf(name);
+        if (index < 0) return;
+        const reordered = [...ordered];
+        reordered.splice(index, 1);
+        if (mode === "front") reordered.push(name);
+        else if (mode === "back") reordered.unshift(name);
+        else if (mode === "up") reordered.splice(Math.min(ordered.length - 1, index + 1), 0, name);
+        else reordered.splice(Math.max(0, index - 1), 0, name);
+        const patches = reordered.map((key, position) => ({ name: key, z: position }));
+        commit(patches, "已调整图层顺序");
+      };
+
+      const patchSelected = (patch: any, label: any) => {
+        if (selected === null) return;
+        commit([{ name: selected, ...patch }], label);
+      };
+
+      if (placedNames.length === 0 && notYetPlaced.length === 0) {
+        return h("p", { className: "SPR_hint" }, "还没有可用部件，请先在第 ① 步拆件或上传部件 PNG。");
+      }
 
       return h(
         "div",
-        null,
-        showReference === true
-          ? h(
-              "div",
-              { className: "SPR_rigSideBySide" },
-              h("figure", null, h("figcaption", null, "参考图（角色整图）"), referenceUrl !== null ? h("img", { src: referenceUrl, alt: "reference" }) : null),
-              h("figure", null, h("figcaption", null, "合成图（部件按当前摆放叠出来）"), h("img", { src: compositeUrl, alt: "composite" }))
-            )
-          : null,
+        { className: "SPR_asm" },
+        // ── 工具条 ────────────────────────────────────────────────
         h(
           "div",
-          { className: "SPR_rigCanvasWrap", "data-drag": drag !== null ? "true" : undefined, ref: wrapRef },
-          h("img", { src: compositeUrl, alt: "composite", onLoad: onImageLoad, draggable: false }),
-          // 先验框用虚线画出来：用户要能看出「agent 说的位置」和「实际摆的位置」差多少，
-          // 这也决定了「要不要相信这个先验、要不要重新给」。
-          Object.entries(hints).map(([name, box]: [string, any]) =>
-            h("div", {
-              key: `hint:${name}`,
-              className: "SPR_rigHintBox",
-              style: {
-                left: box.x * scale,
-                top: box.y * scale,
-                width: box.width * scale,
-                height: box.height * scale
-              }
-            })
+          { className: "SPR_asmBar" },
+          h("span", { className: "SPR_asmGroup" },
+            h("span", { className: "SPR_fieldLabel" }, "缩放"),
+            h(Btn, { onClick: () => setZoom((z) => Math.max(0.25, z - 0.25)), title: "缩小" }, "−"),
+            h(Btn, { onClick: () => setZoom(1) }, `${Math.round(zoom * 100)}%`),
+            h(Btn, { onClick: () => setZoom((z) => Math.min(4, z + 0.25)), title: "放大" }, "+")
           ),
-          parts.map((part) => {
-            const item = items[part.name];
-            if (item === undefined || item.matched !== true) return null;
-            const active = drag !== null && drag.name === part.name;
-            const offsetX = active ? drag.dx : 0;
-            const offsetY = active ? drag.dy : 0;
-            return h(
+          h("span", { className: "SPR_asmGroup" },
+            h(Btn, { on: showReference, onClick: () => setShowReference((v) => !v), title: "把参考图叠在下面，方便对位" }, "参考图底图"),
+            h(Btn, { on: showBoxes, onClick: () => setShowBoxes((v) => !v) }, "显示边框"),
+            h(Btn, { on: snapEnabled, onClick: () => setSnapEnabled((v) => !v), title: "拖动时吸附到其它部件的边与中线" }, "吸附"),
+            h(Btn, { on: lockRatio, onClick: () => setLockRatio((v) => !v), title: "拖角手柄时保持宽高比" }, "锁等比")
+          ),
+          h("span", { className: "SPR_asmGroup" },
+            h(Btn, { onClick: undo, disabled: history.length === 0 }, `撤销${history.length > 0 ? `(${history.length})` : ""}`),
+            h(Btn, { onClick: redo, disabled: future.length === 0 }, "重做")
+          ),
+          h("span", { className: "SPR_spacer" }),
+          h("span", { className: "SPR_asmHint" },
+            `已放置 ${placedNames.length}/${(job.parts ?? []).filter((part) => part.status === "ready").length}　·　拖部件移动、拖角缩放、方向键微调 1px（Shift 10px）、Delete 收回`)
+        ),
+
+        h(
+          "div",
+          { className: "SPR_asmBody" },
+          // ── 画布 ──────────────────────────────────────────────
+          h(
+            "div",
+            { className: "SPR_asmStage", ref: stageRef },
+            h(
               "div",
               {
-                key: part.name,
-                className: "SPR_rigBox",
-                "data-selected": selected === part.name ? "true" : undefined,
-                style: {
-                  left: (item.x + offsetX) * scale,
-                  top: (item.y + offsetY) * scale,
-                  width: Math.max(6, item.width * scale),
-                  height: Math.max(6, item.height * scale)
+                className: "SPR_asmCanvas",
+                ref: wrapRef,
+                onMouseDown: (event: any) => {
+                  if (event.target === event.currentTarget) setSelected(null);
                 },
-                onMouseDown: (event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  onSelect(part.name);
-                  setDrag({ name: part.name, startX: event.clientX, startY: event.clientY, dx: 0, dy: 0 });
-                }
+                style: { width: canvasW * scale, height: canvasH * scale }
               },
-              h("span", { className: "SPR_rigBoxLabel" }, part.label ?? part.name)
-            );
-          })
-        ),
-        h(
-          "p",
-          { className: "SPR_hint" },
-          `画布 ${canvasW}×${canvasH}。点方块选中，拖动即微调位置（松手保存）；也可以在下面对话框里精确调数值。`,
-          Object.keys(hints).length > 0 ? `虚线框是 agent 给的视觉先验（${Object.keys(hints).length} 个）。` : ""
+              showReference && job.sourceUrl !== null
+                ? h("img", { className: "SPR_asmRef", src: job.sourceUrl, alt: "reference", draggable: false })
+                : null,
+              placedNames.map((name) => {
+                const box = geometryOf(name) ?? items[name];
+                const part = (job.parts ?? []).find((entry) => entry.name === name);
+                if (part?.url === null || part?.url === undefined) return null;
+                return h("img", {
+                  key: `layer:${name}`,
+                  className: "SPR_asmLayer",
+                  src: part.url,
+                  alt: name,
+                  draggable: false,
+                  style: {
+                    left: box.x * scale,
+                    top: box.y * scale,
+                    width: Math.max(1, box.width * scale),
+                    height: Math.max(1, box.height * scale),
+                    transform: box.rotation ? `rotate(${box.rotation}deg)` : undefined,
+                    opacity: part.hidden === true ? 0.25 : 1
+                  }
+                });
+              }),
+              guides.map((guide, index) =>
+                h("div", { key: `guide:${index}`, className: "SPR_asmGuide", style: { left: guide.at * scale } })
+              ),
+              showBoxes
+                ? placedNames.map((name) => {
+                    const box = geometryOf(name) ?? items[name];
+                    const isSelected = selected === name;
+                    return h(
+                      "div",
+                      {
+                        key: `box:${name}`,
+                        className: "SPR_rigBox",
+                        "data-selected": isSelected ? "true" : undefined,
+                        style: { left: box.x * scale, top: box.y * scale, width: Math.max(6, box.width * scale), height: Math.max(6, box.height * scale) },
+                        onMouseDown: (event: any) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          setSelected(name);
+                          const point = toCanvas(event.clientX, event.clientY);
+                          setDrag({ kind: "move", name, startX: point.x, startY: point.y, dx: 0, dy: 0 });
+                        }
+                      },
+                      isSelected
+                        ? RIG_HANDLES.map(([handle, fx, fy]: any) =>
+                            h("span", {
+                              key: handle,
+                              className: "SPR_asmHandle",
+                              "data-handle": handle,
+                              style: { left: `${fx * 100}%`, top: `${fy * 100}%` },
+                              onMouseDown: (event: any) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                const point = toCanvas(event.clientX, event.clientY);
+                                setDrag({ kind: "resize", name, handle, startX: point.x, startY: point.y, dx: 0, dy: 0 });
+                              }
+                            })
+                          )
+                        : null,
+                      h("span", { className: "SPR_rigBoxLabel" }, (job.parts ?? []).find((p) => p.name === name)?.label ?? name)
+                    );
+                  })
+                : null
+            )
+          ),
+
+          // ── 右侧：部件栏 + 参数 ─────────────────────────────────
+          h(
+            "div",
+            { className: "SPR_asmSide" },
+            h("div", { className: "SPR_sideTitle" }, `未放置（${unplaced.length + notYetPlaced.length}）· 拖进画布`),
+            h(
+              "div",
+              { className: "SPR_asmPalette" },
+              [...unplaced, ...notYetPlaced].map((part) =>
+                h(
+                  "div",
+                  {
+                    key: `palette:${part.name}`,
+                    className: "SPR_asmChip",
+                    onMouseDown: (event: any) => startPaletteDrag(part, event)
+                  },
+                  part.url !== null && part.url !== undefined ? h("img", { src: part.url, alt: part.name, draggable: false }) : null,
+                  h("span", null, part.label ?? part.name)
+                )
+              ),
+              unplaced.length + notYetPlaced.length === 0 ? h("p", { className: "SPR_hint" }, "全部部件都已放置。") : null
+            ),
+
+            selectedItem !== undefined && selected !== null
+              ? h(
+                  "div",
+                  { className: "SPR_asmPanel" },
+                  h("div", { className: "SPR_sideTitle" }, `选中：${selectedPart?.label ?? selected}`),
+                  h(
+                    "div",
+                    { className: "SPR_asmFields" },
+                    h(NumField, { label: "x", value: selectedItem.x, onChange: (value) => patchSelected({ x: value }, "已修改 x") }),
+                    h(NumField, { label: "y", value: selectedItem.y, onChange: (value) => patchSelected({ y: value }, "已修改 y") }),
+                    h(NumField, { label: "宽", value: selectedItem.width, min: 1, onChange: (value) => patchSelected(lockRatio ? { width: value, height: Math.round((value * selectedItem.height) / Math.max(1, selectedItem.width)) } : { width: value }, "已修改宽度") }),
+                    h(NumField, { label: "高", value: selectedItem.height, min: 1, onChange: (value) => patchSelected(lockRatio ? { height: value, width: Math.round((value * selectedItem.width) / Math.max(1, selectedItem.height)) } : { height: value }, "已修改高度") }),
+                    h(NumField, { label: "旋转", value: selectedItem.rotation, step: 5, onChange: (value) => patchSelected({ rotation: value }, "已旋转") }),
+                    h(NumField, { label: "层级", value: selectedItem.z, onChange: (value) => patchSelected({ z: value }, "已修改层级") })
+                  ),
+                  h(
+                    "div",
+                    { className: "SPR_asmRow" },
+                    h(Btn, { onClick: () => changeZ(selected, "front") }, "置顶"),
+                    h(Btn, { onClick: () => changeZ(selected, "up") }, "上移"),
+                    h(Btn, { onClick: () => changeZ(selected, "down") }, "下移"),
+                    h(Btn, { onClick: () => changeZ(selected, "back") }, "置底")
+                  ),
+                  h(
+                    "div",
+                    { className: "SPR_asmRow" },
+                    h(Btn, { onClick: () => patchSelected({ width: selectedItem.height, height: selectedItem.width }, "已交换宽高") }, "宽高互换"),
+                    h(
+                      BusyBtn,
+                      {
+                        busy: busy,
+                        busyText: "重定位中…",
+                        onClick: () => void run(() => api.runRigLayout({ jobId: job.id, names: [selected] }), `已重新自动定位「${selected}」`, activeKey)
+                      },
+                      "这块重新自动定位"
+                    ),
+                    h(Btn, { onClick: () => commit([{ name: selected, placed: false }], `已收回「${selected}」`), danger: true }, "收回部件")
+                  ),
+                  selectedItem.matched === false
+                    ? h("p", { className: "SPR_hint" }, "这块目前是「未放置」状态：拖到画布上或点上面的数值确认即可放回。")
+                    : null
+                )
+              : h("div", { className: "SPR_asmPanel" }, h("p", { className: "SPR_hint" }, "在画布上点一个部件，这里会出现它的精确参数与图层操作。")),
+
+            h(
+              "div",
+              { className: "SPR_asmPanel" },
+              h("div", { className: "SPR_sideTitle" }, "图层（从下到上）"),
+              h(
+                "ol",
+                { className: "SPR_asmLayers" },
+                placedNames.slice().reverse().map((name) =>
+                  h(
+                    "li",
+                    {
+                      key: `layer-row:${name}`,
+                      "data-active": selected === name ? "true" : "false",
+                      onClick: () => setSelected(name)
+                    },
+                    h("span", null, (job.parts ?? []).find((p) => p.name === name)?.label ?? name),
+                    h(
+                      "span",
+                      { className: "SPR_asmLayerBtns" },
+                      h("button", { type: "button", className: "SPR_miniBtn", onClick: (event) => { event.stopPropagation(); changeZ(name, "up"); } }, "↑"),
+                      h("button", { type: "button", className: "SPR_miniBtn", onClick: (event) => { event.stopPropagation(); changeZ(name, "down"); } }, "↓")
+                    )
+                  )
+                )
+              )
+            )
+          )
         )
       );
+    }
+
+    /** 部件还没有任何摆放记录时，按它的原始像素尺寸 × 全局缩放先验给一个默认框。 */
+    function defaultItemOf(part: any, hint: number): any {
+      const width = Math.max(4, Math.round((part.width ?? 64) * hint));
+      const height = Math.max(4, Math.round((part.height ?? 64) * hint));
+      return { x: 0, y: 0, width, height, rotation: 0, z: 0, matched: true, manual: false };
     }
 
     /**
@@ -4251,41 +4799,7 @@
                             ),
                             h(Btn, { onClick: () => setShowReference((current) => !current), on: showReference }, showReference ? "只显示合成图" : "并排显示参考图")
                           ),
-                          h(RigLayoutEditor, {
-                            job,
-                            selected,
-                            showReference,
-                            onSelect: setSelected,
-                            onCommit: async (name, patch) => {
-                              await run(() => api.saveRigLayoutItem({ jobId: job.id, name, ...patch }), `已移动「${name}」`);
-                            }
-                          }),
-                          selectedItem !== undefined && selected !== null
-                            ? h(
-                                "div",
-                                { className: "SPR_rigStage", style: { marginTop: 10 } },
-                                h("div", { className: "SPR_rigStageHead" }, h("span", { className: "SPR_rigStageTitle" }, `微调：${selected}`), h("span", { className: "SPR_rigStageHint" }, "改完立刻重出合成图；这一步只影响这一个部件。")),
-                                h(
-                                  "div",
-                                  { className: "SPR_rigEditorRow" },
-                                  h(NumField, { label: "x", value: selectedItem.x, onChange: (value) => void run(() => api.saveRigLayoutItem({ jobId: job.id, name: selected, x: value })) }),
-                                  h(NumField, { label: "y", value: selectedItem.y, onChange: (value) => void run(() => api.saveRigLayoutItem({ jobId: job.id, name: selected, y: value })) }),
-                                  h(NumField, { label: "宽", value: selectedItem.width, min: 1, onChange: (value) => void run(() => api.saveRigLayoutItem({ jobId: job.id, name: selected, width: value })) }),
-                                  h(NumField, { label: "高", value: selectedItem.height, min: 1, onChange: (value) => void run(() => api.saveRigLayoutItem({ jobId: job.id, name: selected, height: value })) }),
-                                  h(NumField, { label: "层级 z", value: selectedItem.z, onChange: (value) => void run(() => api.saveRigLayoutItem({ jobId: job.id, name: selected, z: value })) }),
-                                  h(NumField, { label: "旋转", value: selectedItem.rotation, step: 5, onChange: (value) => void run(() => api.saveRigLayoutItem({ jobId: job.id, name: selected, rotation: value })) }),
-                                  h(
-                                    BusyBtn,
-                                    {
-                                      busy: keyBusy(PART_K(selected, "relayout")),
-                                      busyText: "正在重定位…",
-                                      onClick: () => void run(() => api.runRigLayout({ jobId: job.id, names: [selected] }), `已重新定位「${selected}」`, PART_K(selected, "relayout"))
-                                    },
-                                    "这块重新自动定位"
-                                  )
-                                )
-                              )
-                            : null,
+                          h(RigAssemblyEditor, { job, api, run, busy, activeKey: K_RIG_LAYOUT }),
                           (job.review?.unmatched ?? []).length > 0
                             ? h("p", { className: "SPR_hint", style: { color: "var(--dsw-alias-state-warning-primary, #b45309)" } }, `这些部件没匹配上，请手工拖到正确位置：${job.review.unmatched.join("、")}`)
                             : null,
@@ -4940,6 +5454,7 @@
         renameRigPart: (payload) => call("renameRigPart", payload),
         setRigPartVisibility: (payload) => call("setRigPartVisibility", payload),
         saveRigLayoutItem: (payload) => call("saveRigLayoutItem", payload),
+        saveRigLayoutItems: (payload) => call("saveRigLayoutItems", payload),
         setRigLayoutHints: (payload) => call("setRigLayoutHints", payload),
         runRigSheet: (payload) => call("runRigSheet", payload),
         runRigSegment: (payload) => call("runRigSegment", payload),

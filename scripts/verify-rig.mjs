@@ -351,18 +351,24 @@ let worstRot = 0;
 for (const part of layoutParts) {
   const bone = worldOf(part.name);
   const att = spine.skins[0].attachments[part.name][part.name];
-  const rad = att.rotation === undefined ? 0 : (att.rotation * Math.PI) / 180;
-  const cx = bone.x + (att.x * Math.cos(rad) - att.y * Math.sin(rad));
-  const cy = bone.y + (att.x * Math.sin(rad) + att.y * Math.cos(rad));
+  const attRot = att.rotation === undefined ? 0 : (att.rotation * Math.PI) / 180;
+  // 真实语义（与参考项目 demo 渲染器一致）：
+  //   挂点中心 = 骨骼世界位置 + R(骨骼世界旋转) · (att.x, att.y)
+  //   图片朝向 = 骨骼世界旋转 + 挂点局部旋转
+  // 注意 att.rotation 只影响朝向、不影响中心——之前这里错用了 R(att.rotation)
+  // 算中心，只是因为合成场景里骨骼旋转恰好都是 0°/180°（R(180)=R(-180)）才没暴露。
+  const cx = bone.x + (att.x * Math.cos(bone.rot) - att.y * Math.sin(bone.rot));
+  const cy = bone.y + (att.x * Math.sin(bone.rot) + att.y * Math.cos(bone.rot));
   const expectX = part.x + part.width / 2 - W / 2;
   const expectY = H - (part.y + part.height / 2);
   worstCentre = Math.max(worstCentre, Math.abs(cx - expectX), Math.abs(cy - expectY));
-  // 挂点世界旋转 = 骨骼世界旋转 + 挂点局部旋转，初始姿态必须是 0（图片正立）。
-  const worldRot = bone.rot + rad;
-  worstRot = Math.max(worstRot, Math.abs(((worldRot * 180) / Math.PI + 540) % 360 - 180));
+  // 装配结果里这块部件被拧了 part.rotation，初始姿态就该呈现同样的角度。
+  const worldRot = ((bone.rot + attRot) * 180) / Math.PI;
+  const delta = (((worldRot - (part.rotation ?? 0)) % 360) + 540) % 360 - 180;
+  worstRot = Math.max(worstRot, Math.abs(delta));
 }
 check("初始姿态挂点位置逐像素还原", worstCentre < 0.02, `最大偏差 ${worstCentre.toFixed(4)} px`);
-check("初始姿态部件保持正立", worstRot < 0.02, `最大旋转偏差 ${worstRot.toFixed(4)}°`);
+check("初始姿态部件朝向 = 装配结果里的旋转", worstRot < 0.02, `最大旋转偏差 ${worstRot.toFixed(4)}°`);
 
 console.log("=== 7. Spine 4.2 wire format ===");
 // 本测试场景只有 6 个部件、没有 hip；wire format 的检查用一份完整的 16 部件骨架。

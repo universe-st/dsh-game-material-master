@@ -357,7 +357,61 @@ console.log("=== 7. 视觉先验（自动摆位的关键入口） ===");
   await riggen.solveRigLayout(job.id);
 }
 
-console.log("=== 8. 验收打标与列表 ===");
+console.log("=== 8. 手动装配 ===");
+{
+  const before = await riggen.readRigJob(job.id);
+  const target = before.parts[0].name;
+  const base = before.layout.items[target];
+  const compositeBefore = await readFile(riggen.rigAssetPath(job.id, "layout/composite.png"));
+
+  // 一次拖动 = 一次批量提交
+  const moved = await riggen.saveRigLayoutItems(job.id, [{ name: target, x: base.x + 25, y: base.y - 30 }]);
+  check("批量手动装配返回改动数", moved.touched === 1, String(moved.touched));
+  let after = await riggen.readRigJob(job.id);
+  check("拖动生效", after.layout.items[target].x === base.x + 25 && after.layout.items[target].y === base.y - 30);
+  check("手动改动被标记 manual", after.layout.items[target].manual === true);
+  check("手动改动让骨骼与图集作废", after.rig.status === "empty" && after.atlas.status === "empty");
+  const compositeAfter = await readFile(riggen.rigAssetPath(job.id, "layout/composite.png"));
+  check("合成图随手动改动重出", !compositeBefore.equals(compositeAfter));
+
+  // 旋转：必须真的画进合成图，否则用户拧了半天看不到变化
+  await riggen.saveRigLayoutItems(job.id, [{ name: target, rotation: 30 }]);
+  after = await riggen.readRigJob(job.id);
+  check("旋转被记录", after.layout.items[target].rotation === 30);
+  const compositeRotated = await readFile(riggen.rigAssetPath(job.id, "layout/composite.png"));
+  check("旋转真的画进了合成图", !compositeAfter.equals(compositeRotated));
+  await riggen.saveRigLayoutItems(job.id, [{ name: target, rotation: 0 }]);
+
+  // 收回 / 放回：手动装配允许把部件从画布上取下来再拖回去
+  await riggen.saveRigLayoutItems(job.id, [{ name: target, placed: false }]);
+  after = await riggen.readRigJob(job.id);
+  check("可以收回部件", after.layout.items[target].matched === false);
+  check("收回的部件仍保留坐标（能再拖回来）", Number.isFinite(after.layout.items[target].x));
+  await riggen.saveRigLayoutItems(job.id, [{ name: target, placed: true }]);
+  after = await riggen.readRigJob(job.id);
+  check("可以放回部件", after.layout.items[target].matched === true);
+
+  // 为「还没有任何摆放记录」的部件建条目：拆完件直接手工拼也是合理用法
+  const empty = await riggen.readRigJob(job.id);
+  await riggen.writeRigJob({ ...empty, layout: { status: "empty", items: {} } });
+  const created = await riggen.saveRigLayoutItems(job.id, [{ name: target, x: 40, y: 60 }]);
+  after = await riggen.readRigJob(job.id);
+  check("没有摆放记录时也能手动放置（自动建条目）", created.touched === 1 && after.layout.items[target].x === 40);
+  check("新建条目按缩放先验给了默认尺寸", after.layout.items[target].width > 1 && after.layout.items[target].height > 1, `${after.layout.items[target].width}×${after.layout.items[target].height}`);
+
+  let threw = false;
+  try {
+    await riggen.saveRigLayoutItems(job.id, [{ name: "no-such-part", x: 1 }]);
+  } catch {
+    threw = true;
+  }
+  check("手动装配给不存在的部件会报错", threw);
+
+  // 还原：重新跑一次自动装配，后面的验收打标测试才有意义
+  await riggen.solveRigLayout(job.id);
+}
+
+console.log("=== 9. 验收打标与列表 ===");
 await riggen.setRigStageApproved(job.id, "rig", true);
 await riggen.setRigPartApproved(job.id, "head", true);
 state = await riggen.readRigJob(job.id);
@@ -369,7 +423,7 @@ const summaries = await riggen.listRigJobs();
 check("任务列表能读到本任务", summaries.length === 1 && summaries[0].id === job.id);
 check("列表统计部件数正确", summaries[0].partCount === state.parts.length, String(summaries[0].partCount));
 
-console.log("=== 9. 删除部件会让下游作废 ===");
+console.log("=== 10. 删除部件会让下游作废 ===");
 let threw = false;
 try {
   await riggen.removeRigPart(job.id, "neck");
@@ -383,7 +437,7 @@ check("部件已删除", !state.parts.some((part) => part.name === "left-foot"))
 check("删除后装配记录被清空", Object.keys(state.layout.items).length === 0);
 check("删除后骨骼与图集重置", state.rig.status === "empty" && state.atlas.status === "empty");
 
-console.log("=== 10. 清理 ===");
+console.log("=== 11. 清理 ===");
 await riggen.deleteRigJob(job.id);
 check("任务目录已删除", !(await exists(riggen.rigJobDir(job.id))));
 await rm(sandbox, { recursive: true, force: true });

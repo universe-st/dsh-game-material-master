@@ -42,6 +42,7 @@ import {
   detectBackground,
   groupComponentsByProximity,
   resizeRgba,
+  rotateRgba,
   segmentWithLabels,
   sideBySide,
   solveLayout,
@@ -1246,7 +1247,7 @@ export async function segmentSheet(jobId: string): Promise<void> {
     const ROWS = Math.ceil(generated.length / COLS);
     const canvas = createRgba(CELL * COLS, CELL * ROWS, [246, 246, 249, 255]);
     for (let i = 0; i < generated.length; i++) {
-      const decoded = await decodeToRgba(rigAssetPath(jobId, generated[i].file!), 1024);
+      const decoded = await decodeCached(rigAssetPath(jobId, generated[i].file!), 1024);
       const scale = Math.min((CELL - 14) / decoded.width, (CELL - 14) / decoded.height);
       const scaled = resizeRgba(
         { data: decoded.rgba, width: decoded.width, height: decoded.height },
@@ -1406,7 +1407,7 @@ export async function solveRigLayout(jobId: string, names?: string[]): Promise<v
 
   const inputs = [];
   for (const part of subset ?? ready) {
-    const decoded = await decodeToRgba(rigAssetPath(jobId, part.file!), 2048);
+    const decoded = await decodeCached(rigAssetPath(jobId, part.file!), 2048);
     inputs.push({ name: part.name, rgba: { data: decoded.rgba, width: decoded.width, height: decoded.height } as Rgba });
     part.width = decoded.width;
     part.height = decoded.height;
@@ -1590,38 +1591,132 @@ export async function setRigLayoutHints(
   return { count: touched };
 }
 
-export async function saveLayoutItem(
-  jobId: string,
-  name: string,
-  patch: { x?: number; y?: number; width?: number; height?: number; rotation?: number; z?: number }
-): Promise<void> {
+/** 一次手动装配改动：位置 / 尺寸 / 旋转 / 层级，以及「放上画布还是收回部件栏」。 */
+export interface RigLayoutPatch {
+  name: string;
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  rotation?: number;
+  z?: number;
+  /** true = 放到画布上（默认），false = 收回未摆放状态。 */
+  placed?: boolean;
+}
+
+/**
+ * 批量写入手动装配结果。
+ *
+ * 为什么是批量：手动装配是**拖出来**的——一次拖动、一次键盘微调都会改一个部件，
+ * 逐条提交就是逐条「读盘 + 改 + 落盘 + 重出合成图」。重出合成图要解码参考图和全部
+ * 部件，一条几百毫秒，连续微调会明显卡顿。批量提交把「一次编辑动作」收敛成一次写盘
+ * 与一次渲染。
+ *
+ * 另外这里**允许为还不存在的摆放记录创建条目**：手动装配不该依赖先跑过自动定位
+ * （拆完件直接手工拼是完全合理的用法），所以记录不存在时按部件的原始像素尺寸建一条。
+ */
+export async function saveRigLayoutItems(jobId: string, patches: RigLayoutPatch[]): Promise<{ touched: number }> {
   const job = await readRigJob(jobId);
   if (job === undefined) throw new Error(`任务不存在：${jobId}`);
-  const item = job.layout.items[name];
-  if (item === undefined) throw new Error(`这个部件还没有摆放记录：${name}`);
-  if (Number.isFinite(patch.x)) item.x = Math.round(patch.x!);
-  if (Number.isFinite(patch.y)) item.y = Math.round(patch.y!);
-  if (Number.isFinite(patch.width)) item.width = Math.max(1, Math.round(patch.width!));
-  if (Number.isFinite(patch.height)) item.height = Math.max(1, Math.round(patch.height!));
-  if (Number.isFinite(patch.rotation)) item.rotation = num(patch.rotation, item.rotation);
-  if (Number.isFinite(patch.z)) item.z = Math.round(patch.z!);
-  item.manual = true;
-  item.matched = true;
+  if (patches.length === 0) return { touched: 0 };
+
+  let touched = 0;
+  for (const patch of patches) {
+    const part = job.parts.find((entry) => entry.name === patch.name);
+    if (part === undefined) throw new Error(`没有这个部件：${patch.name}`);
+    let item = job.layout.items[patch.name];
+    if (item === undefined) {
+      // 没有记录：按部件的原始像素尺寸 + 全局缩放先验建一条，摆到画布左上角附近。
+      const hint = job.layout.hint ?? 0.5;
+      item = {
+        x: 0,
+        y: 0,
+        width: Math.max(1, Math.round((part.width ?? 64) * (patch.width === undefined ? hint : 1))),
+        height: Math.max(1, Math.round((part.height ?? 64) * (patch.height === undefined ? hint : 1))),
+        scale: hint,
+        rotation: 0,
+        z: drawRankOf(patch.name),
+        matched: false,
+        manual: false
+      };
+      job.layout.items[patch.name] = item;
+    }
+    if (Number.isFinite(patch.x)) item.x = Math.round(patch.x!);
+    if (Number.isFinite(patch.y)) item.y = Math.round(patch.y!);
+    if (Number.isFinite(patch.width)) item.width = Math.max(1, Math.round(patch.width!));
+    if (Number.isFinite(patch.height)) item.height = Math.max(1, Math.round(patch.height!));
+    if (Number.isFinite(patch.rotation)) item.rotation = num(patch.rotation, item.rotation);
+    if (Number.isFinite(patch.z)) item.z = Math.round(patch.z!);
+    if (patch.placed === false) {
+      item.matched = false;
+      item.manual = true;
+    } else {
+      item.matched = true;
+      item.manual = true;
+    }
+    // scale 只是自动匹配的副产物，手动改过尺寸之后它就不再代表任何东西；
+    // 仍然按「最终宽度 / 部件原始宽度」回填，导出的 layout.json 才有意义。
+    if (part.width !== undefined && part.width > 0) item.scale = Number((item.width / part.width).toFixed(4));
+    touched++;
+  }
+
+  // 手动装配会改动骨架上挂点的位置/尺寸，骨骼与图集必须重做——但只标一次。
   job.layout.approved = false;
+  job.layout.status = "ready";
+  job.layout.error = undefined;
   job.rig = { status: "empty" };
   job.atlas = { status: "empty" };
+  appendJobLog(job.log, "info", `手动装配：更新了 ${touched} 个部件`);
   await writeRigJob(job);
   await renderLayoutImages(jobId);
   await writeLayoutJson(jobId);
+  return { touched };
 }
 
-/** 出一张「参考图 | 合成图」对比图和一张纯合成图。 */
+/** 单条改动（界面上的小操作、脚本与测试都用它）。 */
+export async function saveLayoutItem(
+  jobId: string,
+  name: string,
+  patch: Omit<RigLayoutPatch, "name">
+): Promise<void> {
+  await saveRigLayoutItems(jobId, [{ name, ...patch }]);
+}
+
+/**
+ * 解码缓存。
+ *
+ * 手动装配是交互式的：每落一次位就要重出合成图，而重出图要解码参考图 + 全部部件。
+ * 每次 17 次 ffmpeg 调用（~1.4 秒）在连续微调时是灾难。部件文件在两次装配之间不会变，
+ * 所以按「路径 + mtime + 大小」缓存解码结果。
+ */
+const decodeCache = new Map<string, { key: string; image: { rgba: Buffer; width: number; height: number } }>();
+const DECODE_CACHE_LIMIT = 64;
+
+async function decodeCached(file: string, maxEdge = 2048): Promise<{ rgba: Buffer; width: number; height: number }> {
+  let key = file;
+  try {
+    const info = await stat(file);
+    key = `${file}:${info.mtimeMs}:${info.size}`;
+  } catch {
+    /* 取不到 stat 就退化成按路径缓存 */
+  }
+  const hit = decodeCache.get(file);
+  if (hit !== undefined && hit.key === key) return hit.image;
+  const decoded = await decodeToRgba(file, maxEdge);
+  if (decodeCache.size >= DECODE_CACHE_LIMIT) {
+    const oldest = decodeCache.keys().next().value;
+    if (oldest !== undefined) decodeCache.delete(oldest);
+  }
+  decodeCache.set(file, { key, image: decoded });
+  return decoded;
+}
+
 export async function renderLayoutImages(jobId: string): Promise<void> {
   const job = await readRigJob(jobId);
   if (job === undefined) throw new Error(`任务不存在：${jobId}`);
   if (job.source === undefined) throw new Error("还没有角色参考图");
 
-  const referenceDecoded = await decodeToRgba(rigAssetPath(jobId, job.source.file), 2048);
+  const referenceDecoded = await decodeCached(rigAssetPath(jobId, job.source.file));
   const reference: Rgba = { data: referenceDecoded.rgba, width: referenceDecoded.width, height: referenceDecoded.height };
 
   const ordered = orderedItems(job);
@@ -1629,9 +1724,19 @@ export async function renderLayoutImages(jobId: string): Promise<void> {
   for (const [name, item] of ordered) {
     const part = job.parts.find((entry) => entry.name === name);
     if (part?.file === undefined) continue;
-    const decoded = await decodeToRgba(rigAssetPath(jobId, part.file), 2048);
+    const decoded = await decodeCached(rigAssetPath(jobId, part.file));
     const scaled = resizeRgba({ data: decoded.rgba, width: decoded.width, height: decoded.height }, Math.max(1, item.width), Math.max(1, item.height));
-    placed.push({ name, x: item.x, y: item.y, width: item.width, height: item.height, rgba: scaled });
+    // 旋转要真的画出来：手动装配里能改旋转，如果合成图忽略它，用户拧了半天看不到变化，
+    // 而导出的骨架也会和看到的不一致。旋转后尺寸会变大，按中心对齐回原来的框。
+    const rotated = Math.abs(item.rotation) < 0.01 ? scaled : rotateRgba(scaled, item.rotation);
+    placed.push({
+      name,
+      x: item.x + (item.width - rotated.width) / 2,
+      y: item.y + (item.height - rotated.height) / 2,
+      width: rotated.width,
+      height: rotated.height,
+      rgba: rotated
+    });
   }
 
   const composite = compositeParts(reference.width, reference.height, placed);

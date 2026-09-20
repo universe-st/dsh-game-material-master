@@ -735,7 +735,8 @@ export function buildSkeleton(options: BuildSkeletonOptions): { spine: any; bone
       [name]: {
         x: round(offX * cosB - offY * sinB, 4),
         y: round(offX * sinB + offY * cosB, 4),
-        rotation: normalizeAngle(-worldRot),
+        // 挂点自身旋转 = 抵消骨骼朝向（让初始姿态正立）+ 手动装配里拧的角度。
+        rotation: normalizeAngle(-worldRot + (part.rotation ?? 0)),
         width: round(part.width, 4),
         height: round(part.height, 4)
       }

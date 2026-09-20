@@ -63,7 +63,7 @@ async function main() {
   check("注册了一条 prefix 路由", captured.routes.length === 1 && captured.routes[0].kind === "prefix", JSON.stringify(captured.routes.map((r) => r.path)));
 
   const invocations = captured.manifest?.invocations ?? [];
-  check("manifest 方法数为 65", invocations.length === 65, `实际 ${invocations.length}`);
+  check("manifest 方法数为 66", invocations.length === 66, `实际 ${invocations.length}`);
   const ids = new Set(invocations.map((i) => i.id));
   check("方法 id 唯一", ids.size === invocations.length);
   check("所有方法都声明在 gameStudio 服务下", invocations.every((i) => i.service === "gameStudio" && i.namespace === "gameStudio"));
@@ -1140,6 +1140,46 @@ async function main() {
       } finally {
         await new Promise((resolve) => server3.close(resolve));
       }
+    }
+
+    // 手动装配：批量写入 / 为没有记录的部件建条目 / 收回未摆放状态。
+    {
+      const boxOf = (view, name) => view.layout.items[name];
+      const before = await studio.getRigJob({ jobId: rigId });
+      const target = before.parts[0].name;
+      const moved = boxOf(before, target);
+      const result = await studio.saveRigLayoutItems({
+        jobId: rigId,
+        items: [{ name: target, x: moved.x + 17, y: moved.y + 23, width: moved.width + 6, height: moved.height + 4, rotation: 12, z: 3 }]
+      });
+      check("批量手动装配返回改动数", result.touched === 1, String(result.touched));
+      let after = await studio.getRigJob({ jobId: rigId });
+      const next = boxOf(after, target);
+      check("手动装配生效", next.x === moved.x + 17 && next.y === moved.y + 23, `${next.x},${next.y}`);
+      check("手动装配标记 manual 并算出 scale", next.manual === true && next.scale > 0, `scale=${next.scale}`);
+      check("手动装配让骨骼与图集作废", after.rig.status === "empty" && after.atlas.status === "empty");
+      // 视图里的 URL 是拼好的（界面直接用），所以看后缀而不是相对路径。
+      check(
+        "手动装配后合成图重新生成",
+        typeof after.layout.composite === "string" && after.layout.composite.endsWith("layout/composite.png"),
+        String(after.layout.composite)
+      );
+
+      // 收回未摆放状态：matched 变 false，但记录仍在（这样才能再拖回来）。
+      await studio.saveRigLayoutItems({ jobId: rigId, items: [{ name: target, placed: false }] });
+      after = await studio.getRigJob({ jobId: rigId });
+      check("可以把手动装配的部件收回未摆放", boxOf(after, target).matched === false);
+      await studio.saveRigLayoutItems({ jobId: rigId, items: [{ name: target, placed: true }] });
+      after = await studio.getRigJob({ jobId: rigId });
+      check("收回后还能再放回画布", boxOf(after, target).matched === true);
+
+      let threw2 = false;
+      try {
+        await studio.saveRigLayoutItems({ jobId: rigId, items: [{ name: "no-such-part", x: 1 }] });
+      } catch {
+        threw2 = true;
+      }
+      check("手动装配给不存在的部件会报错", threw2);
     }
 
     await studio.deleteRigJob({ jobId: rigId });
