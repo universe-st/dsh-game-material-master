@@ -99,6 +99,7 @@
       ["renameRigPart", true],
       ["setRigPartVisibility", true],
       ["saveRigLayoutItem", true],
+      ["setRigLayoutHints", true],
       ["runRigSheet", true],
       ["runRigSegment", true],
       ["runRigLayout", true],
@@ -477,6 +478,7 @@
 .SPR_rigCanvasWrap[data-drag=true]{cursor:grabbing}
 .SPR_rigBox{position:absolute;border:1.5px solid rgba(63,111,255,.85);border-radius:3px;box-sizing:border-box;cursor:grab;background:rgba(63,111,255,.10)}
 .SPR_rigBox[data-selected=true]{border-color:#ff9f2e;background:rgba(255,159,46,.18);box-shadow:0 0 0 1px rgba(255,159,46,.6)}
+.SPR_rigHintBox{position:absolute;border:1px dashed rgba(255,159,46,.85);border-radius:4px;pointer-events:none;box-sizing:border-box}
 .SPR_rigBoxLabel{position:absolute;left:0;top:-15px;font-size:10px;line-height:14px;padding:0 4px;border-radius:4px;background:rgba(20,22,30,.72);color:#fff;white-space:nowrap;pointer-events:none;font-family:inherit}
 .SPR_rigSideBySide{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
 .SPR_rigSideBySide figure{margin:0;display:flex;flex-direction:column;gap:4px}
@@ -3699,6 +3701,7 @@
       const items = job.layout?.items ?? {};
       const parts = (job.parts ?? []).filter((part) => part.status === "ready" && part.hidden !== true);
       // 任务视图里的 URL 已经是拼好的（宿主与对话工具共用同一份），这里直接用。
+      const hints = job.layout?.hints ?? {};
       const compositeUrl = job.layout?.composite ?? null;
       const referenceUrl = job.sourceUrl ?? null;
 
@@ -3751,6 +3754,20 @@
           "div",
           { className: "SPR_rigCanvasWrap", "data-drag": drag !== null ? "true" : undefined, ref: wrapRef },
           h("img", { src: compositeUrl, alt: "composite", onLoad: onImageLoad, draggable: false }),
+          // 先验框用虚线画出来：用户要能看出「agent 说的位置」和「实际摆的位置」差多少，
+          // 这也决定了「要不要相信这个先验、要不要重新给」。
+          Object.entries(hints).map(([name, box]: [string, any]) =>
+            h("div", {
+              key: `hint:${name}`,
+              className: "SPR_rigHintBox",
+              style: {
+                left: box.x * scale,
+                top: box.y * scale,
+                width: box.width * scale,
+                height: box.height * scale
+              }
+            })
+          ),
           parts.map((part) => {
             const item = items[part.name];
             if (item === undefined || item.matched !== true) return null;
@@ -3783,7 +3800,8 @@
         h(
           "p",
           { className: "SPR_hint" },
-          `画布 ${canvasW}×${canvasH}。点方块选中，拖动即微调位置（松手保存）；也可以在下面对话框里精确调数值。`
+          `画布 ${canvasW}×${canvasH}。点方块选中，拖动即微调位置（松手保存）；也可以在下面对话框里精确调数值。`,
+          Object.keys(hints).length > 0 ? `虚线框是 agent 给的视觉先验（${Object.keys(hints).length} 个）。` : ""
         )
       );
     }
@@ -4922,6 +4940,7 @@
         renameRigPart: (payload) => call("renameRigPart", payload),
         setRigPartVisibility: (payload) => call("setRigPartVisibility", payload),
         saveRigLayoutItem: (payload) => call("saveRigLayoutItem", payload),
+        setRigLayoutHints: (payload) => call("setRigLayoutHints", payload),
         runRigSheet: (payload) => call("runRigSheet", payload),
         runRigSegment: (payload) => call("runRigSegment", payload),
         runRigLayout: (payload) => call("runRigLayout", payload),

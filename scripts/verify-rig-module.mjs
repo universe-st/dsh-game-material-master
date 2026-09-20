@@ -304,7 +304,60 @@ check("带运行日志", Array.isArray(view.log));
   );
 }
 
-console.log("=== 7. 验收打标与列表 ===");
+console.log("=== 7. 视觉先验（自动摆位的关键入口） ===");
+{
+  // 先验的语义是「我告诉你这块大概在哪，你只在这个区域附近精修」。这里用一个
+  // **故意错位**的先验来验证它真的被尊重：把 head 指到画面下半部分，装配结果就该
+  // 跟着去下半部分——这证明先验压过了默认的全图搜索。
+  await riggen.setRigLayoutHints(job.id, {
+    head: { x: 60, y: 460, width: 120, height: 120 }
+  });
+  let withHint = await riggen.readRigJob(job.id);
+  check("先验已写入", withHint.layout.hints?.head !== undefined, JSON.stringify(withHint.layout.hints?.head));
+  const view = riggen.rigSnapshot(withHint);
+  check("先验出现在任务视图里", view.layout.hints.head !== undefined);
+  check("视图带本机数据目录（agent 看图要用）", typeof view.dataDir === "string" && view.dataDir.endsWith(job.id));
+  check("视图带部件蒙太奇路径", typeof view.partsMontagePath === "string" && view.partsMontagePath.endsWith("parts-montage.png"));
+  check("视图带部件顺序", Array.isArray(view.partsOrder) && view.partsOrder.length === withHint.parts.length);
+
+  await riggen.solveRigLayout(job.id);
+  withHint = await riggen.readRigJob(job.id);
+  const head = withHint.layout.items.head;
+  // 契约是「模板**中心**落在先验框向外放宽 35% 的范围内」——不是「框必须完全落在先验里」。
+  // 放宽是为了让先验给得粗一点也没关系（不精确是允许的，给错区域才是问题）。
+  const margin = 0.35;
+  const centerX = head.x + head.width / 2;
+  const centerY = head.y + head.height / 2;
+  const inside = centerX >= 60 - 120 * margin && centerX <= 180 + 120 * margin && centerY >= 460 - 120 * margin && centerY <= 580 + 120 * margin;
+  check("先验被尊重（中心落在放宽后的先验范围内）", inside, `head 中心 (${Math.round(centerX)},${Math.round(centerY)})，先验框中心 (120,520)`);
+  check("先验确实把部件拉过去了", head.y > 300, `head y=${head.y}（默认搜索会落在 100 附近）`);
+
+  // 清掉先验，结果应当回到默认搜索的位置（不再被拉到下半部分）。
+  await riggen.setRigLayoutHints(job.id, { head: null });
+  let cleared = await riggen.readRigJob(job.id);
+  check("先验可以清除", cleared.layout.hints?.head === undefined);
+  await riggen.solveRigLayout(job.id);
+  cleared = await riggen.readRigJob(job.id);
+  check("清除后不再被先验拉走", cleared.layout.items.head.y < 460, `head y=${cleared.layout.items.head.y}`);
+
+  let threw = false;
+  try {
+    await riggen.setRigLayoutHints(job.id, { head: { x: 0, y: 0, width: -5, height: 10 } });
+  } catch {
+    threw = true;
+  }
+  check("非法先验框会报错", threw);
+  threw = false;
+  try {
+    await riggen.setRigLayoutHints(job.id, { "no-such-part": { x: 0, y: 0, width: 10, height: 10 } });
+  } catch {
+    threw = true;
+  }
+  check("给不存在的部件设先验会报错", threw);
+  await riggen.solveRigLayout(job.id);
+}
+
+console.log("=== 8. 验收打标与列表 ===");
 await riggen.setRigStageApproved(job.id, "rig", true);
 await riggen.setRigPartApproved(job.id, "head", true);
 state = await riggen.readRigJob(job.id);
@@ -316,7 +369,7 @@ const summaries = await riggen.listRigJobs();
 check("任务列表能读到本任务", summaries.length === 1 && summaries[0].id === job.id);
 check("列表统计部件数正确", summaries[0].partCount === state.parts.length, String(summaries[0].partCount));
 
-console.log("=== 8. 删除部件会让下游作废 ===");
+console.log("=== 9. 删除部件会让下游作废 ===");
 let threw = false;
 try {
   await riggen.removeRigPart(job.id, "neck");
@@ -330,7 +383,7 @@ check("部件已删除", !state.parts.some((part) => part.name === "left-foot"))
 check("删除后装配记录被清空", Object.keys(state.layout.items).length === 0);
 check("删除后骨骼与图集重置", state.rig.status === "empty" && state.atlas.status === "empty");
 
-console.log("=== 9. 清理 ===");
+console.log("=== 10. 清理 ===");
 await riggen.deleteRigJob(job.id);
 check("任务目录已删除", !(await exists(riggen.rigJobDir(job.id))));
 await rm(sandbox, { recursive: true, force: true });

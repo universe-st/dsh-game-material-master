@@ -302,6 +302,8 @@ export interface SegmentedComponent {
   /** 合并了哪些连通域（一个格子里出现多块时用于诊断）。 */
   pieces: number;
   rgba: Rgba;
+  /** 在 labels 里的编号。 */
+  label: number;
 }
 
 /** 取图像四角的中位数颜色作为底色估计——比「假设是白色」可靠。 */
@@ -331,7 +333,19 @@ export function detectBackground(src: Rgba): [number, number, number] {
  * 流程：底色估计 → 前景掩码 → 8 邻域连通域标记 → 按面积过滤 → 逐个裁剪并按
  * 「离底色多远」生成软 alpha（这样抗锯齿边缘不会留下底色描边）。
  */
+export interface SegmentationResult {
+  components: SegmentedComponent[];
+  /** 每个像素所属的连通域编号（-1 = 不属于任何保留下来的连通域）。 */
+  labels: Int32Array;
+  width: number;
+  height: number;
+}
+
 export function segmentComponents(atlas: Rgba, options: SegmentOptions): SegmentedComponent[] {
+  return segmentWithLabels(atlas, options).components;
+}
+
+export function segmentWithLabels(atlas: Rgba, options: SegmentOptions): SegmentationResult {
   const { width, height, data } = atlas;
   const total = width * height;
   const labels = new Int32Array(total).fill(-1);
@@ -348,7 +362,7 @@ export function segmentComponents(atlas: Rgba, options: SegmentOptions): Segment
     if (dr * dr + dg * dg + db * db > tol2) isForeground[i] = 1;
   }
 
-  const components: Array<{ minX: number; minY: number; maxX: number; maxY: number; area: number; sumX: number; sumY: number }> = [];
+  const components: Array<{ minX: number; minY: number; maxX: number; maxY: number; area: number; sumX: number; sumY: number; label: number }> = [];
   const stack = new Int32Array(total);
   let label = 0;
 
@@ -391,7 +405,7 @@ export function segmentComponents(atlas: Rgba, options: SegmentOptions): Segment
       }
     }
 
-    components.push({ minX, minY, maxX, maxY, area, sumX, sumY });
+    components.push({ minX, minY, maxX, maxY, area, sumX, sumY, label });
     label++;
   }
 
@@ -438,10 +452,11 @@ export function segmentComponents(atlas: Rgba, options: SegmentOptions): Segment
       centroidX: Math.round(component.sumX / component.area),
       centroidY: Math.round(component.sumY / component.area),
       pieces: 1,
-      rgba: { data: out, width: cw, height: ch }
+      rgba: { data: out, width: cw, height: ch },
+      label: component.label
     });
   }
-  return result;
+  return { components: result, labels, width, height };
 }
 // ── 模板匹配（多尺度 + 金字塔由粗到细） ─────────────────────────────────
 
@@ -469,6 +484,15 @@ export interface MatchOptions {
   scalePrior?: number;
   /** 先验的强度（每 e 倍偏差扣多少分）。 */
   scalePriorWeight?: number;
+  /**
+   * 允许的搜索区域（**完整分辨率**下的参考图像素框），约束的是模板中心。
+   *
+   * 这是「视觉先验」落地的地方：让多模态模型先看一眼参考图和拆件图，给出每个
+   * 部件大致在哪。框不需要准——只要它对——就能把「全图盲搜」降级成「在指定
+   * 区域里精修」。盲搜是当前最大的失败来源：重画过的部件（裙摆、袖子）在错误
+   * 位置也可能拿到不低的分数，加了区域约束之后那些位置根本不会被考虑。
+   */
+  bounds?: { x0: number; y0: number; x1: number; y1: number };
   /**
    * 完整分辨率下的「忽略」掩码：被前面部件挡住的地方。
    * 这些像素不参与打分，也不计入覆盖率分母。
@@ -899,6 +923,7 @@ export function matchPartInPyramid(
   const evidenceWeight = options.evidenceWeight ?? 0.35;
   const scalePrior = options.scalePrior;
   const scalePriorWeight = options.scalePriorWeight ?? 0.15;
+  const bounds = options.bounds;
   const partBase = toGrayMask(part, 128);
   const lastLevel = pyramid.levels.length - 1;
   const ignoreCache = new Map<number, Uint8Array>();
@@ -946,6 +971,17 @@ export function matchPartInPyramid(
         const stride = isCoarse ? strideAt(part, scale, factor) : 1;
 
         let window: { x0: number; y0: number; x1: number; y1: number } | undefined;
+        if (bounds !== undefined) {
+          // bounds 约束的是**模板中心**，而搜索枚举的是左上角，所以两边各减去半个模板。
+          const halfW = prepared.gray.width / 2;
+          const halfH = prepared.gray.height / 2;
+          window = {
+            x0: Math.round(bounds.x0 * factor - halfW),
+            y0: Math.round(bounds.y0 * factor - halfH),
+            x1: Math.round(bounds.x1 * factor - halfW),
+            y1: Math.round(bounds.y1 * factor - halfH)
+          };
+        }
         if (!isCoarse && bestHit !== undefined) {
           const prevFactor = pyramid.levels[level - 1].factor;
           const ratio = factor / prevFactor;
@@ -954,12 +990,23 @@ export function matchPartInPyramid(
           const centerX = (bestHit.x + prevW / 2) * ratio;
           const centerY = (bestHit.y + prevH / 2) * ratio;
           const pad = Math.max(prevStride * 3 + 3, 5);
-          window = {
+          const refined = {
             x0: Math.round(centerX - prepared.gray.width / 2) - pad,
             y0: Math.round(centerY - prepared.gray.height / 2) - pad,
             x1: Math.round(centerX - prepared.gray.width / 2) + pad,
             y1: Math.round(centerY - prepared.gray.height / 2) + pad
           };
+          // 精修窗口必须与先验框取**交集**：否则某一级的粗定位一旦飘出先验区域，
+          // 后面几级会沿着错误的中心一路精修下去，先验就白给了。
+          window =
+            window === undefined
+              ? refined
+              : {
+                  x0: Math.max(window.x0, refined.x0),
+                  y0: Math.max(window.y0, refined.y0),
+                  x1: Math.min(window.x1, refined.x1),
+                  y1: Math.min(window.y1, refined.y1)
+                };
         }
 
         const hit = searchAtLevel(ref, foreground, foregroundCount, prepared, stride, window, floorRank, minCoverage, evidenceWeight, ignoreAt(pyramid.levels[level]));
@@ -1314,10 +1361,21 @@ export interface LayoutSolveOptions {
    * 不传就跳过这一步。
    */
   drawOrder?: string[];
+  /**
+   * 视觉先验：部件名 → 它在参考图里的大致像素框（完整分辨率）。
+   *
+   * 由多模态模型看一眼图给出来，不需要精确。有先验的部件会被限制在这个框附近
+   * 搜索，并把缩放锁定在先验隐含的倍率附近——「全图盲搜」是当前最大的失败来源。
+   */
+  hints?: Record<string, { x: number; y: number; width: number; height: number }>;
+  /** 先验框向外放宽的比例（搜索区域），默认 0.35。 */
+  hintMargin?: number;
 }
 
 export interface LayoutSolveResult {
   hint: number;
+  /** 实际使用了先验的部件数（诊断用）。 */
+  hintedCount?: number;
   /** 全局缩放的候选扫描结果（诊断用：可以看清为什么选了这个缩放）。 */
   scaleProbes?: Array<{ scale: number; meanScore: number; coverage: number }>;
   placements: Record<string, MatchResult>;
@@ -1392,9 +1450,50 @@ export function solveLayout(reference: Rgba, parts: LayoutPartInput[], options: 
   const placements: Record<string, MatchResult> = {};
   const failed: string[] = [];
   const attempts = new Map<string, number>();
+  const hints = options.hints ?? {};
+  const hintMargin = options.hintMargin ?? 0.35;
+
+  // 先验隐含的缩放：拿「先验框尺寸 / 部件像素尺寸」的中位数当全局倍率。
+  // 这比面积公式与覆盖率探测都直接——它就是「模型说这块该多大」。
+  const hintedScales: number[] = [];
+  for (const part of parts) {
+    const hintBox = hints[part.name];
+    if (hintBox === undefined || hintBox.width <= 0 || hintBox.height <= 0) continue;
+    hintedScales.push(hintBox.width / part.rgba.width, hintBox.height / part.rgba.height);
+  }
+  const hintedScale =
+    hintedScales.length >= 2 ? hintedScales.slice().sort((a, b) => a - b)[Math.floor(hintedScales.length / 2)] : undefined;
+
+  /**
+   * 某个部件的搜索框。**每一处重新匹配都要带上它**——先验只约束「初次匹配」
+   * 是不够的：后面的冲突消解 / 遮挡修正 / 镜像消解都会重新搜一次位置，漏掉任何
+   * 一处，那一处就能把部件挪到先验框外面去（实测 16 个先验里 13 个最终出框）。
+   */
+  const boundsOf = (name: string) => {
+    const box = hints[name];
+    if (box === undefined) return undefined;
+    return {
+      x0: box.x - box.width * hintMargin,
+      y0: box.y - box.height * hintMargin,
+      x1: box.x + box.width * (1 + hintMargin),
+      y1: box.y + box.height * (1 + hintMargin)
+    };
+  };
 
   for (const part of parts) {
-    let result = matchPartInPyramid(pyramid, part.rgba, { scales: narrow, evidenceWeight, minCoverage, scalePrior: hint });
+    const hintBox = hints[part.name];
+    const bounds = boundsOf(part.name);
+    // 有先验时把缩放阶梯收窄到先验倍率附近（模型给的尺寸本来就比我们的估计准），
+    // 没有先验才回到全局阶梯。
+    const ownScale = hintBox === undefined ? undefined : (hintBox.width / part.rgba.width + hintBox.height / part.rgba.height) / 2;
+    const ladder = ownScale !== undefined && ownScale > 0.004 ? scaleLadderAround(ownScale).slice(1, 4) : narrow;
+    let result = matchPartInPyramid(pyramid, part.rgba, {
+      scales: ladder,
+      evidenceWeight,
+      minCoverage,
+      scalePrior: ownScale ?? hintedScale ?? hint,
+      bounds
+    });
     let tries = 1;
     let retried = false;
     if (result === undefined) {
@@ -1407,7 +1506,10 @@ export function solveLayout(reference: Rgba, parts: LayoutPartInput[], options: 
         scales: wide,
         evidenceWeight,
         minCoverage: Math.max(0.5, minCoverage),
-        scalePrior: hint
+        scalePrior: hintedScale ?? hint,
+        // 兜底重试也**不能放开先验框**：放开了就等于回到全图盲搜，
+        // 而那正是我们要修的东西。只在框内放宽缩放。
+        bounds
       });
       if (retry !== undefined && retry.score >= 0.62) result = retry;
       tries = 2;
@@ -1439,7 +1541,8 @@ export function solveLayout(reference: Rgba, parts: LayoutPartInput[], options: 
       scales: narrow,
       evidenceWeight,
       minCoverage: Math.max(0.4, minCoverage - 0.1),
-      scalePrior: hint
+      scalePrior: hint,
+      bounds: boundsOf(name)
     });
     // 冲突就是硬证据：两块部件都指向同一处，最多只有一个是对的。
     // 所以这里不要求「新位置得分更高」，只要新位置本身站得住就采纳。
@@ -1492,7 +1595,9 @@ export function solveLayout(reference: Rgba, parts: LayoutPartInput[], options: 
         evidenceWeight,
         minCoverage: Math.max(0.3, minCoverage - 0.2),
         ignoreFull: ignore,
-        scalePrior: hint
+        scalePrior: hint,
+        // 遮挡修正同样不能越出先验框：它只该在框内挪一点，而不是重新做一次全局搜索。
+        bounds: boundsOf(name)
       });
       if (candidate === undefined || before === undefined) continue;
       // 两边都在「涂掉前面部件」的参考图上比，才是公平比较。
@@ -1580,7 +1685,8 @@ export function solveLayout(reference: Rgba, parts: LayoutPartInput[], options: 
       evidenceWeight,
       minCoverage: Math.max(0.35, minCoverage - 0.15),
       ignoreFull: ignore,
-      scalePrior: hint
+      scalePrior: hint,
+      bounds: boundsOf(loser)
     });
     if (alternative === undefined || alternative.score < 0.45) continue;
     if (Math.sign(alternative.x + alternative.width / 2 - centerX) === Math.sign(centreOf(placements[loser]) - centerX)) continue;
@@ -1588,5 +1694,65 @@ export function solveLayout(reference: Rgba, parts: LayoutPartInput[], options: 
     if (!resolved.includes(loser)) resolved.push(loser);
   }
 
-  return { hint, scaleProbes: chosen.probes, placements, failed, resolved, moved };
+  return { hint, scaleProbes: chosen.probes, hintedCount: Object.keys(hints).filter((name) => parts.some((part) => part.name === name)).length, placements, failed, resolved, moved };
+}
+
+/**
+ * 按**真实像素邻近距离**把连通域分组，而不是按包围盒。
+ *
+ * 为什么不能用包围盒：头发那块连通域的包围盒横跨了大半张图，和领子、上衣的包围盒
+ * 天然重叠，按包围盒一判就是「相邻」，再经过单链传递（A~B、B~C ⇒ A~C）整张图会被
+ * 串成一块——实测把角色串成了一个 1937×1156 的「头」。
+ *
+ * 这里改成从每个连通域的**边界像素**向外搜 `gap` 像素，只有真的找到另一块的像素才
+ * 合并；只扫边界像素（而不是全部前景像素），代价从 O(面积×gap²) 降到 O(周长×gap²)。
+ */
+export function groupComponentsByProximity(
+  labels: Int32Array,
+  width: number,
+  height: number,
+  gap: number
+): number[] {
+  const parent = new Int32Array(0);
+  const ids = new Set<number>();
+  for (let i = 0; i < labels.length; i++) if (labels[i] >= 0) ids.add(labels[i]);
+  const maxLabel = ids.size === 0 ? 0 : Math.max(...ids) + 1;
+  const find = (map: Int32Array, index: number): number => (map[index] === index ? index : (map[index] = find(map, map[index])));
+  const roots = new Int32Array(maxLabel);
+  for (let i = 0; i < maxLabel; i++) roots[i] = i;
+  const union = (a: number, b: number) => {
+    const ra = find(roots, a);
+    const rb = find(roots, b);
+    if (ra !== rb) roots[rb] = ra;
+  };
+
+  const offset = Math.max(1, Math.round(gap));
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const index = y * width + x;
+      const label = labels[index];
+      if (label < 0) continue;
+      // 只处理边界像素：右/下邻居已经属于别块，或者自己是前景而邻居是背景。
+      const right = x + 1 < width ? labels[index + 1] : -1;
+      const down = y + 1 < height ? labels[index + width] : -1;
+      if (right >= 0 && right !== label) union(label, right);
+      if (down >= 0 && down !== label) union(label, down);
+      if (right >= 0 && down >= 0) continue;
+      // 边界像素才向外找：跳过中间的空隙，仍能认出「差一点点就接上」的两块。
+      for (let dy = -offset; dy <= offset; dy++) {
+        const ny = y + dy;
+        if (ny < 0 || ny >= height) continue;
+        for (let dx = -offset; dx <= offset; dx++) {
+          const nx = x + dx;
+          if (nx < 0 || nx >= width) continue;
+          const other = labels[ny * width + nx];
+          if (other >= 0 && other !== label) union(label, other);
+        }
+      }
+    }
+  }
+
+  const out = new Array<number>(maxLabel).fill(-1);
+  for (const id of ids) out[id] = find(roots, id);
+  return out;
 }

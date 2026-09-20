@@ -153,6 +153,19 @@ const rigLayoutItemSchema = z.object({
   z: z.number().optional()
 });
 const runRigLayoutSchema = z.object({ jobId: z.string(), names: z.array(z.string()).optional() });
+const setRigLayoutHintsSchema = z.object({
+  jobId: z.string(),
+  /**
+   * 部件名 → 它在参考图里的大致像素框；传 null 表示清除该部件的先验。
+   * 由多模态模型看一眼图给出来（对话里就是 agent 自己），不需要精确。
+   */
+  hints: z.record(
+    z.string(),
+    z
+      .object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() })
+      .nullable()
+  )
+});
 
 /**
  * 浏览器半区上报自己真实的 `location.origin`。
@@ -242,6 +255,7 @@ export const METHODS: MethodSpec[] = [
   { method: "renameRigPart", payload: renameRigPartSchema, result: okSchema },
   { method: "setRigPartVisibility", payload: rigPartFlagSchema, result: okSchema },
   { method: "saveRigLayoutItem", payload: rigLayoutItemSchema, result: okSchema },
+  { method: "setRigLayoutHints", payload: setRigLayoutHintsSchema, result: okSchema },
   { method: "runRigSheet", payload: rigJobIdSchema, result: startedSchema },
   { method: "runRigSegment", payload: rigJobIdSchema, result: startedSchema },
   { method: "runRigLayout", payload: runRigLayoutSchema, result: startedSchema },
