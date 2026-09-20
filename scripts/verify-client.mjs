@@ -367,10 +367,39 @@ for (const file of files) {
   }
 }
 
+// ── 宿主后台任务 key：浏览器半区与宿主是两份实现，只能靠文本契约对齐 ──────
+//
+// 界面判断「这一批还在跑」靠宿主运行表里的任务（`project.jobs[].targets`）：
+// 批量抽帧是 kick 型调用，远程调用立刻返回，真正的活在后台一个方向一个方向地做，
+// 本地 pending 表那 700ms 撑不住——实测表现就是点「提取全部序列帧」后八个方向
+// 先一起转圈，紧接着还没轮到的变回「尚未抽帧」，过一阵才出结果。
+//
+// 任务 key 写错一个字不会有任何报错，只是这条路静默失效，所以两边一起核对：
+// 浏览器半区点了名的 key，宿主必须真有这个任务，而且必须公布覆盖面。
+{
+  const clientText = readFileSync(fileURLToPath(new URL("../src/client.ts", import.meta.url)), "utf8");
+  const hostText = readFileSync(fileURLToPath(new URL("../src/pipeline.ts", import.meta.url)), "utf8");
+
+  const clientKeys = [...new Set(
+    [...clientText.matchAll(/hostJob\(\s*project\s*,\s*"([^"]+)"\s*\)/g)].map((match) => match[1])
+  )];
+  const kicked = new Set([...hostText.matchAll(/kick\(\s*projectId\s*,\s*"([^"]+)"/g)].map((match) => match[1]));
+  const published = new Set(
+    [...hostText.matchAll(/(?:setJobTargets|addJobTargets)\(\s*projectId\s*,\s*"([^"]+)"/g)].map((match) => match[1])
+  );
+
+  check("浏览器半区按宿主任务 key 判断批量进度", clientKeys.length >= 3, clientKeys.join("、") || "(一个都没有)");
+  for (const key of clientKeys) {
+    check(`宿主存在后台任务 ${key}`, kicked.has(key), [...kicked].join("、"));
+    check(`后台任务 ${key} 公布覆盖面 targets`, published.has(key), [...published].join("、"));
+  }
+}
+
 console.log("");
 if (failures.length > 0) {
   console.error(`失败 ${failures.length} 项：${failures.join("、")}`);
   console.error("阶段渲染函数少拿到 ctx 键时，界面渲染看不出来，只有点按钮才会报 TypeError。请把调用点补齐。");
+  console.error("宿主任务 key / targets 对不上时同样看不出来，只是批量任务中途会退回空态。请把两边对齐。");
   process.exit(1);
 }
 console.log(`共 ${checks} 项检查，全部通过。`);

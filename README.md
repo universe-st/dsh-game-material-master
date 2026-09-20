@@ -325,10 +325,10 @@ npm run build          # tsc → lib/，并剥掉浏览器束结尾的 export {}
 # 纯本地测试（不联网、不花钱）
 node scripts/verify-minimax.mjs    # MiniMax 协议层（85 项，含请求体逐字段断言）
 node scripts/verify-pipeline.mjs   # 抽帧/抠像/合成链路（30 项，含回归用例）
-node scripts/verify-host.mjs       # 宿主冒烟（193 项，真实 cordis + 真实 HTTP）
-node scripts/verify-client.mjs     # 浏览器半区契约（66 项：阶段 ctx 键必须被转发，且每个生成类调用点都带 loading 反馈）
-node scripts/verify-feedback.mjs   # 浏览器半区渲染（73 项：真加载 lib/client.js，断言遮罩真的出现 / 空闲时真的不出现 / 深链接点击真的切面板）
-node scripts/verify-tools.mjs      # 对话调用面（83 项：工具 schema、方法覆盖、固定流程、审核模式、深链接契约）
+node scripts/verify-host.mjs       # 宿主冒烟（202 项，真实 cordis + 真实 HTTP）
+node scripts/verify-client.mjs     # 浏览器半区契约（73 项：阶段 ctx 键必须被转发，且每个生成类调用点都带 loading 反馈）
+node scripts/verify-feedback.mjs   # 浏览器半区渲染（87 项：真加载 lib/client.js，断言遮罩真的出现 / 空闲时真的不出现 / 深链接点击真的切面板）
+node scripts/verify-tools.mjs      # 对话调用面（88 项：工具 schema、方法覆盖、固定流程、审核模式、深链接契约）
 node scripts/verify-live-bundle.mjs # 运行中的宿主是否已在提供新束（走 /plugins/events 拿真实 graph，再按图里的 URL 取回）
 
 # 真实 API 端到端（会花钱）
@@ -400,6 +400,28 @@ running 落在下一次 `getProject` 里**：
 - 批量操作有专属 key（`image:*all` 等），这样**还没轮到的方向**也能一并盖住，
   而不是只有正在跑的那一个变灰；
 - 卸载后不再 `setState`（长任务可能几分钟才回来）。
+
+### 批量任务跑多久，遮罩就得盖多久（`job.targets`）
+
+上面那张 pending 表只活到**远程调用返回**为止，而批量任务是 kick 型调用：一提交就返回
+`{started: true}`，真正的活在宿主后台一个方向一个方向地做（抽帧并发只有 2）。所以「还没
+轮到」的判定不能只看本地 pending——实测的 bug 就出在这里：点「提取全部序列帧」后八个方向
+先一起转圈，紧接着还没轮到的那几个变回「尚未抽帧」，过一阵才陆续出结果，看着像点击没生效。
+
+因此宿主的运行表会公布**这次任务要负责哪些方向**（`project.jobs[].targets`，
+见 `pipeline.ts` 的 `JobInfo`），界面按它决定盖不盖：
+
+| 谁 | 什么时候 | 由谁负责 |
+|---|---|---|
+| `frames:extract` | 从任务登记（第一个 `await` 之前）到该方向的预览带写出来 | 抽帧节点自己的 running 状态；覆盖面负责「还没轮到」与「抽好了但预览带还没出」 |
+| `videos:submit` | 逐方向提交的整段时间 | 提交成功后交给节点自己的 running 状态（覆盖面同时从该方向摘掉） |
+| `images:all` | 整批生成期间 | 出图落地（成功或失败）后立刻摘掉，已通过验收、这次不重做的方向一开始就不在覆盖面里 |
+
+两条硬约束（`verify-host.mjs` 钉住）：**覆盖面只包含真的有素材、这次真会做的方向**
+（否则那个格子会一直转圈），**单方向操作只覆盖那一个方向**（否则其余方向被白白盖住）。
+`verify-client.mjs` 用文本契约核对两边的任务 key：写错一个字不会有任何报错，
+只是这条路静默失效。宿主半区是启动时装入的，**改完 `pipeline.ts` 要重启 DSH**；
+浏览器半区刷新即可（旧宿主不带 `targets` 时这条路自动不生效，不会报错）。
 
 `verify-client.mjs` 的文本契约与 `verify-feedback.mjs` 的真渲染断言一起保证：
 新增调用点时忘了传反馈，或者遮罩在空闲时误开，都会在本地测试里直接失败。

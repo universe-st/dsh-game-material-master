@@ -44,6 +44,19 @@ export interface JobInfo {
   key: string;
   label: string;
   startedAt: number;
+  /**
+   * 这个任务还要负责哪些方向（界面据此盖住「还没轮到 / 产物还没出来」的那些）。
+   *
+   * 为什么必须由宿主公布：`runFrames` / `runVideos` / `runImages` 都是 kick 型调用，
+   * 一提交就返回 `{started: true}`，真正的活是一个方向一个方向做的，宿主把节点写成
+   * running 也是一个个来的。浏览器半区那张本地 pending 表只多留 700ms，盖不住
+   * 「还没轮到」的那段空窗期——实测表现就是点「提取全部序列帧」后八个方向先转圈，
+   * 紧接着变回「尚未抽帧」，过一阵才陆续出结果。
+   *
+   * 方向做完了就从列表里摘掉（见 `dropJobTarget`），不能一直挂着：摘晚了会把
+   * 已经出好的产物一直盖着。
+   */
+  targets?: string[];
 }
 
 const jobs = new Map<string, Map<string, JobInfo>>();
@@ -117,6 +130,24 @@ async function mapLimit<T>(items: T[], limit: number, fn: (item: T, index: numbe
       }
     })
   );
+}
+
+/**
+ * 公布 / 更新一个后台任务覆盖的方向。
+ *
+ * 在 kick 的回调**第一个 await 之前**调用，远程调用返回时列表已经就绪——
+ * 界面第一次轮询就能看到，不会出现「本地 pending 撤了、宿主列表还没写」的空窗。
+ */
+function setJobTargets(projectId: string, taskKey: string, targets: string[]): void {
+  const info = jobs.get(projectId)?.get(taskKey);
+  if (info !== undefined) info.targets = [...targets];
+}
+
+/** 某个方向的产物已经可见，从任务的覆盖面里摘掉，界面不再盖着它。 */
+function dropJobTarget(projectId: string, taskKey: string, key: string): void {
+  const info = jobs.get(projectId)?.get(taskKey);
+  if (info === undefined || info.targets === undefined) return;
+  info.targets = info.targets.filter((item) => item !== key);
 }
 
 // ── 阶段 1：八方向绿幕图 ──────────────────────────────────────────────────
@@ -216,23 +247,35 @@ function markDependentsStale(project: Project, changed: string): void {
 /** 按依赖顺序把八张图全部生成一遍（用户已手工通过的图会被跳过）。 */
 export function startAllImages(projectId: string, force = false): { started: boolean; reason?: string } {
   const started = kick(projectId, "images:all", "批量生成八方向图", async () => {
-    const config = await loadConfig();
+    // 一开工先把八个方向都盖住（与「刚点下去」时本地 pending 表的表现一致），
+    // 等这一批到底要重做哪些方向算出来再收窄——生图要跑好几分钟，
+    // 已经通过验收、这次不会重做的方向不能一直盖着。
+    setJobTargets(projectId, "images:all", DIRECTION_KEYS);
+    const plan: string[][] = [];
     for (const stage of IMAGE_STAGES) {
+      const project = await readProject(projectId);
+      if (project === undefined) throw new Error(`项目不存在：${projectId}`);
+      plan.push(
+        stage.filter((key) => {
+          const node = project.images[key];
+          const fresh = node?.status === "ready" && node.stale !== true;
+          return force || !(fresh && node.approved);
+        })
+      );
+    }
+    // 收窄到这一批真要做的方向：还没轮到的也要盖住，跳过的一个都不多盖。
+    setJobTargets(projectId, "images:all", plan.flat());
+    const config = await loadConfig();
+    for (const todo of plan) {
       if (disposed) return;
-      const todo: string[] = [];
-      for (const key of stage) {
-        const project = await readProject(projectId);
-        if (project === undefined) throw new Error(`项目不存在：${projectId}`);
-        const node = project.images[key];
-        const fresh = node?.status === "ready" && node.stale !== true;
-        if (!force && fresh && node.approved) continue;
-        todo.push(key);
-      }
+      // 出图落地后逐个摘掉：成功是露出新图，失败是露出错误。
       await mapLimit(todo, config.concurrency, async (key) => {
         try {
           await generateOne(projectId, key, undefined);
         } catch {
           // generateOne 已经把错误写进节点状态，这里继续推进其余方向。
+        } finally {
+          dropJobTarget(projectId, "images:all", key);
         }
       });
     }
@@ -244,6 +287,9 @@ export function startAllImages(projectId: string, force = false): { started: boo
 
 export function startVideos(projectId: string, keys?: string[]): { started: boolean; reason?: string } {
   const started = kick(projectId, "videos:submit", "提交视频任务", async () => {
+    // 第一个 await 之前就把覆盖面公布出去：远程调用返回时界面已经能靠它
+    // 盖住「还没轮到」的方向，不必等本地 pending 表那 700ms 的缓冲。
+    setJobTargets(projectId, "videos:submit", keys ?? DIRECTION_KEYS);
     const project = await readProject(projectId);
     if (project === undefined) throw new Error(`项目不存在：${projectId}`);
     const config = await loadConfig();
@@ -259,6 +305,8 @@ export function startVideos(projectId: string, keys?: string[]): { started: bool
       if (video?.status === "running" && typeof video.taskId === "string") return false;
       return true;
     });
+    // 收窄成真正要提交的那几个：被跳过（已经完成）的方向不该被盖上遮罩。
+    setJobTargets(projectId, "videos:submit", targets);
     if (targets.length === 0) {
       const already = (keys ?? DIRECTION_KEYS).filter((key) => project.videos[key]?.status === "running");
       throw new Error(
@@ -308,6 +356,10 @@ export function startVideos(projectId: string, keys?: string[]): { started: bool
           current.videos[key] = { ...current.videos[key], status: "error", error: message, remoteStatus: "提交失败", updatedAt: Date.now() };
           log(current, "error", `「${label}」视频提交失败：${message}`);
         });
+      } finally {
+        // 提交这一步结束（成功进 running、失败进 error）就摘掉：
+        // 之后的进度由节点自己的 running 状态负责，不该再靠这张覆盖面。
+        dropJobTarget(projectId, "videos:submit", key);
       }
     });
 
@@ -410,12 +462,22 @@ export async function pollVideosOnce(projectId: string): Promise<void> {
 
 // ── 阶段 3：抽帧 ─────────────────────────────────────────────────────────
 
+/**
+ * 抽取序列帧。`keys` 是要抽的方向；省略则按「有视频的方向」全抽。
+ * 调用方（`runFrames`）已经把没有视频的方向滤掉了，这里再滤一次兜底。
+ */
 export function startExtract(projectId: string, keys?: string[]): { started: boolean; reason?: string } {
   const started = kick(projectId, "frames:extract", "抽取序列帧", async () => {
+    const scope = keys ?? DIRECTION_KEYS;
+    // 第一个 await 之前就公布覆盖面，理由同 startVideos：抽帧是「一次两个方向」
+    // 慢慢做的，还没轮到的方向必须靠这张表盖着，否则界面会闪回「尚未抽帧」。
+    setJobTargets(projectId, "frames:extract", scope);
     const project = await readProject(projectId);
     if (project === undefined) throw new Error(`项目不存在：${projectId}`);
     const config = await loadConfig();
-    const targets = (keys ?? DIRECTION_KEYS).filter((key) => project.videos[key]?.file !== undefined);
+    const targets = scope.filter((key) => project.videos[key]?.file !== undefined);
+    // 没有视频的方向不会产出任何东西，必须从覆盖面里去掉——留着它们会一直转圈。
+    setJobTargets(projectId, "frames:extract", targets);
     if (targets.length === 0) throw new Error("还没有可抽帧的视频");
 
     await mapLimit(targets, Math.min(2, config.concurrency), async (key) => {
@@ -591,6 +653,10 @@ async function renderSheet(projectId: string, options: RenderOptions = {}): Prom
               target.strip = `preview/${key}.png`;
             }
           });
+          // 第 3 步里「抽帧完成」和「预览带可见」之间隔着这一步，所以抽帧任务的
+          // 覆盖面要留到条带真的写出来才摘：摘早了界面会闪回「尚未抽帧」，
+          // 摘晚了会把已经出好的预览一直盖着。
+          dropJobTarget(projectId, "frames:extract", key);
         }
       }
       rows.push(row);

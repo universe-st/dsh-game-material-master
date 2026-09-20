@@ -240,6 +240,8 @@ const textOf = (node) => {
   return textOf(node.children ?? []);
 };
 const overlayText = (tree) => overlays(tree).map(textOf).join(" | ");
+/** 空态格子上的文案（「尚未抽帧」这类）：没产物时有没有被正确盖住，全看这里。 */
+const emptyTexts = (tree) => byClass(tree, "SPR_thumbEmpty").map(textOf);
 
 /** 验收控件：审核模式下拉（auto/manual）与「通过」按钮。 */
 const modeOptions = (tree) => collect(tree, (node) => node.type === "option").map((node) => node.props?.value);
@@ -404,6 +406,20 @@ section("阶段① 八方向绿幕图");
     byClass(regenerate.tree, "SPR_btn").some((node) => node.props["data-busy"] === "true")
   );
   check("全部重新生成时出现忙碌徽章", byClass(regenerate.tree, "SPR_busyBadge").length >= 1);
+
+  // 宿主侧那批生成还在跑（本地 pending 早就撤了）：被它覆盖的方向要盖着，
+  // 没被覆盖的方向一个遮罩都不能多——覆盖面是按方向公布的，见 job.targets。
+  const hostBatch = makeProject();
+  hostBatch.images.upLeft = { status: "empty" };
+  hostBatch.jobs = [{ key: "images:all", label: "批量生成八方向图", startedAt: 1, targets: ["upLeft", "upRight"] }];
+  const hostTree = renderStage(hostBatch, "images", makeTasks()).tree;
+  check("宿主批量生图：还没轮到的方向也被盖住", overlays(hostTree).length === 1, `${overlays(hostTree).length} 个`);
+  check("宿主批量生图：还没出图的方向显示正在生成", emptyTexts(hostTree).includes("正在生成…"), emptyTexts(hostTree).join("、"));
+  check("宿主批量生图期间出现忙碌徽章", byClass(hostTree, "SPR_busyBadge").length >= 1);
+  check(
+    "宿主批量生图期间重复提交被禁用",
+    byClass(hostTree, "SPR_btn").some((node) => node.props.disabled === true)
+  );
 }
 
 // ── 阶段②：视频 ─────────────────────────────────────────────────────────
@@ -416,9 +432,29 @@ section("阶段② 行走动作视频");
   check("遮罩文案带方向", overlayText(busy.tree).includes("video:front"), overlayText(busy.tree));
   const all = renderStage(makeProject(), "videos", makeTasks(["video:*all"]));
   check("批量提交时未轮到的方向也被盖住", overlays(all.tree).length >= 7, `${overlays(all.tree).length} 个`);
+
+  // 宿主侧那批提交还在跑：覆盖面里的方向盖着，覆盖面外的一个都不多盖。
+  const hostSubmit = makeProject();
+  hostSubmit.videos.upLeft = { status: "empty" };
+  hostSubmit.videos.upRight = { status: "running", remoteStatus: "提交中" };
+  hostSubmit.jobs = [{ key: "videos:submit", label: "提交视频任务", startedAt: 1, targets: ["upLeft", "upRight"] }];
+  const hostTree = renderStage(hostSubmit, "videos", makeTasks()).tree;
+  check("宿主批量提交：还没轮到的方向也被盖住", overlays(hostTree).length === 2, `${overlays(hostTree).length} 个`);
+  check("宿主批量提交期间重复提交被禁用", byClass(hostTree, "SPR_btn").some((node) => node.props.disabled === true));
 }
 
 // ── 阶段③：抽帧 ─────────────────────────────────────────────────────────
+/** 八个方向都还没抽过帧的那一份桩数据（下面两段抽帧用例都要用）。 */
+function emptyFrames() {
+  const project = makeProject();
+  for (const key of COMPASSES) project.frames[key] = { status: "empty", frames: [], keyed: [], approved: false };
+  return project;
+}
+/** 桩：宿主运行表里那次抽帧任务，`targets` 是它负责的方向。 */
+function frameJob(targets) {
+  return [{ key: "frames:extract", label: "抽取序列帧", startedAt: 1, targets }];
+}
+
 section("阶段③ 提取序列帧");
 {
   const idle = renderStage(makeProject(), "frames", makeTasks());
@@ -427,6 +463,82 @@ section("阶段③ 提取序列帧");
   check("抽帧时遮罩盖住序列条", overlays(busy.tree).length >= 1, `${overlays(busy.tree).length} 个`);
   const all = renderStage(makeProject(), "frames", makeTasks(["frames:*all"]));
   check("批量抽帧时出现忙碌徽章", byClass(all.tree, "SPR_busyBadge").length >= 1);
+
+  // 点下去到「宿主任务表回来」之间那一下：本地 pending 的批量 key 必须自己盖住，
+  // 否则会出现一次「点了没反应」的空档。
+  const localBatch = renderStage(emptyFrames(), "frames", makeTasks(["frames:*all"]));
+  check(
+    "本地批量 key 也要盖住还没轮到的方向",
+    emptyTexts(localBatch.tree).every((text) => text === "正在抽帧…"),
+    emptyTexts(localBatch.tree).join("、")
+  );
+}
+
+// ── 批量抽帧：还没轮到的方向不能退回空态（实测踩过的坑）──────────────────
+//
+// 「提取全部序列帧」是 kick 型调用：远程调用立刻返回 `{started:true}`，真正的活在
+// 宿主后台一个方向一个方向地做（并发只有 2）。本地 pending 表只多留 700ms，
+// 于是点下去八个方向先一起转圈，紧接着还没轮到的那几个变回「尚未抽帧」，
+// 过一阵才陆续出结果——看着像点击没生效，用户会以为按钮坏了。
+// 宿主的运行表（`project.jobs[].targets`）在整个任务期间都在，界面必须看它。
+section("批量抽帧：宿主任务的覆盖面");
+{
+  const batch = emptyFrames();
+  batch.frames.front = { status: "running", frames: [], keyed: [], approved: false };
+  // 本地 pending 已经撤了（远程调用早返回了），只剩宿主这张表。
+  batch.jobs = frameJob([...COMPASSES]);
+  const hostBusy = renderStage(batch, "frames", makeTasks());
+  check(
+    "宿主还在抽帧时八个方向都不显示「尚未抽帧」",
+    emptyTexts(hostBusy.tree).every((text) => text === "正在抽帧…"),
+    emptyTexts(hostBusy.tree).join("、")
+  );
+  check("宿主还在抽帧时出现忙碌徽章", byClass(hostBusy.tree, "SPR_busyBadge").length >= 1);
+  check(
+    "宿主还在抽帧时重复提交被禁用",
+    byClass(hostBusy.tree, "SPR_btn").some((node) => node.props.disabled === true)
+  );
+
+  // 抽帧完成、预览带还没写出来的那一小段：仍然算「在跑」，不能闪回空态。
+  const writing = makeProject();
+  writing.frames.front = { status: "ready", frames: ["frames/front/f00.png"], keyed: [], approved: false, duration: 2 };
+  writing.jobs = frameJob(["front"]);
+  const gap = renderStage(writing, "frames", makeTasks());
+  check(
+    "抽完帧但预览带还没出来时不显示「尚未抽帧」",
+    emptyTexts(gap.tree).every((text) => text !== "尚未抽帧"),
+    emptyTexts(gap.tree).join("、")
+  );
+
+  // 只抽一个方向时不能连累其余方向：覆盖面是按方向公布的。
+  const single = emptyFrames();
+  single.frames.front = { status: "running", frames: [], keyed: [], approved: false };
+  single.jobs = frameJob(["front"]);
+  const scoped = renderStage(single, "frames", makeTasks());
+  check(
+    "只抽一个方向时其余方向照常显示「尚未抽帧」",
+    emptyTexts(scoped.tree).filter((text) => text === "尚未抽帧").length === 7,
+    emptyTexts(scoped.tree).join("、")
+  );
+
+  // 抽帧失败的方向必须让人看见错误，不能被遮罩糊住。
+  const failed = emptyFrames();
+  failed.frames.back = { status: "error", error: "抽帧失败：ffmpeg 挂了", frames: [], keyed: [], approved: false };
+  failed.jobs = frameJob([...COMPASSES]);
+  const errored = renderStage(failed, "frames", makeTasks());
+  check(
+    "抽帧失败的方向不被盖住（错误要看得见）",
+    emptyTexts(errored.tree).includes("尚未抽帧") &&
+      byClass(errored.tree, "SPR_error").length === 1,
+    `${emptyTexts(errored.tree).join("、")} / ${byClass(errored.tree, "SPR_error").length} 个错误`
+  );
+
+  const idle = renderStage(emptyFrames(), "frames", makeTasks());
+  check(
+    "没有任务在跑时该显示「尚未抽帧」",
+    emptyTexts(idle.tree).every((text) => text === "尚未抽帧"),
+    emptyTexts(idle.tree).join("、")
+  );
 }
 
 // ── 阶段④：合成整图 ─────────────────────────────────────────────────────

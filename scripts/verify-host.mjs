@@ -380,6 +380,28 @@ async function main() {
     check("失败被写入运行日志", settled.log.some((e) => e.level === "error"));
   }
 
+  // 批量生图也要公布覆盖面：这一批可能跑好几分钟，界面靠它把还没轮到的方向
+  // 一直盖住（本地 pending 表只活 700ms）。还是那把无效 Key，八个方向都会很快
+  // 失败，但「这一批要重做哪几个方向」当场就能从运行表里读到。
+  const batchKick = await studio.runImages({ projectId });
+  check("批量生图任务被接受", batchKick.started === true, JSON.stringify(batchKick));
+  const batchProject = await studio.getProject({ projectId });
+  const batchJob = (batchProject.jobs ?? []).find((job) => job.key === "images:all");
+  check("批量生图公布了覆盖面", Array.isArray(batchJob?.targets) && batchJob.targets.length > 0, JSON.stringify(batchJob));
+  check(
+    "覆盖面按依赖层列出这一批要做的方向",
+    JSON.stringify(batchJob?.targets) === JSON.stringify(["front", "back", "downLeft", "downRight", "upLeft", "upRight", "left", "right"]),
+    JSON.stringify(batchJob?.targets)
+  );
+  // 让它落定再往下走：八个方向都要打一次接口（失败也是几秒内的事），
+  // 不等就会和后面对运行表的断言打架。
+  for (let i = 0; i < 60; i++) {
+    await sleep(500);
+    if (((await studio.getProject({ projectId })).jobs ?? []).length === 0) break;
+  }
+  const batchSettled = await studio.getProject({ projectId });
+  check("批量生图任务结束后运行表清空", (batchSettled.jobs ?? []).length === 0, JSON.stringify(batchSettled.jobs));
+
   // ── 8. 静态资源路由 ────────────────────────────────────────────────────
   console.log("8) 静态资源路由（真实 HTTP）");
   const handler = captured.routes[0].handler;
@@ -480,6 +502,24 @@ async function main() {
 
   const extractKick = await studio.runFrames({ projectId });
   check("抽帧任务被接受", extractKick.started === true, JSON.stringify(extractKick));
+  // 任务一登记就要公布覆盖面：界面靠它盖住「还没轮到」的方向。抽帧是
+  // kick 型调用（立刻返回，后台一次两个方向慢慢做），浏览器半区那张本地
+  // pending 表只多留 700ms，盖不住剩下的六个——不公布就会先转圈、再退回
+  // 「尚未抽帧」，过一阵才出结果（实测 bug）。
+  const justKicked = await studio.getProject({ projectId });
+  const extractJob = (justKicked.jobs ?? []).find((job) => job.key === "frames:extract");
+  check("抽帧任务公布了覆盖面", extractJob !== undefined, JSON.stringify(justKicked.jobs));
+  check(
+    "覆盖面正好是「有视频的方向」",
+    JSON.stringify(extractJob?.targets) === JSON.stringify(seeded),
+    JSON.stringify(extractJob?.targets)
+  );
+  check(
+    "没视频的方向不在覆盖面里（否则它会一直转圈）",
+    (extractJob?.targets ?? []).includes("left") === false,
+    JSON.stringify(extractJob?.targets)
+  );
+
   let framesSettled = null;
   for (let i = 0; i < 40; i++) {
     await sleep(500);
@@ -520,6 +560,22 @@ async function main() {
     const pngWidth = png.readUInt32BE(16);
     const pngHeight = png.readUInt32BE(20);
     check("抽出的帧是合法 PNG 且尺寸等于工作尺寸", pngWidth === 160 && pngHeight === 160, `${pngWidth}x${pngHeight}`);
+  }
+
+  // 单方向抽帧只该覆盖那一个方向：覆盖面写成全量的话，其余方向会被白白盖住，
+  // 而它们根本不会在这次任务里重跑（界面上表现为七个格子一直转圈）。
+  const singleKick = await studio.runFrames({ projectId, keys: ["back"] });
+  check("单方向抽帧任务被接受", singleKick.started === true, JSON.stringify(singleKick));
+  const singleJob = (await studio.getProject({ projectId })).jobs?.find((job) => job.key === "frames:extract");
+  check(
+    "单方向抽帧只覆盖那一个方向",
+    JSON.stringify(singleJob?.targets) === JSON.stringify(["back"]),
+    JSON.stringify(singleJob?.targets)
+  );
+  // 等它跑完再往下走：后面的合成与它写的是同一批文件，不能叠在一起。
+  for (let i = 0; i < 40; i++) {
+    await sleep(500);
+    if (((await studio.getProject({ projectId })).jobs ?? []).length === 0) break;
   }
 
   const composeKick = await studio.compose({ projectId });

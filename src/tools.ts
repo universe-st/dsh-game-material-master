@@ -114,12 +114,16 @@ function cellsOf(
 
 function spriteSnapshot(project: any) {
   const assetBase = `${ROUTE_PREFIX}/assets/${project.id}/`;
+  // 「还有没有活在跑」= 节点状态 + 宿主的后台任务表。只看节点不行：批量任务是
+  // 一个方向一个方向开工的（抽帧并发只有 2），任务刚登记时八个方向可能都还不是
+  // running，只看节点会让 game_material_wait 立刻返回 settled=true，
+  // 而那时候一个产物都没出来。
   const busy = DIRECTION_KEYS.some(
     (key) =>
       project.images?.[key]?.status === "running" ||
       project.videos?.[key]?.status === "running" ||
       project.frames?.[key]?.status === "running"
-  ) || project.sheet?.status === "running";
+  ) || project.sheet?.status === "running" || listJobs(project.id).length > 0;
   const count = (cells: DirectionCell[], status: string) => cells.filter((cell) => cell.status === status).length;
   const approved = (cells: DirectionCell[]) => cells.filter((cell) => cell.approved).length;
 
