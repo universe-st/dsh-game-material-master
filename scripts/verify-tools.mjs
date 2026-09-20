@@ -300,6 +300,49 @@ async function main() {
   const seqApprove = await run("game_material_approve", { module: "sequence", id: seqId, step: "video", approved: true });
   check("序列帧按步骤打通过不报错", seqApprove.step === "video", JSON.stringify(seqApprove));
 
+  // ── 5.5 骨骼动画的 status / review 渲染 ────────────────────────────────
+  //
+  // 这一段是为两个真实炸掉的调用加的：
+  //   · game_material_review 的渲染器一律按「阶段里有 cells」迭代，而骨骼动画的
+  //     阶段**没有 cells**（产物是每阶段固定的几个 URL），整次调用直接以
+  //     "stage.cells is not iterable" 失败——用户在对话里连验收包都拿不到；
+  //   · status / wait 按 ready/total/running 渲染，骨骼动画的阶段只有 status，
+  //     印出来是一串 `ready undefined/undefined`。
+  // 两个都只在骨骼动画模块出现，其他模块的测试一条都不会红。
+  console.log("\n5.5) 骨骼动画的 status / review 渲染");
+  const { jobId: rigId } = await studio.createRigJob({ name: "自检骨骼动画任务" });
+  await run("game_material_upload", { module: "rig", id: rigId, kind: "source", path: sourcePath });
+  await run("game_material_upload", { module: "rig", id: rigId, kind: "part", path: sourcePath, name: "head" });
+
+  // 渲染器的签名是 render(args, value)，返回的是文本块数组（与 DSH 一致）。
+  const renderText = (name, args, value) =>
+    (tool(name).output.render(args, value) ?? []).map((block) => block?.text ?? "").join("\n");
+
+  const rigStatus = await run("game_material_status", { module: "rig", id: rigId });
+  const rigStatusText = renderText("game_material_status", { module: "rig", id: rigId }, rigStatus);
+  check("骨骼动画 status 渲染没有 undefined", !rigStatusText.includes("undefined"), rigStatusText.slice(0, 140).replace(/\n/g, " | "));
+  check(
+    "骨骼动画 status 列出四个阶段",
+    ["① 拆件", "② 装配定位", "③ 骨骼与动画", "④ 图集"].every((title) => rigStatusText.includes(title)),
+    ""
+  );
+
+  const rigReview = await run("game_material_review", { module: "rig", id: rigId });
+  let rigReviewText = "";
+  let rigReviewError = null;
+  try {
+    rigReviewText = renderText("game_material_review", { module: "rig", id: rigId }, rigReview);
+  } catch (error) {
+    rigReviewError = String(error?.message ?? error);
+  }
+  check("骨骼动画 review 渲染不报错", rigReviewError === null, String(rigReviewError));
+  check("骨骼动画 review 没有 undefined", !rigReviewText.includes("undefined"), rigReviewText.slice(0, 140).replace(/\n/g, " | "));
+  check(
+    "骨骼动画 review 里能点到产物 URL",
+    (rigReviewText.match(/https?:\/\//g) ?? []).length >= 1,
+    rigReviewText.split("\n").filter((line) => /https?:\/\//.test(line)).length + " 条"
+  );
+
   // ── 6. 错误要有可读信息 ────────────────────────────────────────────────
   console.log("\n6) 错误路径");
   const expectThrow = async (name, fn, needle) => {

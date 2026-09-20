@@ -505,8 +505,8 @@ row 4: left-lower-leg| right-lower-leg| left-foot        | right-foot
 | `node scripts/verify-rig.mjs` | 模块四算法层：拆件分割、装配定位精度、遮挡排序、骨骼初始姿态逐像素还原、Spine 4.2 wire format、图集装箱、预览 HTML（合成图像素级断言） |
 | `node scripts/verify-rig-module.mjs` | 模块四端到端：建任务 → 上传 → 装配 → 骨骼 → 图集 → 打标 → 删除级联（走真实模块代码，数据落在临时 DSH_HOME） |
 | `node scripts/e2e-rig-live.mjs <角色整图>` | 模块四真实链路：**真的调一次生图模型**拆件，再跑完装配/骨骼/图集（约 0.2 元） |
-| `node scripts/verify-host.mjs` | 宿主半区全链路（**225 项**）：四个模块的本地链路、资源路由、预览页的 `text/html`、目录穿越与 id 前缀校验 |
-| `node scripts/verify-tools.mjs` / `verify-client.mjs` / `verify-pipeline.mjs` | 对话调用面、浏览器半区契约（含「每个远程方法都有 api 实现」）、抠像回归 |
+| `node scripts/verify-host.mjs` | 宿主半区全链路（**233 项**）：四个模块的本地链路、资源路由、预览页的 `text/html`、目录穿越与 id 前缀校验 |
+| `node scripts/verify-tools.mjs` / `verify-client.mjs` / `verify-pipeline.mjs` | 对话调用面（含四个模块 status/review 的文字渲染）、浏览器半区契约（含「每个远程方法都有 api 实现」与手动装配的两条回归）、抠像回归 |
 
 
 
@@ -516,10 +516,10 @@ npm run build          # tsc → lib/，并剥掉浏览器束结尾的 export {}
 # 纯本地测试（不联网、不花钱）
 node scripts/verify-minimax.mjs    # MiniMax 协议层（85 项，含请求体逐字段断言）
 node scripts/verify-pipeline.mjs   # 抽帧/抠像/合成链路（30 项，含回归用例）
-node scripts/verify-host.mjs       # 宿主冒烟（202 项，真实 cordis + 真实 HTTP）
-node scripts/verify-client.mjs     # 浏览器半区契约（73 项：阶段 ctx 键必须被转发，且每个生成类调用点都带 loading 反馈）
+node scripts/verify-host.mjs       # 宿主冒烟（233 项，真实 cordis + 真实 HTTP）
+node scripts/verify-client.mjs     # 浏览器半区契约（155 项：阶段 ctx 键必须被转发、每个生成类调用点都带 loading 反馈、手动装配的两个坑）
 node scripts/verify-feedback.mjs   # 浏览器半区渲染（87 项：真加载 lib/client.js，断言遮罩真的出现 / 空闲时真的不出现 / 深链接点击真的切面板）
-node scripts/verify-tools.mjs      # 对话调用面（88 项：工具 schema、方法覆盖、固定流程、审核模式、深链接契约）
+node scripts/verify-tools.mjs      # 对话调用面（93 项：工具 schema、方法覆盖、固定流程、审核模式、深链接契约、骨骼动画 status/review 渲染）
 node scripts/verify-live-bundle.mjs # 运行中的宿主是否已在提供新束（走 /plugins/events 拿真实 graph，再按图里的 URL 取回）
 
 # 真实 API 端到端（会花钱）
@@ -563,7 +563,12 @@ node scripts/retry-video.mjs <项目 id> <方向> [--soft]         # 单方向�
 `verify-tools.mjs` 盯的是对话调用面这一类坑：工具 schema 必须落在 DSH 支持的关键字子集里、
 `game_material_call` 的 method 枚举必须**覆盖插件的每一个远程方法**（少一个就是「某个功能对话里调不了」）、
 固定流程第 0 步必须按真实状态算出要问什么（缺源图就问、已有源图就不问）、
-审核模式必须只有 auto/manual 两个选项。最后用**文本契约**把宿主 `links.ts` 与浏览器半区
+审核模式必须只有 auto/manual 两个选项。它还把四个模块的 `status` / `review` 文字渲染
+**真的跑一遍**——这几个渲染器按同一套字段写，而骨骼动画的阶段形状跟其它三个模块不一样
+（没有 `cells`，只有 `status`），一律按 `cells` 迭代会让 `game_material_review` 以
+`stage.cells is not iterable` 整次失败，而按 `ready/total` 渲染 `status` 会印出一串
+`undefined`；两种坏法都只在骨骼动画上出现，别的模块一条测试都不会红。
+最后用**文本契约**把宿主 `links.ts` 与浏览器半区
 `client.ts` 的深链接常量钉成一致——两边是两份实现（经典脚本不能 `import`），
 参数名或模块名改单边会静默失效。
 
