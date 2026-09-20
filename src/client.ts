@@ -4681,6 +4681,10 @@
                             h(NumField, { label: "底色容差", value: settingsDraft.backgroundTolerance ?? 30, min: 1, max: 200, onChange: (value) => setSettingsDraft({ ...settingsDraft, backgroundTolerance: value }) }),
                             h(NumField, { label: "边缘羽化", value: settingsDraft.feather ?? 26, min: 1, max: 200, onChange: (value) => setSettingsDraft({ ...settingsDraft, feather: value }) }),
                             h(NumField, { label: "最小面积", value: settingsDraft.minArea ?? 0, min: 0, max: 100000, onChange: (value) => setSettingsDraft({ ...settingsDraft, minArea: value }) }),
+                            // 「边缘羽化」以前是「离底色多远才不透明」的斜率，浅色填充会
+                            // 因此整片变半透明；现在它只作用于轮廓最外圈，内部一律不透明。
+                            h("p", { className: "SPR_hint", style: { marginTop: 4, marginBottom: 0 } },
+                              "底色容差：与底色多接近算背景。边缘羽化：只决定轮廓最外圈那几个像素的软过渡，部件内部不会变半透明。"),
                             h(Btn, { onClick: () => void saveSettings() }, "保存参数与提示词")
                           ),
                           h("textarea", {

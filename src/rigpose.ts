@@ -285,7 +285,10 @@ export interface SegmentOptions {
   minArea: number;
   /** 裁剪时四周多留的像素。 */
   padding: number;
-  /** 边缘羽化宽度：距离背景越远越不透明。 */
+  /**
+   * 边缘羽化：**只作用于轮廓最外圈那几个像素**的软过渡宽度（按颜色距离算）。
+   * 它不再参与部件内部的 alpha——否则浅色填充会被判成半透明，见 `componentAlpha`。
+   */
   feather: number;
 }
 
@@ -343,6 +346,134 @@ export interface SegmentationResult {
 
 export function segmentComponents(atlas: Rgba, options: SegmentOptions): SegmentedComponent[] {
   return segmentWithLabels(atlas, options).components;
+}
+
+/**
+ * 部件裁剪块里的软 alpha（每个像素 0-255）。
+ *
+ * **不能拿「离底色多远」直接当 alpha。** 这个映射对「浅色角色 + 白底」是灾难性的：
+ * 实测一张真实立绘里白色长袜的填充色是 `rgb(247,227,221)`，与白底 `rgb(252,252,254)`
+ * 只差 42，于是整条腿——**不只是边缘**——被判成 ~45% 透明，显示出来就是「不该半透明的
+ * 地方全是半透明」，而且填充越浅越透明，在美术上完全说不通。同一张图里手是 33%、
+ * 小腿是 64% 的内部像素都这样，只有深色描边（距离 440+）才能拿到不透明。
+ *
+ * 正确做法是把「形状」和「过渡」拆开：
+ *
+ * 1. **形状**由硬掩码决定（颜色距离 > 容差），并且把**完全封闭**的孔洞补上——
+ *    浅色高光一旦落进容差内，会在部件中间咬出一个透明的洞，那比白斑更糟。
+ * 2. **过渡**只发生在轮廓最外圈 `RIM_PX` 个像素里；内部一律不透明，**与颜色无关**。
+ *    颜色距离只用来决定这一圈有多软（就是设置里的「边缘羽化」）。
+ *
+ * 距离用 3-4 chamfer 近似欧氏距离，比棋盘距离圆，代价仍是两遍线性扫描。
+ */
+const RIM_PX = 2;
+
+function componentAlpha(
+  data: Buffer,
+  sheetWidth: number,
+  x1: number,
+  y1: number,
+  cw: number,
+  ch: number,
+  background: [number, number, number],
+  tolerance: number,
+  feather: number
+): Uint8Array {
+  const total = cw * ch;
+  const [br, bg, bb] = background;
+  const solid = new Uint8Array(total);
+  const colorDistance = new Float32Array(total);
+  const alpha = new Uint8Array(total);
+
+  for (let y = 0; y < ch; y++) {
+    for (let x = 0; x < cw; x++) {
+      const i = y * cw + x;
+      const srcIdx = ((y1 + y) * sheetWidth + x1 + x) * 4;
+      const dr = data[srcIdx] - br;
+      const dg = data[srcIdx + 1] - bg;
+      const db = data[srcIdx + 2] - bb;
+      const distance = Math.sqrt(dr * dr + dg * dg + db * db);
+      colorDistance[i] = distance;
+      solid[i] = distance > tolerance && data[srcIdx + 3] > 8 ? 1 : 0;
+    }
+  }
+
+  // 「外部」= 能从裁剪块边界一路走到的地方（4 邻域，避免从对角缝里漏出去）。
+  // 没被淹到的空格就是被部件完全包住的孔洞——对着一张「白底 + 描边」的拆件图，
+  // 那种地方按定义属于部件内部，补成不透明。
+  const outside = new Uint8Array(total);
+  const queue = new Int32Array(total);
+  let head = 0;
+  let tail = 0;
+  const seed = (i: number) => {
+    if (solid[i] === 0 && outside[i] === 0) {
+      outside[i] = 1;
+      queue[tail++] = i;
+    }
+  };
+  for (let x = 0; x < cw; x++) {
+    seed(x);
+    seed((ch - 1) * cw + x);
+  }
+  for (let y = 0; y < ch; y++) {
+    seed(y * cw);
+    seed(y * cw + cw - 1);
+  }
+  while (head < tail) {
+    const i = queue[head++];
+    const x = i % cw;
+    const y = (i - x) / cw;
+    if (x > 0) seed(i - 1);
+    if (x < cw - 1) seed(i + 1);
+    if (y > 0) seed(i - cw);
+    if (y < ch - 1) seed(i + cw);
+  }
+
+  // 到「外部」的像素距离（3-4 chamfer，单位是 1/3 像素）。
+  const FAR = (cw + ch) * 4;
+  const dt = new Int32Array(total);
+  for (let i = 0; i < total; i++) dt[i] = outside[i] === 1 ? 0 : FAR;
+  for (let y = 0; y < ch; y++) {
+    for (let x = 0; x < cw; x++) {
+      const i = y * cw + x;
+      if (dt[i] === 0) continue;
+      let best = dt[i];
+      if (x > 0) best = Math.min(best, dt[i - 1] + 3);
+      if (y > 0) best = Math.min(best, dt[i - cw] + 3);
+      if (x > 0 && y > 0) best = Math.min(best, dt[i - cw - 1] + 4);
+      if (x < cw - 1 && y > 0) best = Math.min(best, dt[i - cw + 1] + 4);
+      dt[i] = best;
+    }
+  }
+  for (let y = ch - 1; y >= 0; y--) {
+    for (let x = cw - 1; x >= 0; x--) {
+      const i = y * cw + x;
+      if (dt[i] === 0) continue;
+      let best = dt[i];
+      if (x < cw - 1) best = Math.min(best, dt[i + 1] + 3);
+      if (y < ch - 1) best = Math.min(best, dt[i + cw] + 3);
+      if (x < cw - 1 && y < ch - 1) best = Math.min(best, dt[i + cw + 1] + 4);
+      if (x > 0 && y < ch - 1) best = Math.min(best, dt[i + cw - 1] + 4);
+      dt[i] = best;
+    }
+  }
+
+  const rim3 = RIM_PX * 3;
+  for (let y = 0; y < ch; y++) {
+    for (let x = 0; x < cw; x++) {
+      const i = y * cw + x;
+      if (outside[i] === 1) continue;
+      let cover = 1;
+      if (dt[i] <= rim3) {
+        // 最外圈：颜色距离只在这里起作用，给抗锯齿边缘留一点软过渡。
+        const ramp = Math.max(0, Math.min(1, (colorDistance[i] - tolerance) / feather));
+        cover = Math.max(ramp, dt[i] / (rim3 + 3));
+      }
+      const srcIdx = ((y1 + y) * sheetWidth + x1 + x) * 4;
+      alpha[i] = Math.round(Math.max(0, Math.min(1, cover)) * data[srcIdx + 3]);
+    }
+  }
+  return alpha;
 }
 
 export function segmentWithLabels(atlas: Rgba, options: SegmentOptions): SegmentationResult {
@@ -420,27 +551,15 @@ export function segmentWithLabels(atlas: Rgba, options: SegmentOptions): Segment
     const cw = x2 - x1;
     const ch = y2 - y1;
     const out = Buffer.alloc(cw * ch * 4);
+    const alpha = componentAlpha(atlas.data, width, x1, y1, cw, ch, [br, bg, bb], options.tolerance, feather);
 
-    for (let y = 0; y < ch; y++) {
-      for (let x = 0; x < cw; x++) {
-        const ax = x1 + x;
-        const ay = y1 + y;
-        const aIdx = ay * width + ax;
-        const idx = (y * cw + x) * 4;
-        // 不按「最大连通域」硬切：一个部件常常由多块组成（比如头 + 头发），
-        // 一律按「离底色多远」定 alpha，落在同一包围盒里的碎块自然就连起来了。
-        const srcIdx = aIdx * 4;
-        const dr = atlas.data[srcIdx] - br;
-        const dg = atlas.data[srcIdx + 1] - bg;
-        const db = atlas.data[srcIdx + 2] - bb;
-        const distance = Math.sqrt(dr * dr + dg * dg + db * db);
-        const alpha = Math.max(0, Math.min(1, (distance - options.tolerance) / feather));
-        if (alpha <= 0) continue;
-        out[idx] = atlas.data[srcIdx];
-        out[idx + 1] = atlas.data[srcIdx + 1];
-        out[idx + 2] = atlas.data[srcIdx + 2];
-        out[idx + 3] = Math.round(alpha * atlas.data[srcIdx + 3]);
-      }
+    for (let i = 0; i < cw * ch; i++) {
+      if (alpha[i] === 0) continue;
+      const srcIdx = (((y1 + Math.floor(i / cw)) * width) + x1 + (i % cw)) * 4;
+      out[i * 4] = atlas.data[srcIdx];
+      out[i * 4 + 1] = atlas.data[srcIdx + 1];
+      out[i * 4 + 2] = atlas.data[srcIdx + 2];
+      out[i * 4 + 3] = alpha[i];
     }
 
     result.push({

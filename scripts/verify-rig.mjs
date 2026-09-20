@@ -185,6 +185,75 @@ for (const [name, box] of Object.entries(gridBox)) {
 }
 check("部件面积与真值一致", true);
 
+// ── 回归：浅色填充不能被判成半透明 ──────────────────────────────────────
+//
+// 「离底色的距离」直接当 alpha，对「浅色角色 + 白底」是灾难性的失效模式。实测一张
+// 真实立绘：白色长袜的填充色是 rgb(247,227,221)，与白底 rgb(252,252,254) 只差 42，
+// 在容差 30 / 羽化 26 之下整条腿——**不只是边缘**——被判成约 45% 透明。同一张图里
+// 手的内部有 33%、小腿 64% 的实体像素落在半透明带里，只有深色描边（距离 440+）
+// 才拿得到不透明。用户看到的就是「不该半透明的地方全是半透明」，而且填充越浅越透明，
+// 这在美术上完全说不通。这里把那个色差原样搬进来。
+const lightSheet = createRgba(120, 120, [252, 252, 254, 255]);
+rect(lightSheet, 20, 20, 80, 80, [247, 227, 221, 255]);
+const lightParts = segmentComponents(lightSheet, {
+  background: [252, 252, 254],
+  tolerance: 30,
+  minArea: 100,
+  padding: 4,
+  feather: 26
+});
+check("浅色部件仍能被切出来", lightParts.length === 1, `${lightParts.length} 块`);
+if (lightParts.length === 1) {
+  const piece = lightParts[0].rgba;
+  let interiorPartial = 0;
+  let rimPartial = 0;
+  let body = 0;
+  for (let y = 0; y < piece.height; y++) {
+    for (let x = 0; x < piece.width; x++) {
+      const a = piece.data[(y * piece.width + x) * 4 + 3];
+      if (a === 0) continue;
+      body++;
+      if (a === 255) continue;
+      // 5x5 邻域里没有全透明像素 = 离轮廓边界 2px 以上 = 内部
+      let nearEmpty = false;
+      for (let dy = -2; dy <= 2 && !nearEmpty; dy++) {
+        for (let dx = -2; dx <= 2; dx++) {
+          const nx = x + dx;
+          const ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= piece.width || ny >= piece.height || piece.data[(ny * piece.width + nx) * 4 + 3] === 0) {
+            nearEmpty = true;
+            break;
+          }
+        }
+      }
+      if (nearEmpty) rimPartial++;
+      else interiorPartial++;
+    }
+  }
+  check("浅色部件内部完全不透明", interiorPartial === 0, `内部半透明 ${interiorPartial} / 实体 ${body}`);
+  check("软过渡只留在轮廓最外圈", rimPartial > 0 && rimPartial < body * 0.5, `外圈 ${rimPartial} / 实体 ${body}`);
+}
+
+// 封闭孔洞要补上：浅色高光一旦落进容差内，会在部件中间咬出一个透明的洞。
+const holed = createRgba(120, 120, [252, 252, 254, 255]);
+rect(holed, 20, 20, 80, 80, [40, 60, 120, 255]);
+rect(holed, 50, 50, 20, 20, [252, 252, 253, 255]); // 完全包在里面的近底色方块
+const holedParts = segmentComponents(holed, { background: [252, 252, 254], tolerance: 30, minArea: 100, padding: 4, feather: 26 });
+check("带封闭孔的部件仍是一块", holedParts.length === 1, `${holedParts.length} 块`);
+if (holedParts.length === 1) {
+  const piece = holedParts[0].rgba;
+  let holes = 0;
+  for (let y = 0; y < piece.height; y++) {
+    for (let x = 0; x < piece.width; x++) {
+      // 原图 (50..69, 50..69) 在这个包围盒里的相对位置
+      const px = piece.x + x;
+      const py = piece.y + y;
+      if (px >= 26 && px < 46 && py >= 26 && py < 46 && piece.data[(y * piece.width + x) * 4 + 3] === 0) holes++;
+    }
+  }
+  check("封闭孔洞被补成不透明", holes === 0, `漏了 ${holes} 个像素`);
+}
+
 console.log("=== 3. 装配定位（多尺度模板匹配） ===");
 const t0 = Date.now();
 const partInputs = Object.entries(byName).map(([name, component]) => ({
