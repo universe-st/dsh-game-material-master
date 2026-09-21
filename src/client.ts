@@ -4367,6 +4367,10 @@
           const node = trackRef.current;
           const drag = dragRef.current;
           if (node === null || drag === null) return;
+          // **手抖不算拖动**。少了这个阈值，单击选中就会把关键帧的时间改到鼠标位置——
+          // 实测：点一下 `walk` 里 0.6s 的帧，它当场变成 0.401s（那条轨道的 lane 与
+          // 鼠标位置换算出来的值）。用户只是"选中想改数值"，结果位置先跑了。
+          if (Math.abs(event.clientX - drag.startX) < 4) return;
           const rect = node.getBoundingClientRect();
           const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / Math.max(1, rect.width)));
           setDraft((current) => {
@@ -4524,7 +4528,7 @@
                               onMouseDown: (event) => {
                                 event.preventDefault();
                                 setSelected({ bone: track.bone, kind: track.kind, index });
-                                if (index > 0) dragRef.current = { bone: track.bone, kind: track.kind, index };
+                                if (index > 0) dragRef.current = { bone: track.bone, kind: track.kind, index, startX: event.clientX };
                               }
                             });
                           })
@@ -5800,6 +5804,18 @@
       const keyBusy = (key) => tasks.has(key);
       const PART_K = (name, action) => `rig:${action}:${name}`;
 
+      /**
+       * 刚提交过宿主任务 → 接下来这几秒保持轮询（时间戳，0 = 不额外轮询）。
+       *
+       * 为什么需要：`run()` 里的 `tasks.active` 在 `await fn()` 返回时就变回 false，
+       * 而 `kick()` 是「登记后台任务后立即返回」——宿主写 `running` 落盘、以及本地任务
+       * （推骨骼 / 装配 / 打图集，通常不到 1 秒）跑完，都发生在这一次 `load()` **之后**。
+       * 于是 `busy` 一直是 false，轮询不启动，界面停在旧状态：表现为「点完按钮没反应、
+       * 下一步的按钮还是灰的」，用户只能手动刷新页面（实测踩过：骨骼明明建好了，
+       * ③ 还是没打勾）。所以提交成功后给一个短暂的「沉降窗口」。
+       */
+      const [settleUntil, setSettleUntil] = React.useState(0);
+
       const refresh = React.useCallback(async () => {
         if (api === undefined) return [];
         try {
@@ -5851,16 +5867,21 @@
       }, [jobId, load]);
 
       React.useEffect(() => {
-        if (!busy || jobId === null) return undefined;
+        if (jobId === null) return undefined;
+        // 有任务在跑，或刚提交完还在「沉降窗口」里，都要继续刷新。
+        if (!busy && Date.now() >= settleUntil) return undefined;
         const timer = setInterval(() => void load(jobId), 2500);
         return () => clearInterval(timer);
-      }, [busy, jobId, load]);
+      }, [busy, jobId, load, settleUntil]);
 
       const run = async (fn, okText = undefined, feedback = undefined) => {
         const invoke = async () => {
           try {
             const value = await fn();
             if (okText !== undefined) setNotice({ kind: "ok", text: okText });
+            // 提交成功就开一个沉降窗口：宿主可能还没把任务登记成 `running`
+            // （本地任务甚至可能已经跑完），只 load 一次会读到「什么都没发生」。
+            setSettleUntil(Date.now() + 6000);
             if (jobId !== null) await load(jobId);
             await refresh();
             return value;

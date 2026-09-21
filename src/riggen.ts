@@ -73,6 +73,7 @@ import {
   normalizeAnimationSettings,
   packAtlas,
   partLabel,
+  rigSlotOf,
   type RigAnimationSettings,
   type RigPlacedPart
 } from "./spine.js";
@@ -442,6 +443,17 @@ export async function ensureRigJobLayout(id: string): Promise<void> {
  * 事后猜。这里额外要求模型**按严格网格摆放**：格子位置 = 部件身份，是确定事实，
  * 于是「头」真的是头，骨骼层级和动画预设才能自动套上去，而不必让用户手工命名
  * 十几个文件。
+ *
+ * 底下那三条硬约束是**用真实数据换来的**。拿一张真实立绘跑出来过：
+ * 18 块里 6 块是同一部位重画（4 段大腿、4 只鞋、3 条袖子）、标着 `hip` 的格子画的是
+ * 裙子、标着 `neck` 的画的是大腿、两条「左右袖」同向重合 0.901（应该是镜像）。
+ * 根因都在提示词没说清：
+ *
+ *   ① 只说「一格一件」，没说「每件必须不同」——于是模型把同一块内容画了很多遍；
+ *   ② 只给了格子名（`hip`/`neck`），没给部位描述——模型对这些短名字的理解与我们的
+ *      骨骼语义不一致，而骨架是靠「名字 → 语义」推的，名字错了骨架从第一根骨头起就错；
+ *   ③ 没有说明「参考图里被衣服遮住的部位要按解剖结构补全」——模型看不到大腿，
+ *      就把小腿反复画成「大腿」交差。
  */
 export function buildSheetPrompt(columns: number, rows: number, names: string[]): string {
   const grid: string[] = [];
@@ -449,19 +461,25 @@ export function buildSheetPrompt(columns: number, rows: number, names: string[])
     const cells: string[] = [];
     for (let column = 0; column < columns; column++) {
       const index = row * columns + column;
-      cells.push(names[index] ?? "-");
+      const name = names[index];
+      const slot = name === undefined ? undefined : rigSlotOf(name);
+      cells.push(slot === undefined ? (name ?? "-") : `${slot.name} = ${slot.en}`);
     }
     grid.push(`row ${row + 1}: ${cells.join(" | ")}`);
   }
   return [
     "A flat 2D game sprite sheet for skeletal (Spine) cut-out animation, showing the EXACT same character as the reference image, completely taken apart into separate body parts.",
     "",
-    `The image is a SQUARE canvas divided into an even ${columns} × ${rows} grid of equal cells. Each cell contains exactly ONE detached body part, centered in its cell. Cells in reading order:`,
+    `The image is a SQUARE canvas divided into an even ${columns} × ${rows} grid of equal cells. Each cell contains exactly ONE detached body part, centered in its cell. Cells in reading order — the text before the "=" is the part's name, the text after it says what that part IS:`,
     ...grid,
     "",
     "Hard requirements:",
     "- the canvas is square and the grid lines are perfectly even; every cell is the same size;",
     "- exactly one body part per cell, and nothing else in that cell;",
+    "- **every cell shows a DIFFERENT part. Draw each body part exactly ONCE in the whole image.** Never repeat the same part in a second cell. The character has exactly two arms, two hands, two legs and two feet — never draw a third one;",
+    "- **draw what the cell says.** A cell labelled `neck` shows a neck, not a thigh or a leg. If a name seems ambiguous, follow the description after the \"=\";",
+    "- **CUT, do not redesign.** Every piece must look exactly like the corresponding region of the reference image: same garment, same colours, same silhouette, same proportions. The cell name only tells you *which body region to cut out*; the reference image tells you what it *looks like*. If the hip region is covered by a skirt in the reference image, the `hip` cell shows that skirt — never invent clothing that is not in the reference image (no shorts, no different outfit);",
+    "- **left and right parts are MIRRORED, not copies.** `left-upper-arm` and `right-upper-arm` must face opposite ways (one mirrored copy of the other), and the same for every other left/right pair;",
     "- every part is COMPLETELY DETACHED: upper arm and forearm and hand are three separate pieces, never joined; upper leg, lower leg and foot are three separate pieces, never joined;",
     "- no piece crosses a cell boundary, no piece touches or overlaps another piece;",
     "- generous empty white space around every piece;",
@@ -469,7 +487,7 @@ export function buildSheetPrompt(columns: number, rows: number, names: string[])
     "- CRITICAL: identical art style, identical shading, identical face, identical colours and identical proportions as the reference image;",
     "- plain solid pure white background everywhere, flat 2D game asset, character part sheet;",
     "",
-    "Negative: assembled body, connected limbs, joined arm, joined leg, overlapping parts, grid lines drawn, borders, labels, text, watermark, drop shadows, gradients, background scenery, 3D, realistic, redesigned character, different face, different colours."
+    "Negative: assembled body, connected limbs, joined arm, joined leg, overlapping parts, duplicated part, repeated part, three arms, three legs, extra limb, wrong part in cell, mismatched cell content, grid lines drawn, borders, labels, text, watermark, drop shadows, gradients, background scenery, 3D, realistic, redesigned character, different face, different colours."
   ].join("\n");
 }
 
@@ -1049,6 +1067,14 @@ export function rigSnapshot(job: RigJob, origin = "") {
       boneList: job.rig.boneList ?? [],
       /** DragonBones 5.5（`_ske.json`）：与 `skeleton` 同源的第二条导出路径。 */
       dragonBones: { skeleton: url(job.rig.dragonBones?.skeleton) },
+      /**
+       * 产物更新时间。
+       *
+       * 客户端拿它给预览 iframe 做缓存破除（`?v=`）——少了它，改完关键帧 / 骨骼偏移后
+       * 重算产物，React 会认为 iframe 的 src 没变、不重新挂载，**预览一直是旧的**。
+       * 这是「改了没反应」里最难查的一种：数据全对，只是没人让浏览器重新去拉。
+       */
+      updatedAt: job.rig.updatedAt,
       /** 手工偏移的**当前真源**：骨骼还没重跑时，界面上也要能看到自己调过什么。 */
       boneOffsets: job.boneOffsets ?? {},
       /**
@@ -1909,6 +1935,14 @@ export async function resetRigAnimationSettings(jobId: string, ids?: string[]): 
 export const MAX_KEYFRAMES_PER_TRACK = 240;
 /** 一台动画最多多少条轨道。 */
 export const MAX_TRACKS_PER_ANIMATION = 96;
+/**
+ * 关键帧时间的对齐网格。
+ *
+ * 必须与导出用的帧率一致（`rigexport.ts` 的 `DRAGONBONES_FRAME_RATE`）：
+ * DragonBones 的 `duration` 以帧为单位，两帧落在同一帧上时中间那帧的 duration 为 0，
+ * 会被解析成阶跃并在导出校验里被拦下。对齐之后这种数据根本进不来。
+ */
+export const ANIMATION_FRAME_RATE = 30;
 
 /**
  * 归一化一份手工动画。
@@ -1980,15 +2014,25 @@ function normalizeCustomAnimation(
       if (frames.length === 0) continue;
       // 时间必须严格递增：同一时刻两个帧在两条导出路径里的归属都是未定义的。
       frames.sort((a, b) => a.time - b.time);
+      // **对齐到 30fps 的帧网格**，并丢掉会塌缩的相邻帧。
+      //
+      // 为什么必须对齐：DragonBones 的 `duration` 单位是帧，两帧相隔不足一帧时
+      // 它们会落在同一个 `frameStart` 上，中间那一帧的 `duration` 就是 0 ——
+      // 而 0 会被解析成**阶跃**，导出前校验也会直接拦下（实测：把一帧拖到
+      // 0.401s、它前面那帧在 0.4s，整条骨骼链路就这样失败了）。
+      // 在保存时对齐，坏数据根本进不了任务。
       const dedup: RigKeyframe[] = [];
       for (const frame of frames) {
-        if (dedup.length > 0 && Math.abs(dedup[dedup.length - 1].time - frame.time) < 1e-4) {
-          issues.push(`${boneName}/${kind} 有重合的关键帧，已保留后一个`);
-          dedup[dedup.length - 1] = frame;
+        const snapped = { ...frame, time: Number((Math.round(frame.time * ANIMATION_FRAME_RATE) / ANIMATION_FRAME_RATE).toFixed(4)) };
+        if (snapped.time > duration) continue;
+        if (dedup.length > 0 && snapped.time <= dedup[dedup.length - 1].time) {
+          issues.push(`${boneName}/${kind} 有两个关键帧落在同一帧上（${snapped.time}s），已保留后一个`);
+          dedup[dedup.length - 1] = snapped;
           continue;
         }
-        dedup.push(frame);
+        dedup.push(snapped);
       }
+      if (dedup.length === 0) continue;
       // 末帧永不携带 curve（它描述的是「以本帧为起点」的那一段，末帧没有下一段）。
       dedup[dedup.length - 1].curve = null;
       // 首帧必须是 0：否则 0 → 首帧之间是一段「没有定义的静默区」。

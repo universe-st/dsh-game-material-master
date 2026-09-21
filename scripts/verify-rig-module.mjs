@@ -664,6 +664,30 @@ console.log("=== 4b. 关键帧编辑（M3）===");
   const restoredWalk = JSON.parse(await readFile(riggen.rigAssetPath(job.id, "rig/skeleton.json"), "utf8"));
   check("还原后 head 回到预设值", !restoredWalk.animations.walk.bones.head.rotate.some((frame) => Math.abs(frame.value - 4) < 1e-6));
   state = await riggen.readRigJob(job.id);
+
+  // ── 关键帧时间按 30fps 对齐 ──────────────────────────────────────────
+  // 不字对齐的话，两帧会落在同一个 `frameStart` 上，中间那帧的 DragonBones
+  // `duration` 就是 0（被解析成阶跃），导出前校验会直接拦下整条骨骼链路。
+  // 实测踩过：界面上把一帧拖到 0.401s、它前面那帧在 0.4s，骨骼构建当场失败。
+  {
+    const draft = await riggen.getRigAnimation(job.id, "idle");
+    const frames = draft.bones.torso.rotate;
+    const base = frames[1];
+    frames.splice(1, 0, { ...base, time: Number((base.time + 0.001).toFixed(4)), angle: 99 });
+    draft.bones.torso.rotate = frames;
+    const saved = await riggen.saveRigAnimation(job.id, { id: "idle", animation: draft });
+    check("同帧的两个关键帧被合并（时间对齐到 1/30 秒）", saved.issues.some((issue) => issue.includes("同一帧")), saved.issues.join(" | "));
+    const stored = (await riggen.readRigJob(job.id)).animations.idle.bones.torso.rotate;
+    check("合并后时间仍然严格递增", stored.every((frame, i) => i === 0 || frame.time > stored[i - 1].time), stored.map((f) => f.time).join(","));
+    check("时间全部落在 1/30 秒网格上", stored.every((frame) => Math.abs(frame.time * 30 - Math.round(frame.time * 30)) < 1e-6), stored.map((f) => f.time).join(","));
+    // 最关键的一条：这样存下来的数据必须能过导出校验。
+    await riggen.buildRigOutput(job.id);
+    const after = await riggen.readRigJob(job.id);
+    check("对齐后的数据能成功导出（不再有 duration=0 的中间帧）", after.rig.status === "ready", after.rig.error ?? "");
+    await riggen.resetRigAnimation(job.id, "idle");
+    await riggen.buildRigOutput(job.id);
+    state = await riggen.readRigJob(job.id);
+  }
 }
 
 console.log("=== 5. 图集打包 ===");
