@@ -455,10 +455,48 @@ function checkRigContracts(text, label) {
     ["锁等比开关", "锁等比"],
     ["撤销/重做", "重做"],
     ["参考图做底图对位", "参考图底图"],
-    ["图层置顶置底", "置顶"]
+    ["图层置顶置底", "置顶"],
+    ["滚轮缩放（以光标为锚）", "zoomAt"],
+    ["空格/中键拖动平移", "data-panning"],
+    ["Ctrl/Cmd+0 适应窗口", 'event.key === "0"']
   ]) {
     check(`${label}：手动装配有${feature}`, text.includes(token));
   }
+  // 滚轮缩放必须用**非被动**监听：React 的 onWheel 是被动注册的，在里面
+  // preventDefault 无效（浏览器照旧滚动，还会打警告），缩放会被页面滚动吃掉。
+  check(
+    `${label}：滚轮监听是非被动的`,
+    text.includes('addEventListener("wheel"') && text.includes("{ passive: false }"),
+    ""
+  );
+  // 画布居中必须用 margin:auto，不能靠父级 justify-content:center——
+  // 后者在「内容比容器宽」时会裁掉左侧且滚不到，一放大就够不着左边那块。
+  check(
+    `${label}：画布用 margin:auto 居中（放大后左边够得着）`,
+    /\.SPR_asmCanvas\{[^}]*margin:auto/.test(text),
+    /\.SPR_asmCanvas\{([^}]*)\}/.exec(text)?.[1]?.slice(0, 80) ?? ""
+  );
+  // 舞台高度必须是固定的。用 max-height 让它被内容撑着的话，一缩放面板就跟着
+  // 长高（实测 100% 时 605px、176% 时 681px），画面抽动、光标锚点也算不准。
+  check(
+    `${label}：装配舞台高度固定（缩放时面板不抽动）`,
+    /\.SPR_asmStage\{[^}]*height:70vh/.test(text) && !/\.SPR_asmStage\{[^}]*max-height:70vh/.test(text),
+    /\.SPR_asmStage\{([^}]*)\}/.exec(text)?.[1]?.slice(0, 90) ?? ""
+  );
+  // 撤销/重做的两处时序陷阱，都是实测撞出来的：
+  //  ① 把 setHistory([]) 挂在 [job.id, job.updatedAt] 上 —— commit 自己就会改
+  //     updatedAt，于是每提交一次就清空撤销栈，撤销按钮永远是灰的；
+  //  ② undo 把「改动前」的快照塞进重做栈 —— 重做还原的还是改动前那份，点了没反应。
+  check(
+    `${label}：清空撤销栈只跟着任务 id，不跟着 updatedAt`,
+    /setHistory\(\[\]\)[\s\S]{0,80}?\}, \[job\.id\]\)/.test(text),
+    "把 setHistory([]) 和 setDraft({}) 拆成两个 effect：前者只依赖 job.id"
+  );
+  check(
+    `${label}：撤销时先把当前状态抓进重做栈`,
+    /const undo = \(\) => \{[\s\S]{0,400}?captureSnapshot\(Object\.keys\(last\)\)/.test(text),
+    "undo 里要 captureSnapshot 当前状态再 applySnapshot(last)"
+  );
   check(`${label}：骨骼预览内联在 iframe 里`, text.includes("SPR_rigPreview"));
   check(`${label}：低置信度部件有提示`, text.includes("相似度偏低"));
   // 面板根必须自己是滚动容器。SPR_root 是定高 flex 列，子元素默认不滚动，

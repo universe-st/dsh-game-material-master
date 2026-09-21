@@ -481,6 +481,8 @@ row 4: left-lower-leg| right-lower-leg| left-foot        | right-foot
   拉伸；拖动时实时显示与其它部件的中线/边缘**对齐参考线**（`吸附` 开关控制，默认开）。
 - **键盘**：方向键微调 1px，`Shift` 10px；`Delete` 把部件收回部件栏（不是删除，随时能再拖回来）。
 - **撤销 / 重做**：`Ctrl/Cmd+Z` / `Ctrl/Cmd+Shift+Z`，50 步，整批操作算一步。
+- **视图缩放 / 平移**：滚轮以**光标为锚**缩放（25%～600%），`Ctrl/Cmd+0` 适应窗口；
+  按住空格或中键拖动平移。
 - **图层**：右侧图层列表从下到上排列，点选、批量「置顶 / 置底」，也可以直接改 z 值——
   这就是上面说的遮挡关系。
 - **精确数值**：选中后出现 x / y / 宽 / 高 / 旋转 / z 六个输入框，外加「宽高互换」。
@@ -500,8 +502,14 @@ row 4: left-lower-leg| right-lower-leg| left-foot        | right-foot
 >    与「已放置 N/16」计数的是 `matched`（宿主也是读 `placed`、写回 `matched`）。合并草稿时
 >    不把两者折算一下，Delete 收回、部件栏拖入这类**纯本地**改动就要等宿主回包才看得见；
 >    一旦通信失败（比如宿主半区还没重启），界面会一动不动，看起来就像整个手动装配是坏的。
+> 3. **撤销栈被自己的提交清空**（M7 收尾时撞出来的）。`setHistory([])` 原先挂在
+>    `[job.id, job.updatedAt]` 上，而 `commit()` 写盘后 `updatedAt` 必然变化——于是每提交一次
+>    就清空撤销栈，「撤销」按钮**永远是灰的**。拆成两个 effect：历史栈只跟 `job.id`，
+>    草稿跟 `updatedAt`。
+> 4. **重做是空操作**。`undo()` 把从历史栈弹出的**改动前**快照也塞进了重做栈，重做时还原的
+>    还是那一份，等于又撤一次。改成先把「当前状态」抓进重做栈。
 
-这两条 `scripts/verify-client.mjs` 里各有一条契约盯着。
+这 4 条 `scripts/verify-client.mjs` 里各有一条契约盯着。
 
 ### 骨骼是怎么推出来的
 
@@ -660,7 +668,7 @@ node scripts/dsh-web-cookie.mjs 127.0.0.1:43121 --json
 | `node scripts/probe-redraw.mjs <部件PNG> "<提示词>"` | **花钱**：直接调生图模型重绘一个部件并打印统计（与插件共用提示词构造器）。用于排查「是模型不行还是管线不行」 |
 | `node scripts/e2e-rig-live.mjs <角色整图>` | 模块四真实链路：**真的调一次生图模型**拆件，再跑完装配/骨骼/图集（约 0.2 元） |
 | `node scripts/verify-host.mjs` | 宿主半区全链路（**233 项**）：四个模块的本地链路、资源路由、预览页的 `text/html`、目录穿越与 id 前缀校验 |
-| `node scripts/verify-tools.mjs` / `verify-client.mjs` / `verify-pipeline.mjs` | 对话调用面（含四个模块 status/review 的文字渲染）、浏览器半区契约（含「每个远程方法都有 api 实现」与手动装配的两条回归）、抠像回归 |
+| `node scripts/verify-tools.mjs` / `verify-client.mjs` / `verify-pipeline.mjs` | 对话调用面（含四个模块 status/review 的文字渲染）、浏览器半区契约（含「每个远程方法都有 api 实现」与手动装配的四条回归）、抠像回归 |
 
 
 
@@ -671,7 +679,7 @@ npm run build          # tsc → lib/，并剥掉浏览器束结尾的 export {}
 node scripts/verify-minimax.mjs    # MiniMax 协议层（85 项，含请求体逐字段断言）
 node scripts/verify-pipeline.mjs   # 抽帧/抠像/合成链路（30 项，含回归用例）
 node scripts/verify-host.mjs       # 宿主冒烟（233 项，真实 cordis + 真实 HTTP）
-node scripts/verify-client.mjs     # 浏览器半区契约（155 项：阶段 ctx 键必须被转发、每个生成类调用点都带 loading 反馈、手动装配的两个坑）
+node scripts/verify-client.mjs     # 浏览器半区契约（171 项：阶段 ctx 键必须被转发、每个生成类调用点都带 loading 反馈、手动装配的四个坑）
 node scripts/verify-feedback.mjs   # 浏览器半区渲染（87 项：真加载 lib/client.js，断言遮罩真的出现 / 空闲时真的不出现 / 深链接点击真的切面板）
 node scripts/verify-tools.mjs      # 对话调用面（93 项：工具 schema、方法覆盖、固定流程、审核模式、深链接契约、骨骼动画 status/review 渲染）
 node scripts/verify-live-bundle.mjs # 运行中的宿主是否已在提供新束（走 /plugins/events 拿真实 graph，再按图里的 URL 取回）
