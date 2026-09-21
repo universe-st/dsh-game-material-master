@@ -550,6 +550,18 @@ function checkRigContracts(text, label) {
     ["清空全部网格", 'data-testid": "rig-mesh-clear"']
   ]) {
     check(`${label}：蒙皮面板有${feature}`, text.includes(token), token);
+  }
+  // Path 面板（M5）：选末端骨 + 链长，默认路径沿部件的近端锚点生成。
+  for (const [feature, token] of [
+    ["Path 面板", 'data-testid": "rig-paths"'],
+    ["选末端骨", 'data-testid": "rig-path-tip"'],
+    ["加路径", 'data-testid": "rig-path-add"'],
+    ["逐条删除", "rig-path-del-"],
+    ["清空全部", 'data-testid": "rig-path-clear"'],
+    // 位置必须取自 layout.items——parts 只有尺寸没有坐标，拿它算会得到 NaN。
+    ["从 layout.items 取坐标", "job.layout?.items?.[name]"]
+  ]) {
+    check(`${label}：Path 面板有${feature}`, text.includes(token), token);
   }  // 撤销/重做的两处时序陷阱，都是实测撞出来的：  //  ① 把 setHistory([]) 挂在 [job.id, job.updatedAt] 上 —— commit 自己就会改
   //     updatedAt，于是每提交一次就清空撤销栈，撤销按钮永远是灰的；
   //  ② undo 把「改动前」的快照塞进重做栈 —— 重做还原的还是改动前那份，点了没反应。
