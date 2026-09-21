@@ -81,6 +81,7 @@ import {
 import { buildPreviewHtml } from "./rigpreview.js";
 import { buildDragonBonesSkeleton, buildDragonBonesTexture } from "./rigexport.js";
 import { assessParts, type QaDuplicateGroup, type QaIssue, type QaPart, type QaReport } from "./rigqa.js";
+import { MESH_DEFAULT_DIVISIONS, MESH_MAX_DIVISIONS } from "./rigmesh.js";
 import {
   validateAnimationLoops,
   validateAtlas,
@@ -287,7 +288,31 @@ export interface RigAtlasState {
 export const ATLAS_MAX_SIZE = 4096;
 
 /**
- * 拆件质检结果。
+ * 网格密度。网格本身由 `buildRigMesh` 按这个密度确定性地重算，不落盘。
+ */
+export interface RigMeshSpec {
+  cols: number;
+  rows: number;
+}
+
+/** 程序化摆动变形：`anchor` 那侧不动，另一侧按正弦甩出去。 */
+export interface RigWaveDeform {
+  mode: "wave";
+  /** 位移幅度（参考图像素）。 */
+  amplitude: number;
+  /** 波形周期数（越大越"抖"）。 */
+  cycles: number;
+  /** 位移方向（弧度）：0 = 向 +x（右）。 */
+  direction: number;
+  /** 固定端：裙摆取 `top`（上缘系在腰上）。 */
+  anchor: "top" | "bottom" | "none";
+  /** 一个循环的秒数。 */
+  duration: number;
+}
+
+export type RigDeform = RigWaveDeform;
+
+/** 拆件质检结果。
  *
  * 之所以要**存在任务里**而不是每次现算：重复件检测要解码全部部件 PNG，
  * 而它最该被看到的时候（刚拆完、还没装配）恰好是最贵的时候。
@@ -375,6 +400,25 @@ export interface RigJob {
    * 不会把它冲掉——「重推一遍骨架」推不出「这只手要跟着那个点走」。
    */
   constraints?: RigConstraint[];
+  /**
+   * **蒙皮网格**（M5 的 L1）：哪些部件要细分。
+   *
+   * 点进来才细分，而不是所有部件一律细分：`mesh` 的代价在预览里是「逐三角形裁剪绘制」
+   * （裙子 6×6 就是 72 个三角形、每帧 72 次 `clip + drawImage`），对不需要软变形的
+   * 部件（头、鞋）纯属浪费。
+   *
+   * **只存密度不存顶点**：网格是规则三角化的确定性结果，同样的 `cols/rows` 永远算出
+   * 同样的顶点——存下来的话，改了算法就会与盘上的旧顶点对不上号，而重算是免费的。
+   */
+  meshes?: Record<string, RigMeshSpec>;
+  /**
+   * **FFD 变形**（M5 的 L3）：逐部件的顶点位移。
+   *
+   * 目前只有程序化的 `wave`（摆动）：裙摆/披风/长发要的是「上缘不动、下缘甩出去」，
+   * 而这件事用一条正弦就能描述得非常准，还天然首尾闭合（与动画预设同一个要求）。
+   * 手工逐帧拖顶点的关键帧形式留给编辑器。
+   */
+  deforms?: Record<string, RigDeform>;
   /** 拆件质检结论（分割后自动写、可手动重跑）。 */
   qa?: RigQaState;
   reviewMode?: "auto" | "manual";
@@ -820,6 +864,8 @@ function normalizeRigJob(raw: any): RigJob {
     })(),
     qa: normalizeQaState(raw?.qa),
     constraints: normalizeConstraints(raw?.constraints),
+    meshes: normalizeMeshes(raw?.meshes),
+    deforms: normalizeDeforms(raw?.deforms),
     log: Array.isArray(raw?.log) ? raw.log.slice(-200) : []
   };
 }
@@ -849,6 +895,45 @@ function normalizeConstraints(raw: unknown): RigConstraint[] | undefined {
     });
   }
   return out.length === 0 ? undefined : out;
+}
+
+/**
+ * 读盘时的蒙皮网格归一化。
+ *
+ * ⚠️ `normalizeRigJob` 是**白名单式**的：字段不在这里列出来就会被静默丢掉。
+ * 实测踩过——`setRigMesh` 明明写盘成功、日志也有记录，读回来却是 `undefined`，
+ * 表现是「加了网格但骨架里还是 region 附件」（排查时最容易怀疑错地方）。
+ */
+function normalizeMeshes(raw: unknown): Record<string, RigMeshSpec> | undefined {
+  if (raw === null || typeof raw !== "object") return undefined;
+  const out: Record<string, RigMeshSpec> = {};
+  for (const [name, value] of Object.entries<any>(raw)) {
+    if (value === null || typeof value !== "object") continue;
+    out[name] = {
+      cols: Math.max(1, Math.min(MESH_MAX_DIVISIONS, Math.round(num(value.cols, MESH_DEFAULT_DIVISIONS)))),
+      rows: Math.max(1, Math.min(MESH_MAX_DIVISIONS, Math.round(num(value.rows, MESH_DEFAULT_DIVISIONS))))
+    };
+  }
+  return Object.keys(out).length === 0 ? undefined : out;
+}
+
+/** 读盘时的 FFD 变形归一化（同上：白名单字段，漏了就会静默丢）。 */
+function normalizeDeforms(raw: unknown): Record<string, RigDeform> | undefined {
+  if (raw === null || typeof raw !== "object") return undefined;
+  const out: Record<string, RigDeform> = {};
+  for (const [name, value] of Object.entries<any>(raw)) {
+    if (value === null || typeof value !== "object") continue;
+    if (value.mode !== undefined && value.mode !== "wave") continue;
+    out[name] = {
+      mode: "wave",
+      amplitude: Math.max(0, Math.min(400, num(value.amplitude, 0))),
+      cycles: Math.max(0.25, Math.min(8, num(value.cycles, 1))),
+      direction: num(value.direction, 0),
+      anchor: value.anchor === "bottom" || value.anchor === "none" ? value.anchor : "top",
+      duration: Math.max(0.1, Math.min(10, num(value.duration, 1.6)))
+    };
+  }
+  return Object.keys(out).length === 0 ? undefined : out;
 }
 
 /** 读盘时的质检状态归一化：字段缺失/手改过都不该让整个任务读不出来。 */function normalizeQaState(raw: any): RigQaState | undefined {
@@ -2303,6 +2388,105 @@ export async function resetRigConstraints(jobId: string, names?: string[]): Prom
   return { touched };
 }
 
+// ── 蒙皮网格与 FFD 变形（M5 的 L1 / L3）──────────────────────────────────
+
+/**
+ * 给部件加/改网格与变形。
+ *
+ * `mesh: null` 表示取消这个部件的细分（回到整块贴图渲染）。`deform: null` 表示取消变形
+ * 但保留网格——两者分开是因为「细分了但暂时不加变形」是调试时的常见状态。
+ */
+export async function setRigMesh(
+  jobId: string,
+  patches: Array<{ name: string; cols?: number; rows?: number; deform?: Partial<RigWaveDeform> | null }>,
+  options: { by?: "ai" | "human" } = {}
+): Promise<{ touched: number; warnings: string[] }> {
+  const job = await readRigJob(jobId);
+  if (job === undefined) throw new Error(`任务不存在：${jobId}`);
+  const meshes = { ...(job.meshes ?? {}) };
+  const deforms = { ...(job.deforms ?? {}) };
+  const warnings: string[] = [];
+  let touched = 0;
+
+  for (const patch of patches) {
+    const part = job.parts.find((entry) => entry.name === patch.name && entry.status === "ready");
+    if (part === undefined) {
+      warnings.push(`没有这个可用部件：${patch.name}`);
+      continue;
+    }
+    if (patch.cols === null || patch.rows === null) {
+      delete meshes[patch.name];
+      delete deforms[patch.name];
+      touched++;
+      continue;
+    }
+    const current = meshes[patch.name] ?? { cols: MESH_DEFAULT_DIVISIONS, rows: MESH_DEFAULT_DIVISIONS };
+    const cols = Math.max(1, Math.min(MESH_MAX_DIVISIONS, Math.round(num(patch.cols, current.cols))));
+    const rows = Math.max(1, Math.min(MESH_MAX_DIVISIONS, Math.round(num(patch.rows, current.rows))));
+    meshes[patch.name] = { cols, rows };
+    touched++;
+
+    if (patch.deform === null) {
+      delete deforms[patch.name];
+      continue;
+    }
+    if (patch.deform === undefined) continue;
+    const previous = deforms[patch.name];
+    const fallback: RigWaveDeform = previous ?? {
+      mode: "wave",
+      // 默认幅度取部件短边的一个比例：裙子这么大一块，6% 大约是「一眼看得出来」的程度。
+      amplitude: Math.max(4, Math.round(Math.min(part.width, part.height) * 0.06)),
+      cycles: 1,
+      direction: 0,
+      anchor: "top",
+      duration: 1.6
+    };
+    deforms[patch.name] = {
+      mode: "wave",
+      amplitude: Math.max(0, Math.min(400, num(patch.deform.amplitude, fallback.amplitude))),
+      cycles: Math.max(0.25, Math.min(8, num(patch.deform.cycles, fallback.cycles))),
+      direction: num(patch.deform.direction, fallback.direction),
+      anchor: patch.deform.anchor === "bottom" || patch.deform.anchor === "none" ? patch.deform.anchor : fallback.anchor,
+      duration: Math.max(0.1, Math.min(10, num(patch.deform.duration, fallback.duration)))
+    };
+  }
+
+  job.meshes = Object.keys(meshes).length === 0 ? undefined : meshes;
+  job.deforms = Object.keys(deforms).length === 0 ? undefined : deforms;
+  // 网格会改变附件的**类型**（region → mesh），骨骼与图集都得重做。
+  invalidateFrom(job, "rig");
+  appendJobLog(
+    job.log,
+    "info",
+    `${options.by === "ai" ? "AI" : "手工"}编辑蒙皮：${patches.map((patch) => patch.name).join("、")}` +
+      (Object.keys(deforms).length > 0 ? `（带变形的 ${Object.keys(deforms).join("、")}）` : "")
+  );
+  await writeRigJob(job);
+  return { touched, warnings };
+}
+
+/** 清除网格与变形（全部，或点名几个部件）。 */
+export async function resetRigMesh(jobId: string, names?: string[]): Promise<{ touched: number }> {
+  const job = await readRigJob(jobId);
+  if (job === undefined) throw new Error(`任务不存在：${jobId}`);
+  const meshes = { ...(job.meshes ?? {}) };
+  const deforms = { ...(job.deforms ?? {}) };
+  const targets = names === undefined || names.length === 0 ? Object.keys(meshes) : names;
+  let touched = 0;
+  for (const name of targets) {
+    if (meshes[name] === undefined) continue;
+    delete meshes[name];
+    delete deforms[name];
+    touched++;
+  }
+  job.meshes = Object.keys(meshes).length === 0 ? undefined : meshes;
+  job.deforms = Object.keys(deforms).length === 0 ? undefined : deforms;
+  invalidateFrom(job, "rig");
+  appendJobLog(job.log, "info", touched > 0 ? `已清除 ${touched} 个部件的网格与变形` : "没有需要清除的网格");
+  await writeRigJob(job);
+  return { touched };
+}
+
 // ── 手工骨骼偏移（三通道的中间那一层）─────────────────────────────────
 
 export interface RigBoneOffset {
@@ -3545,7 +3729,11 @@ export async function buildRigOutput(jobId: string): Promise<void> {
       // 手工编辑过的动画顶掉预设实例。传的是**简写**，转换只发生一次。
       customAnimations: job.animations as any,
       // IK 约束：目标骨不存在时 buildSkeleton 会补一根可拖的点。
-      constraints: job.constraints
+      constraints: job.constraints,
+      // 蒙皮网格：只有列在这里的部件才细分（其余仍走整块贴图渲染）。
+      meshes: job.meshes,
+      // FFD 变形：导出时被采样成 deform/ffd 时间轴（每个动画各一份、首尾闭合）。
+      deforms: job.deforms
     });
 
     // **写盘之前先校验 wire format**。这四条地雷的共同特征是「插件里一路绿灯，
@@ -3604,7 +3792,10 @@ export async function buildRigOutput(jobId: string): Promise<void> {
       title: `${job.name} · 骨骼动画预览`,
       spine,
       images,
-      defaultAnimation: job.settings.animations.includes("idle") ? "idle" : job.settings.animations[0]
+      defaultAnimation: job.settings.animations.includes("idle") ? "idle" : job.settings.animations[0],
+      // FFD 变形参数内联进预览：波形位移要在播放时**逐帧**算，把参数带过去比
+      // 预烘焙一串位移更省体积，也不会在改幅度之后留下一堆过期数据。
+      deforms: job.deforms
     });
     await writeFile(rigAssetPath(jobId, "rig/preview.html"), html, "utf8");
 

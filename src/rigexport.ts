@@ -172,14 +172,27 @@ export function buildDragonBonesSkeleton(options: DragonBonesSkeletonOptions): a
   const skinSlots: any[] = (spine?.slots ?? []).map((slot: any) => {
     const attachment = attachments[slot.name]?.[slot.attachment] ?? {};
     const rotation = round(num(attachment.rotation, 0), 4);
+    // 有网格的部件出 `mesh`，其余出 `image`。
+    // 顶点沿用骨架里的坐标（部件中心为原点），两条导出路径共用同一份——
+    // 各自重算一次网格迟早会因为参数不同而错位，而错位的表现是「贴图按错误的拓扑贴」。
+    const isMesh = attachment.type === "mesh" && Array.isArray(attachment.vertices);
     return {
       name: slot.name,
       display: [
         {
-          type: "image",
+          type: isMesh ? "mesh" : "image",
           name: slot.attachment,
           // 图集里的区域名就是部件名，`path` 与之一致才能取到贴图。
           path: slot.attachment,
+          ...(isMesh
+            ? {
+                vertices: attachment.vertices,
+                uvs: attachment.uvs,
+                triangles: attachment.triangles,
+                width: round(num(attachment.width, 0), 4),
+                height: round(num(attachment.height, 0), 4)
+              }
+            : {}),
           pivot: { x: 0.5, y: 0.5 },
           transform: {
             x: round(num(attachment.x, 0), 4),
@@ -237,12 +250,36 @@ export function buildDragonBonesSkeleton(options: DragonBonesSkeletonOptions): a
     const explicit = num((value as any)?.duration, 0);
     const seconds = explicit > 0 ? explicit : durationSecondsOf(value, preset?.duration ?? 1);
     const loop = typeof (value as any)?.loop === "boolean" ? (value as any).loop : preset?.loop !== false;
+    // FFD 变形：Spine 的 `deform`（按秒）转成 DragonBones 的 `ffd`（按帧）。
+    //
+    // 顺序必须与骨架里 mesh 的 `vertices` 完全一致——两边都是同一份规则网格算出来的，
+    // 一旦这里改了顶点的排列或数量，位移就会对到别的顶点上，表现是「裙摆乱扭」而不是报错。
+    const ffd: any[] = [];
+    const spineDeform = spine?.animations?.[id]?.deform;
+    if (spineDeform !== null && typeof spineDeform === "object") {
+      for (const [slotName, bySkin] of Object.entries<any>(spineDeform)) {
+        const frames: any[] = Array.isArray(bySkin?.default) ? bySkin.default : [];
+        if (frames.length === 0) continue;
+        ffd.push({
+          name: slotName,
+          skin: "default",
+          slot: slotName,
+          frame: frames.map((frame: any, index: number) => ({
+            // 末帧的 duration 被解析器忽略（与骨骼时间轴同一条规则）。
+            duration: index === frames.length - 1 ? 0 : Math.max(1, Math.round(((frames[index + 1].time ?? 0) - (frame.time ?? 0)) * frameRate)),
+            offset: num(frame.offset, 0),
+            vertices: Array.isArray(frame.vertices) ? frame.vertices.map((n: unknown) => num(n, 0)) : []
+          }))
+        });
+      }
+    }
     animation.push({
       duration: Math.max(1, Math.round(seconds * frameRate)),
       name: id,
       // 0 = 无限循环。六个预设都是首尾闭合的（`validateAnimationLoops` 盯着）。
       playTimes: loop ? 0 : 1,
-      bone: boneTimelines
+      bone: boneTimelines,
+      ...(ffd.length === 0 ? {} : { ffd })
     });
   }
 

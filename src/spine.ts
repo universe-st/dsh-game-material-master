@@ -24,6 +24,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { buildRigMesh, buildWaveDeform } from "./rigmesh.js";
 
 // ── 拆件槽位定义 ────────────────────────────────────────────────────────
 
@@ -300,6 +301,62 @@ function kf(time: number, angle?: number, x?: number, y?: number, curve: Curve =
 function round(value: number, digits: number): number {
   const factor = 10 ** digits;
   return Math.round(value * factor) / factor;
+}
+
+/**
+ * 挂点：有网格就出 `mesh`，否则出 `region`。
+ *
+ * **网格顶点用「部件中心为原点」的坐标**，与 region attachment 的 `-w/2, -h/2` 同一套系——
+ * 这样运行时两种附件共用同一条变换链（骨骼世界矩阵 → 挂点 x/y/rotation → 顶点），
+ * 不必为 mesh 另写一套定位逻辑。`buildRigMesh` 那边用的是「左上角为原点」，
+ * 转换就发生在这里，且只发生一次。
+ *
+ * 暂时**不写 `weights`**：那是 LBS（多骨骼线性混合蒙皮），格式在两条导出路径里都绕
+ * （Spine 的加权顶点是 `[骨骼数, (索引, x, y, 权重)…]` 的交错数组），而它解决的问题是
+ * 「一块贴图被多根骨骼共同拉扯」——FFD 时间轴已经把「裙摆上缘不动、下缘甩出去」这件事
+ * 做到了，先把能验证的那条链路走通。`RigMesh` 已经产出权重，接进导出是独立的一步。
+ */
+/** 每个变形循环采样几个关键帧。6 段对「裙摆左右摆」这种低频运动足够。 */
+export const ANIMATION_DEFORM_SAMPLES = 6;
+
+/** 取部件的网格（没有就返回 undefined）。网格是确定性重算的，不落盘。 */
+function meshGridOf(
+  spec: { cols: number; rows: number } | undefined,
+  part: RigPlacedPart | undefined
+): { mesh: ReturnType<typeof buildRigMesh>; width: number; height: number } | undefined {
+  if (spec === undefined || part === undefined) return undefined;
+  const width = Math.max(1, part.width);
+  const height = Math.max(1, part.height);
+  return {
+    mesh: buildRigMesh({ width, height, cols: spec.cols, rows: spec.rows, bones: [], x: part.x, y: part.y }),
+    width,
+    height
+  };
+}
+
+function meshAttachmentOf(  name: string,
+  part: RigPlacedPart,
+  attachment: { x: number; y: number; rotation: number; width: number; height: number },
+  spec: { cols: number; rows: number } | undefined
+): any {
+  if (spec === undefined) return attachment;
+  const grid = meshGridOf(spec, part);
+  if (grid === undefined) return attachment;
+  const vertices: number[] = [];
+  for (let i = 0; i < grid.mesh.vertices.length; i += 2) {
+    vertices.push(round(grid.mesh.vertices[i] - part.width / 2, 3), round(grid.mesh.vertices[i + 1] - part.height / 2, 3));
+  }
+  return {
+    ...attachment,
+    type: "mesh",
+    // `path` 指向图集里的区域名：mesh 与 region 取的是同一张图，只是画法不同。
+    path: name,
+    uvs: grid.mesh.uvs,
+    triangles: grid.mesh.triangles,
+    vertices,
+    // Spine 用它做编辑器里的凸包显示；给顶点数即可（规则网格的凸包就是外圈）。
+    hull: (grid.mesh.cols + 1) * 2 + (grid.mesh.rows - 1) * 2
+  };
 }
 
 /** 宽容取数：非数字/NaN 一律回落到 `fallback`（约束参数来自界面与对话，不能假设它干净）。 */
@@ -839,6 +896,10 @@ export interface BuildSkeletonOptions {
   customAnimations?: Record<string, any>;
   /** IK 约束（M5）。目标骨骼不存在时会自动补一根。 */
   constraints?: RigIkConstraint[];
+  /** 蒙皮网格（M5 的 L1）：部件名 → 网格密度。 */
+  meshes?: Record<string, { cols: number; rows: number }>;
+  /** FFD 变形（M5 的 L3）：部件名 → 波形参数。导出时会采样成 deform 时间轴。 */
+  deforms?: Record<string, { mode: "wave"; amplitude: number; cycles: number; direction: number; anchor: "top" | "bottom" | "none"; duration: number }>;
 }
 
 /**
@@ -1136,14 +1197,14 @@ export function buildSkeleton(
     const cosB = Math.cos(-bRad);
     const sinB = Math.sin(-bRad);
     attachments[name] = {
-      [name]: {
+      [name]: meshAttachmentOf(name, part, {
         x: round(offX * cosB - offY * sinB, 4),
         y: round(offX * sinB + offY * cosB, 4),
         // 挂点自身旋转 = 抵消骨骼朝向（让初始姿态正立）+ 手动装配里拧的角度。
         rotation: normalizeAngle(-worldRot + (part.rotation ?? 0)),
         width: round(part.width, 4),
         height: round(part.height, 4)
-      }
+      }, options.meshes?.[name])
     };
     slots.push({ name, bone: name, attachment: name });
   }
@@ -1174,6 +1235,39 @@ export function buildSkeleton(
   }
   const animations = JSON.parse(JSON.stringify(animationsRaw));
   toSpine42(animations);
+
+  // ── FFD 变形时间轴（M5 的 L3）───────────────────────────────────────
+  //
+  // 把波形**采样**成有限个关键帧再导出：两条导出路径的 deform/ffd 都是关键帧列表，
+  // 而波形是连续的。采样点数取 6（每周期 6 段），对「裙摆左右摆」这个低频运动足够，
+  // 也不会让 JSON 膨胀——顶点数是 49，每帧 98 个数字，6 帧约 600 个。
+  //
+  // 采样时间对齐到**每个动画自己的时长**：这样每个动画的 deform 都首尾闭合，
+  // 切成任何一台动画看，裙摆都不会在接缝处跳一下。
+  for (const [id, animation] of Object.entries<any>(animations)) {
+    const duration = animationDurationOf(id, options.animationSettings ?? {});
+    for (const [name, deform] of Object.entries(options.deforms ?? {})) {
+      const grid = meshGridOf(options.meshes?.[name], byName.get(name));
+      if (grid === undefined || deform === null || deform === undefined) continue;
+      const frames: any[] = [];
+      for (let i = 0; i <= ANIMATION_DEFORM_SAMPLES; i++) {
+        const at = (i / ANIMATION_DEFORM_SAMPLES) * duration;
+        const { offsets } = buildWaveDeform({
+          mesh: grid.mesh,
+          width: grid.width,
+          height: grid.height,
+          phase: at / Math.max(0.01, deform.duration),
+          amplitude: deform.amplitude,
+          cycles: deform.cycles,
+          direction: deform.direction,
+          anchor: deform.anchor
+        });
+        frames.push({ time: round(at, 4), offset: 0, vertices: offsets });
+      }
+      animation.deform = animation.deform ?? {};
+      animation.deform[name] = { default: frames };
+    }
+  }
   if (Object.keys(animations).length === 0) {
     warnings.push("没有生成任何动画：所选预设依赖的骨骼名在本次拆件里都不存在");
   }

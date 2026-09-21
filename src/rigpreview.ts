@@ -31,6 +31,8 @@ export interface PreviewOptions {
   defaultAnimation?: string;
   /** 画布背景（CSS 颜色）。 */
   background?: string;
+  /** FFD 变形（部件名 → 参数）。波形位移由预览按当前时间现算。 */
+  deforms?: Record<string, { mode: "wave"; amplitude: number; cycles: number; direction: number; anchor: "top" | "bottom" | "none"; duration: number }>;
 }
 
 function safeJson(value: unknown): string {
@@ -46,6 +48,8 @@ export function buildPreviewHtml(options: PreviewOptions): string {
     ? options.defaultAnimation
     : animations[0] ?? "";
   const background = options.background ?? "#12121c";
+  /** 没有变形的部件不必内联任何东西——预览里靠 DEFORMS[name] 是否存在来分流。 */
+  const deforms = options.deforms ?? {};
 
   return `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -92,6 +96,8 @@ export function buildPreviewHtml(options: PreviewOptions): string {
   var SPINE = ${safeJson(options.spine)};
   var IMAGE_DATA = ${safeJson(images)};
   var ANIMS = ${safeJson(animations)};
+  // FFD 变形参数（部件名 → 波形）。没有它就不会走 mesh 渲染那条路。
+  var DEFORMS = ${safeJson(deforms)};
   var current = ${safeJson(defaultAnimation)};
   // 允许用 URL 片段指定初始动画（#walk）：插件的界面用它做「切动画」按钮，
   // 不必反复重载整个预览页。
@@ -286,6 +292,114 @@ export function buildPreviewHtml(options: PreviewOptions): string {
     });
   }
 
+  // ── 蒙皮网格 + FFD 变形（M5 的 L1 / L3）─────────────────────────────
+  //
+  // 有网格的部件走「逐三角形裁剪绘制」，没有的仍是一整块 drawImage。
+  // 分流的判据是 att.type === 'mesh'（骨架里写死的），不额外维护一张表。
+  //
+  // 顶点坐标在骨架里是「部件中心为原点」，与 region attachment 的 -w/2,-h/2 同一套系，
+  // 所以两种附件的变换链完全一样，这里只是把 drawImage 换成按三角形贴。
+
+  /**
+   * 当前时刻的顶点位移（FFD）。
+   *
+   * 与宿主 rigmesh.ts 的 buildWaveDeform **同一个公式**：越靠近固定端越不动，
+   * 相位按时间推进。两处必须一致，否则「预览里看到的」和「导出的」不是一回事。
+   */
+  function deformOffsetsOf(name, att, t) {
+    var spec = DEFORMS[name];
+    if (!spec) return null;
+    var verts = att.vertices || [];
+    var height = att.height || 1;
+    var duration = spec.duration > 0 ? spec.duration : 1;
+    var phase = ((t / duration) % 1 + 1) % 1;
+    var cycles = spec.cycles || 1;
+    var amplitude = spec.amplitude || 0;
+    var dirX = Math.cos(spec.direction || 0);
+    var dirY = Math.sin(spec.direction || 0);
+    var out = new Array(verts.length);
+    for (var i = 0; i < verts.length; i += 2) {
+      // 顶点是中心坐标，换回「左上角为原点」才能算"离固定端多远"。
+      var ly = verts[i + 1] + height / 2;
+      var along = spec.anchor === 'bottom' ? 1 - ly / height : spec.anchor === 'none' ? 1 : ly / height;
+      // 相位只随时间推进；沿 y 变化的是权重。写成 sin(along·cycles + phase) 会让
+      // 不同高度在同一时刻朝相反方向走，整条裙子被横向扯开（第一版就是这个毛病）。
+      var sway = Math.sin(phase * cycles * Math.PI * 2);
+      var magnitude = amplitude * along * sway;
+      out[i] = dirX * magnitude;
+      out[i + 1] = dirY * magnitude;
+    }
+    return out;
+  }
+
+  /** 三个源点（图片像素）→ 三个目标点（当前坐标系）的仿射矩阵。 */
+  function affineFromTriangles(s0, s1, s2, d0, d1, d2) {
+    var denom = (s1.x - s0.x) * (s2.y - s0.y) - (s2.x - s0.x) * (s1.y - s0.y);
+    if (Math.abs(denom) < 1e-9) return null;
+    var a = ((d1.x - d0.x) * (s2.y - s0.y) - (d2.x - d0.x) * (s1.y - s0.y)) / denom;
+    var b = ((d1.y - d0.y) * (s2.y - s0.y) - (d2.y - d0.y) * (s1.y - s0.y)) / denom;
+    var c = ((d2.x - d0.x) * (s1.x - s0.x) - (d1.x - d0.x) * (s2.x - s0.x)) / denom;
+    var d = ((d2.y - d0.y) * (s1.x - s0.x) - (d1.y - d0.y) * (s2.x - s0.x)) / denom;
+    return { a: a, b: b, c: c, d: d, e: d0.x - a * s0.x - c * s0.y, f: d0.y - b * s0.x - d * s0.y };
+  }
+
+  function drawMesh(bone, att, img, name, t) {
+    var verts = att.vertices || [];
+    var uvs = att.uvs || [];
+    var tris = att.triangles || [];
+    if (verts.length === 0 || tris.length === 0) return;
+    var width = att.width || 1;
+    var height = att.height || 1;
+    var offsets = deformOffsetsOf(name, att, t);
+    var halfW = width / 2;
+    var halfH = height / 2;
+
+    ctx.save();
+    ctx.translate(bone.worldX, bone.worldY);
+    ctx.rotate(bone.worldRot);
+    ctx.translate(att.x || 0, att.y || 0);
+    ctx.rotate((att.rotation || 0) * Math.PI / 180);
+    ctx.scale(1, -1);
+    // 到这里坐标系是「部件中心为原点、y 向上」，而顶点是「中心为原点、y 向下」
+    // （骨架里按图片坐标算的），所以顶点取负 y。
+    for (var k = 0; k + 2 < tris.length; k += 3) {
+      var i0 = tris[k] * 2, i1 = tris[k + 1] * 2, i2 = tris[k + 2] * 2;
+      var p0 = { x: verts[i0] + (offsets ? offsets[i0] : 0), y: -(verts[i0 + 1] + (offsets ? offsets[i0 + 1] : 0)) };
+      var p1 = { x: verts[i1] + (offsets ? offsets[i1] : 0), y: -(verts[i1 + 1] + (offsets ? offsets[i1 + 1] : 0)) };
+      var p2 = { x: verts[i2] + (offsets ? offsets[i2] : 0), y: -(verts[i2 + 1] + (offsets ? offsets[i2 + 1] : 0)) };
+      // 源点用**图片像素**：顶点是中心坐标，加上半宽半高就是图片里的位置。
+      var s0 = { x: verts[i0] + halfW, y: verts[i0 + 1] + halfH };
+      var s1 = { x: verts[i1] + halfW, y: verts[i1 + 1] + halfH };
+      var s2 = { x: verts[i2] + halfW, y: verts[i2 + 1] + halfH };
+      var m = affineFromTriangles(s0, s1, s2, p0, p1, p2);
+      if (m === null) continue;
+      // 三个顶点以重心为中心**外扩一点点**。
+      //
+      // 逐三角形 clip 之后，每条边的抗锯齿像素都是半透明的，相邻三角形拼起来
+      // 就会在共享边上留下一条亮白细线（实测裙子上能看出一整张网格）。外扩之后
+      // 三角形彼此重叠，细线被后画的三角形盖掉。源点不跟着扩——那会让纹理整体
+      // 放大一圈；这里只挪目标点，代价是每边约 0.5px 的轻微拉伸，看不出来。
+      var gx = (p0.x + p1.x + p2.x) / 3;
+      var gy = (p0.y + p1.y + p2.y) / 3;
+      var grow = 1 + 1.2 / Math.max(1, Math.min(width, height) * view.scale);
+      p0 = { x: gx + (p0.x - gx) * grow, y: gy + (p0.y - gy) * grow };
+      p1 = { x: gx + (p1.x - gx) * grow, y: gy + (p1.y - gy) * grow };
+      p2 = { x: gx + (p2.x - gx) * grow, y: gy + (p2.y - gy) * grow };
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(p0.x, p0.y);
+      ctx.lineTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
+      ctx.closePath();
+      ctx.clip();
+      ctx.transform(m.a, m.b, m.c, m.d, m.e, m.f);
+      ctx.drawImage(img, 0, 0);
+      ctx.restore();
+    }
+    ctx.restore();
+    void uvs;
+  }
+
   // ── 视图 ────────────────────────────────────────────────────────────
   var view = { scale: 1, cx: 0, cy: 0 };
   function fitView() {
@@ -355,6 +469,7 @@ export function buildPreviewHtml(options: PreviewOptions): string {
       if (!att) return;
       var img = images[slot.name];
       if (!img || !img.complete || !img.naturalWidth) return;
+      if (att.type === 'mesh') { drawMesh(bone, att, img, slot.name, t); return; }
       ctx.save();
       ctx.translate(bone.worldX, bone.worldY);
       ctx.rotate(bone.worldRot);

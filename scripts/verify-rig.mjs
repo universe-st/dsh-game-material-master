@@ -32,6 +32,7 @@ import {
 import { buildSkeleton, buildAtlasText, packAtlas, defaultPartNames, RIG_SLOTS, DEFAULT_DRAW_ORDER } from "../lib/spine.js";
 import { buildDragonBonesSkeleton, buildDragonBonesTexture, DRAGONBONES_FRAME_RATE } from "../lib/rigexport.js";
 import { assessParts, findDuplicateParts } from "../lib/rigqa.js";
+import { buildRigMesh, buildWaveDeform } from "../lib/rigmesh.js";
 import {
   validateAnimationLoops,
   validateAtlas,
@@ -1338,6 +1339,114 @@ console.log("=== 15. IK 约束（M5）===");
   }).ok);
   check("抓住「链不足两根骨」", !mutateIk((c) => { c.bones = ["left-lower-arm"]; }).ok);
   check("抓住「mix 越界」", !mutateIk((c) => { c.mix = 1.5; }).ok);
+}
+
+console.log("=== 16. 蒙皮网格与 FFD 变形（M5）===");
+{
+  const mesh = buildRigMesh({ width: 200, height: 120, cols: 4, rows: 3, bones: [], x: 0, y: 0 });
+  check("顶点数 = (cols+1)×(rows+1)", mesh.vertices.length / 2 === 5 * 4, String(mesh.vertices.length / 2));
+  check("三角形数 = cols×rows×2", mesh.triangles.length / 3 === 4 * 3 * 2, String(mesh.triangles.length / 3));
+  check("UV 与顶点一一对应", mesh.uvs.length === mesh.vertices.length);
+  check("UV 落在 0~1", mesh.uvs.every((v) => v >= -1e-9 && v <= 1 + 1e-9));
+  check("顶点铺满部件包围盒", (() => {
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (let i = 0; i < mesh.vertices.length; i += 2) {
+      minX = Math.min(minX, mesh.vertices[i]); maxX = Math.max(maxX, mesh.vertices[i]);
+      minY = Math.min(minY, mesh.vertices[i + 1]); maxY = Math.max(maxY, mesh.vertices[i + 1]);
+    }
+    return minX === 0 && minY === 0 && Math.abs(maxX - 200) < 1e-6 && Math.abs(maxY - 120) < 1e-6;
+  })());
+  check("三角形索引不越界", mesh.triangles.every((i) => i >= 0 && i < mesh.vertices.length / 2));
+
+  // 自动权重：顶点离哪根骨骼近就多受谁影响，且权重归一化。
+  {
+    const weighted = buildRigMesh({
+      width: 100, height: 100, cols: 2, rows: 2,
+      bones: [{ name: "a", x: 0, y: 0 }, { name: "b", x: 100, y: 100 }],
+      x: 0, y: 0
+    });
+    check("每个顶点都有骨骼影响", weighted.weights.every((list) => list.length > 0));
+    check("权重归一化（和为 1）", weighted.weights.every((list) => Math.abs(list.reduce((s, e) => s + e.weight, 0) - 1) < 1e-4));
+    check("左上角顶点更受 a 影响", (() => {
+      const first = weighted.weights[0];
+      return first[0].bone === 0 && first[0].weight > 0.5;
+    })(), JSON.stringify(weighted.weights[0]));
+    check("影响数不超过上限", weighted.weights.every((list) => list.length <= 3));
+  }
+
+  // 波形：上缘不动、下缘最大；首尾闭合；相位只随时间走（不随高度）。
+  {
+    const wave = buildRigMesh({ width: 100, height: 100, cols: 2, rows: 2, bones: [], x: 0, y: 0 });
+    const quarter = buildWaveDeform({ mesh: wave, width: 100, height: 100, amplitude: 20, phase: 0.25, anchor: "top", cycles: 1 });
+    const topIndex = 0; // 第一行第一个顶点（y=0）
+    const bottomIndex = (wave.vertices.length / 2) - 1; // 最后一个顶点（y=100）
+    check("固定端（上缘）不动", quarter.offsets[topIndex * 2] === 0 && quarter.offsets[topIndex * 2 + 1] === 0);
+    check("自由端（下缘）位移最大", Math.abs(quarter.offsets[bottomIndex * 2]) > 19, String(quarter.offsets[bottomIndex * 2]));
+    const start = buildWaveDeform({ mesh: wave, width: 100, height: 100, amplitude: 20, phase: 0, anchor: "top", cycles: 1 });
+    const end = buildWaveDeform({ mesh: wave, width: 100, height: 100, amplitude: 20, phase: 1, anchor: "top", cycles: 1 });
+    check("首尾闭合（phase 0 与 1 同位移）", start.offsets.every((v, i) => Math.abs(v - end.offsets[i]) < 1e-6));
+    // 同一行（同高度）的顶点位移相同 = 没有横向拉扯（第一版的 bug）。
+    check("同一高度的顶点位移一致（不拉伸）", (() => {
+      const rowEnd = quarter.offsets[bottomIndex * 2];
+      const rowStart = quarter.offsets[(bottomIndex - 2) * 2];
+      return Math.abs(rowStart - rowEnd) < 1e-6;
+    })());
+    check("anchor=bottom 时下缘不动", (() => {
+      const flipped = buildWaveDeform({ mesh: wave, width: 100, height: 100, amplitude: 20, phase: 0.25, anchor: "bottom", cycles: 1 });
+      return Math.abs(flipped.offsets[bottomIndex * 2]) < 1e-6;
+    })());
+  }
+
+  // 导出：Spine 的 deform 与 DragonBones 的 ffd 必须指同一份位移。
+  {
+    const meshed = buildSkeleton({
+      canvasWidth: W,
+      canvasHeight: H,
+      // 骨架里必须有 `idle` 预设认得的骨骼（torso / neck / head）：否则那个动画会因为
+      // 「依赖的骨骼都不存在」被整个跳过，deform 就没地方挂（测试里踩过）。
+      parts: [
+        { name: "torso", file: "torso.png", x: 200, y: 300, width: 120, height: 160, scale: 1, rotation: 0, z: 0 },
+        { name: "hip", file: "hip.png", x: 100, y: 500, width: 200, height: 160, scale: 1, rotation: 0, z: 1 }
+      ],
+      animationIds: ["idle"],
+      meshes: { hip: { cols: 4, rows: 4 } },
+      deforms: { hip: { mode: "wave", amplitude: 12, cycles: 1, direction: 0, anchor: "top", duration: 1.6 } }
+    });
+    const att = meshed.spine.skins[0].attachments.hip.hip;
+    check("有网格的部件出 mesh 附件", att.type === "mesh", String(att.type));
+    check("mesh 顶点数 = (4+1)²", att.vertices.length / 2 === 25, String(att.vertices.length / 2));
+    check("mesh 有 uvs / triangles / path", Array.isArray(att.uvs) && Array.isArray(att.triangles) && att.path === "hip");
+    check("顶点以部件中心为原点", (() => {
+      let minX = Infinity, maxX = -Infinity;
+      for (let i = 0; i < att.vertices.length; i += 2) { minX = Math.min(minX, att.vertices[i]); maxX = Math.max(maxX, att.vertices[i]); }
+      return Math.abs(minX + 100) < 0.01 && Math.abs(maxX - 100) < 0.01;
+    })());
+    const deform = meshed.spine.animations.idle.deform?.hip?.default;
+    check("idle 有 hip 的 deform 时间轴", Array.isArray(deform) && deform.length === 7, String(deform?.length));
+    check("deform 覆盖整个动画时长且首尾闭合", (() => {
+      if (!Array.isArray(deform)) return false;
+      const last = deform[deform.length - 1];
+      return Math.abs(last.time - 1.6) < 0.01 && deform[0].vertices.every((v, i) => Math.abs(v - last.vertices[i]) < 1e-6);
+    })());
+    check("没有网格的部件仍是 region 附件", (() => {
+      const plain = buildSkeleton({
+        canvasWidth: W, canvasHeight: H,
+        parts: [{ name: "head", file: "h.png", x: 100, y: 100, width: 80, height: 90, scale: 1, rotation: 0, z: 0 }],
+        animationIds: ["idle"]
+      });
+      return plain.spine.skins[0].attachments.head.head.type === undefined;
+    })());
+
+    const db = buildDragonBonesSkeleton({
+      name: "mesh", canvasWidth: W, canvasHeight: H, spine: meshed.spine, animations: meshed.animationsRaw
+    });
+    const display = db.armature[0].skin[0].slot.find((slot) => slot.name === "hip").display[0];
+    check("DragonBones 出 mesh display", display.type === "mesh" && display.vertices.length / 2 === 25, JSON.stringify(display.type));
+    const ffd = db.armature[0].animation.find((a) => a.name === "idle").ffd;
+    check("DragonBones 出 ffd 时间轴", Array.isArray(ffd) && ffd.length === 1 && ffd[0].frame.length === 7, JSON.stringify(ffd?.length));
+    check("ffd 首帧顶点数与 mesh 一致", ffd[0].frame[0].vertices.length / 2 === 25);
+    check("ffd 中间帧 duration ≥ 1（末帧被忽略）", ffd[0].frame.slice(0, -1).every((f) => f.duration >= 1));
+  }
 }
 
 console.log("");
