@@ -525,7 +525,19 @@ function checkRigContracts(text, label) {
     `${label}：质检面板列出 message 与 suggestion`,
     text.includes("issue.suggestion") && text.includes("SPR_qaFix"),
     "建议没渲染出来"
-  );  // 撤销/重做的两处时序陷阱，都是实测撞出来的：  //  ① 把 setHistory([]) 挂在 [job.id, job.updatedAt] 上 —— commit 自己就会改
+  );
+  // IK 约束编辑器（M5）：约束在这里设、拖动在预览页做。
+  for (const [feature, token] of [
+    ["IK 约束面板", 'data-testid": "rig-constraints"'],
+    ["选链末端骨骼", 'data-testid": "rig-ik-bone"'],
+    ["加约束", 'data-testid": "rig-ik-add"'],
+    ["切换弯曲方向", "rig-ik-bend-"],
+    ["软 IK 权重", "weight: entry.weight"],
+    ["删单条约束", "rig-ik-del-"],
+    ["清空全部", 'data-testid": "rig-ik-clear"']
+  ]) {
+    check(`${label}：约束编辑器有${feature}`, text.includes(token), token);
+  }  // 撤销/重做的两处时序陷阱，都是实测撞出来的：  //  ① 把 setHistory([]) 挂在 [job.id, job.updatedAt] 上 —— commit 自己就会改
   //     updatedAt，于是每提交一次就清空撤销栈，撤销按钮永远是灰的；
   //  ② undo 把「改动前」的快照塞进重做栈 —— 重做还原的还是改动前那份，点了没反应。
   check(

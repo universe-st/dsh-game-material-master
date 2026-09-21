@@ -302,6 +302,11 @@ function round(value: number, digits: number): number {
   return Math.round(value * factor) / factor;
 }
 
+/** 宽容取数：非数字/NaN 一律回落到 `fallback`（约束参数来自界面与对话，不能假设它干净）。 */
+function num(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
 /** 骨骼名 → （时间轴类型 → 关键帧数组）。时间轴类型目前只有 rotate / translate。 */
 type BoneTimelines = Record<string, Record<string, AuthoredKeyframe[]>>;;
 type BoneSet = Set<string>;
@@ -832,6 +837,49 @@ export interface BuildSkeletonOptions {
   /** 逐动画的可调参数（时长 / 幅度 / 是否生成）。 */
   animationSettings?: RigAnimationSettings;
   customAnimations?: Record<string, any>;
+  /** IK 约束（M5）。目标骨骼不存在时会自动补一根。 */
+  constraints?: RigIkConstraint[];
+}
+
+/**
+ * IK 约束（两骨余弦定理）。
+ *
+ * 内部用 DragonBones 的写法（`bone` = 链末端 + `chain` = 链长），因为导出时
+ * Spine 要的是「从根到末端的骨骼名数组」、DragonBones 要的是「末端 + 链长」，
+ * 而后者是那个更好反推的表示（拿到末端沿父级往上走就够了）。
+ */
+export interface RigIkConstraint {
+  type: "ik";
+  name: string;
+  /** 链的**末端**骨骼（被约束的那根）。 */
+  bone: string;
+  /**
+   * 目标骨骼名。拖动它，整条链跟着走。
+   *
+   * 骨架里不存在时会**自动补一根**：目标骨不带贴图、不参与绘制，只是一个可拖的点。
+   * 让用户手工去建这样一根骨头是没有意义的负担。
+   */
+  target: string;
+  /** 链长：1 = `bone` 与它的父级两根骨（本轮只实现这一档）。 */
+  chain: number;
+  /** 膝盖/肘往哪一侧弯。 */
+  bendPositive: boolean;
+  /** 0~1，小于 1 即**软 IK**（在「不约束」与「对齐目标」之间插值）。 */
+  weight: number;
+}
+
+/** 兼容命名：约束目前只有 IK 一种。 */
+export type RigConstraint = RigIkConstraint;
+
+/** 沿父级往上取链上的骨骼名，**从根到末端**。末端骨自己也算。 */
+export function ikChainOf(boneParent: Map<string, string | undefined>, bone: string, chain: number): string[] {
+  const out: string[] = [bone];
+  let cursor: string | undefined = boneParent.get(bone);
+  for (let i = 0; i < chain && cursor !== undefined; i++) {
+    out.unshift(cursor);
+    cursor = boneParent.get(cursor);
+  }
+  return out;
 }
 
 interface Bone {
@@ -1090,6 +1138,69 @@ export function buildSkeleton(
     .digest("hex")
     .slice(0, 20);
 
+  // ── IK 约束 ──────────────────────────────────────────────────────────
+  //
+  // 目标骨不在骨架里就补一根：它只是一个**可拖的点**，不带贴图、不参与绘制。
+  // 位置取链末端当前的世界坐标，于是「刚加上约束时姿态不变」——用户看到的是
+  // 一个可以直接拖的目标点，而不是先跳一下。
+  const ik: any[] = [];
+  const boneParent = new Map<string, string | undefined>(bones.map((bone) => [bone.name, bone.parent]));
+  for (const constraint of options.constraints ?? []) {
+    if (constraint === null || typeof constraint !== "object") continue;
+    if (constraint.type !== undefined && constraint.type !== "ik") continue;
+    const chainLength = Math.max(1, Math.min(8, Math.round(num(constraint.chain, 1))));
+    const chain = ikChainOf(boneParent, constraint.bone, chainLength);
+    if (chain.length < 2) {
+      warnings.push(`IK「${constraint.name}」的链端骨骼不存在或没有父级：${constraint.bone}`);
+      continue;
+    }
+    if (chain[chain.length - 1] !== constraint.bone) {
+      warnings.push(`IK「${constraint.name}」的链端骨骼不是 ${constraint.bone}`);
+      continue;
+    }
+    // 链上每根骨都必须有长度，否则余弦定理无从下手（长度 0 的骨在几何上是退化的）。
+    const lengths = chain.map((name) => bones.find((bone) => bone.name === name)?.length ?? 0);
+    if (lengths.some((value) => value <= 0.01)) {
+      warnings.push(`IK「${constraint.name}」的链上有长度为 0 的骨骼（${chain.filter((name, index) => lengths[index] <= 0.01).join("、")}），已跳过`);
+      continue;
+    }
+
+    const targetName = typeof constraint.target === "string" && constraint.target !== "" ? constraint.target : `${constraint.name}-target`;
+    if (!boneNames.has(targetName)) {
+      // 目标点落在链末端的**骨尖**上（原点沿自身朝向再走一个 length，和预览器的画法一致）：
+      // 加上约束的那一刻姿态不变，用户看到的是一个可以直接拖的点，而不是先跳一下。
+      const tip = bones.find((bone) => bone.name === constraint.bone)!;
+      const origin = world.get(constraint.bone) ?? { x: tip.x, y: tip.y, rotation: 0 };
+      const dirRad = (origin.rotation * Math.PI) / 180;
+      const tipWorldX = origin.x - Math.sin(dirRad) * tip.length;
+      const tipWorldY = origin.y + Math.cos(dirRad) * tip.length;
+      bones.splice(
+        bones.findIndex((bone) => bone.name === constraint.bone) + 1,
+        0,
+        { name: targetName, x: round(tipWorldX, 4), y: round(tipWorldY, 4), rotation: 0, length: 0 }
+      );
+      boneNames.add(targetName);
+      boneParent.set(targetName, undefined);
+    }
+
+    ik.push({
+      name: constraint.name,
+      // Spine 4.2：`bones` 是链上的骨骼，**包含末端**、顺序从根到末端
+      // （官方示例 `["front-upper-arm","front-lower-arm"]`）。
+      // DragonBones 那边要的是「末端骨 + chain 长度」，导出时从这份反推。
+      bones: chain,
+      target: targetName,
+      mix: Math.max(0, Math.min(1, num(constraint.weight, 1))),
+      bendPositive: constraint.bendPositive !== false,
+      compress: false,
+      stretch: false,
+      uniform: false,
+      // 我们自己的字段：DragonBones 导出要用，Spine 侧会忽略。
+      chain: chainLength,
+      order: ik.length
+    });
+  }
+
   const spine = {
     skeleton: {
       hash,
@@ -1102,6 +1213,7 @@ export function buildSkeleton(
     },
     bones,
     slots,
+    ik: ik.length === 0 ? undefined : ik,
     skins: [{ name: "default", attachments }],
     animations
   };

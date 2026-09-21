@@ -194,8 +194,29 @@ export function buildDragonBonesSkeleton(options: DragonBonesSkeletonOptions): a
     };
   });
 
-  const animation: any[] = [];
-  for (const [id, value] of Object.entries(options.animations ?? {})) {
+  // ── IK 约束 ──────────────────────────────────────────────────────────
+  //
+  // Spine 的写法是 `bones: [从根到末端的骨骼名]`；DragonBones 要的是
+  // `bone`（链末端）+ `chain`（再往上几根）。两者是同一件事的两种编码，
+  // 转换时**末尾那根就是末端**，`chain` 要减一（不含末端自己）。
+  const ik: any[] = [];
+  for (const constraint of Array.isArray(spine?.ik) ? spine.ik : []) {
+    const chain: string[] = Array.isArray(constraint?.bones) ? constraint.bones.filter((name: unknown) => typeof name === "string") : [];
+    if (chain.length === 0) continue;
+    ik.push({
+      name: String(constraint.name ?? `ik-${ik.length}`),
+      bone: chain[chain.length - 1],
+      target: String(constraint.target ?? ""),
+      // 我们的 `chain` 字段是「链长」（两骨 = 1）；Spine 那边写的是骨骼数组长度，
+      // 所以这里优先用显式字段，缺了才从数组长度反推。
+      chain: Math.max(1, num(constraint.chain, chain.length - 1)),
+      bendPositive: constraint.bendPositive !== false,
+      weight: Math.max(0, Math.min(1, num(constraint.mix, 1))),
+      scale: false
+    });
+  }
+
+  const animation: any[] = [];  for (const [id, value] of Object.entries(options.animations ?? {})) {
     const timelines = (value as any)?.bones;
     if (timelines === null || typeof timelines !== "object") continue;
     const boneTimelines: any[] = [];
@@ -242,6 +263,7 @@ export function buildDragonBonesSkeleton(options: DragonBonesSkeletonOptions): a
         canvas: { x: -width / 2, y: 0, width, height },
         bone: bones,
         slot: slots,
+        ...(ik.length === 0 ? {} : { ik }),
         skin: [{ name: "default", slot: skinSlots }],
         animation,
         defaultActions: []

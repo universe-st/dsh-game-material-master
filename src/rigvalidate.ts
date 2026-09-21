@@ -87,6 +87,53 @@ export function validateSpineWire(spine: any): ValidationReport {
     }
   }
 
+  // ① IK 约束必须自洽。
+  //
+  // 这几条都不是「能跑但难看」，而是**静默坏掉**：目标骨拼错 → 运行时找不到目标、
+  // 约束被整个丢掉；链上有长度为 0 的骨 → 余弦定理分母为 0、`acos` 参数出界，
+  // NaN 顺着矩阵扩散、整只骨架渲染一帧后消失；把被约束的骨自己当目标 → 自环。
+  {
+    const boneNames = new Set<string>((Array.isArray(spine?.bones) ? spine.bones : []).map((bone: any) => bone?.name).filter((name: unknown) => typeof name === "string"));
+    const lengthOf = new Map<string, number>((Array.isArray(spine?.bones) ? spine.bones : []).map((bone: any) => [bone?.name, numOr(bone?.length, 0)]));
+    for (const constraint of Array.isArray(spine?.ik) ? spine.ik : []) {
+      const where = `ik/${constraint?.name ?? "?"}`;
+      const chain: string[] = Array.isArray(constraint?.bones) ? constraint.bones.filter((name: unknown) => typeof name === "string") : [];
+      if (chain.length < 2) {
+        errors.push({ level: "error", code: "ik-chain", where, message: `IK 的骨骼链至少要有两根骨，当前 ${chain.length} 根` });
+        continue;
+      }
+      for (const name of chain) {
+        if (!boneNames.has(name)) {
+          errors.push({ level: "error", code: "ik-bone", where, message: `IK 链引用了不存在的骨骼「${name}」，运行时这个约束会被丢掉` });
+        }
+      }
+      // 末端骨必须有长度：它定义了「骨尖」这一端，长度为 0 时目标点无处安放。
+      const tipLength = lengthOf.get(chain[chain.length - 1]) ?? 0;
+      if (tipLength <= 0.01) {
+        errors.push({
+          level: "error",
+          code: "ik-bone-length",
+          where,
+          message: `IK 链末端「${chain[chain.length - 1]}」长度为 0：骨尖与骨骼原点重合，余弦定理会除以 0`
+        });
+      }
+      if (typeof constraint?.target !== "string" || !boneNames.has(constraint.target)) {
+        errors.push({
+          level: "error",
+          code: "ik-target",
+          where,
+          message: `IK 的目标骨「${constraint?.target}」不在骨架里，运行时约束会被丢掉（拖动目标点时手不会跟随）`
+        });
+      } else if (chain.includes(constraint.target)) {
+        errors.push({ level: "error", code: "ik-self", where, message: "IK 的目标骨不能是被约束链上的骨骼（自环）" });
+      }
+      const mix = numOr(constraint?.mix, 1);
+      if (mix < 0 || mix > 1) {
+        errors.push({ level: "error", code: "ik-mix", where, message: `mix（软 IK 权重）必须在 0~1，当前 ${mix}` });
+      }
+    }
+  }
+
   const animations = spine?.animations;
   if (animations === null || typeof animations !== "object") {
     return report(errors, warnings);

@@ -75,6 +75,7 @@ import {
   partLabel,
   rigSlotOf,
   type RigAnimationSettings,
+  type RigConstraint,
   type RigPlacedPart
 } from "./spine.js";
 import { buildPreviewHtml } from "./rigpreview.js";
@@ -367,6 +368,13 @@ export interface RigJob {
    * 只有「Spine 绝对量 / DragonBones 归一化」两处编码发生在导出时。
    */
   animations?: Record<string, RigCustomAnimation>;
+  /**
+   * **IK 约束**（M5）。
+   *
+   * 与 `boneOffsets` 同一个道理：约束是**人（或 AI）给的结构**，自动重跑骨骼
+   * 不会把它冲掉——「重推一遍骨架」推不出「这只手要跟着那个点走」。
+   */
+  constraints?: RigConstraint[];
   /** 拆件质检结论（分割后自动写、可手动重跑）。 */
   qa?: RigQaState;
   reviewMode?: "auto" | "manual";
@@ -811,12 +819,39 @@ function normalizeRigJob(raw: any): RigJob {
       return Object.keys(out).length === 0 ? undefined : out;
     })(),
     qa: normalizeQaState(raw?.qa),
+    constraints: normalizeConstraints(raw?.constraints),
     log: Array.isArray(raw?.log) ? raw.log.slice(-200) : []
   };
 }
 
-/** 读盘时的质检状态归一化：字段缺失/手改过都不该让整个任务读不出来。 */
-function normalizeQaState(raw: any): RigQaState | undefined {
+/**
+ * 读盘时的 IK 约束归一化。
+ *
+ * 骨架那一侧还有一道更严的校验（`validateSpineWire`），这里只保证「读得出来、
+ * 字段类型对」——盘上的数据可能是手改的，不能让一条写坏的约束把整个任务卡死。
+ */
+function normalizeConstraints(raw: unknown): RigConstraint[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: RigConstraint[] = [];
+  for (const entry of raw) {
+    if (entry === null || typeof entry !== "object") continue;
+    const value = entry as any;
+    if (typeof value.name !== "string" || value.name === "") continue;
+    if (typeof value.bone !== "string" || value.bone === "") continue;
+    out.push({
+      type: "ik",
+      name: value.name,
+      bone: value.bone,
+      target: typeof value.target === "string" && value.target !== "" ? value.target : `${value.name}-target`,
+      chain: Math.max(1, Math.min(8, Math.round(num(value.chain, 1)))),
+      bendPositive: value.bendPositive !== false,
+      weight: Math.max(0, Math.min(1, num(value.weight, 1)))
+    });
+  }
+  return out.length === 0 ? undefined : out;
+}
+
+/** 读盘时的质检状态归一化：字段缺失/手改过都不该让整个任务读不出来。 */function normalizeQaState(raw: any): RigQaState | undefined {
   if (raw === null || typeof raw !== "object") return undefined;
   if (typeof raw.summary !== "string") return undefined;
   return {
@@ -1089,6 +1124,14 @@ export function rigSnapshot(job: RigJob, origin = "") {
        * 具体的关键帧数据走 `getRigAnimation` 按需取，不塞进每 2 秒轮询的快照里。
        */
       customAnimations: Object.keys(job.animations ?? {}),
+      /**
+       * IK 约束（M5）。
+       *
+       * 连同**自动补出来的目标骨**一起给：界面要显示「这个点可以拖」，
+       * 而目标骨不在部件表里，界面无从推断。
+       */
+      constraints: job.constraints ?? [],
+      constraintTargets: (job.constraints ?? []).map((entry) => entry.target),
       animationPresets: RIG_ANIMATIONS.map((preset) => ({
         id: preset.id,
         label: preset.label,
@@ -2195,6 +2238,69 @@ export async function resetRigAnimation(jobId: string, id: string): Promise<{ to
 /** 当前参与骨架的部件名（= 骨骼名，root 除外）。 */
 function boneNamesOf(job: RigJob): string[] {
   return job.parts.filter((part) => part.status === "ready" && part.hidden !== true).map((part) => part.name);
+}
+
+// ── IK 约束（M5）────────────────────────────────────────────────────────
+
+/**
+ * 写入 / 覆盖 IK 约束。
+ *
+ * 不传 `constraints` 的那条会被删掉；传了的整条替换。约束是**结构**（不是动画），
+ * 所以改动会作废骨骼与图集——骨架的求值链里多了一步求解。
+ */
+export async function setRigConstraints(
+  jobId: string,
+  patches: Array<Partial<RigConstraint> & { name: string }>,
+  options: { by?: "ai" | "human" } = {}
+): Promise<{ touched: number }> {
+  const job = await readRigJob(jobId);
+  if (job === undefined) throw new Error(`任务不存在：${jobId}`);
+  const current = [...(job.constraints ?? [])];
+  let touched = 0;
+  for (const patch of patches) {
+    const index = current.findIndex((entry) => entry.name === patch.name);
+    if (patch.type === "none" as unknown as "ik") {
+      if (index >= 0) { current.splice(index, 1); touched++; }
+      continue;
+    }
+    const merged: RigConstraint = {
+      type: "ik",
+      name: patch.name,
+      bone: patch.bone ?? (index >= 0 ? current[index].bone : ""),
+      target: patch.target ?? (index >= 0 ? current[index].target : `${patch.name}-target`),
+      chain: Math.max(1, Math.min(8, Math.round(num(patch.chain, index >= 0 ? current[index].chain : 1)))),
+      bendPositive: patch.bendPositive ?? (index >= 0 ? current[index].bendPositive : true),
+      weight: Math.max(0, Math.min(1, num(patch.weight, index >= 0 ? current[index].weight : 1)))
+    };
+    if (merged.bone === "") throw new Error(`IK「${merged.name}」缺少被约束的骨骼`);
+    if (index >= 0) current[index] = merged;
+    else current.push(merged);
+    touched++;
+  }
+  job.constraints = current.length === 0 ? undefined : current;
+  invalidateFrom(job, "rig");
+  appendJobLog(
+    job.log,
+    "info",
+    `${options.by === "ai" ? "AI" : "手工"}编辑 IK 约束：${patches.map((patch) => patch.name).join("、")}`
+  );
+  await writeRigJob(job);
+  return { touched };
+}
+
+/** 清除 IK 约束（全部，或点名几条）。 */
+export async function resetRigConstraints(jobId: string, names?: string[]): Promise<{ touched: number }> {
+  const job = await readRigJob(jobId);
+  if (job === undefined) throw new Error(`任务不存在：${jobId}`);
+  const current = [...(job.constraints ?? [])];
+  const targets = names === undefined || names.length === 0 ? current.map((entry) => entry.name) : names;
+  const next = current.filter((entry) => !targets.includes(entry.name));
+  const touched = current.length - next.length;
+  job.constraints = next.length === 0 ? undefined : next;
+  invalidateFrom(job, "rig");
+  appendJobLog(job.log, "info", touched > 0 ? `已清除 ${touched} 条 IK 约束` : "没有需要清除的 IK 约束");
+  await writeRigJob(job);
+  return { touched };
 }
 
 // ── 手工骨骼偏移（三通道的中间那一层）─────────────────────────────────
@@ -3437,7 +3543,9 @@ export async function buildRigOutput(jobId: string): Promise<void> {
       animationIds: job.settings.animations,
       animationSettings: job.animationSettings,
       // 手工编辑过的动画顶掉预设实例。传的是**简写**，转换只发生一次。
-      customAnimations: job.animations as any
+      customAnimations: job.animations as any,
+      // IK 约束：目标骨不存在时 buildSkeleton 会补一根可拖的点。
+      constraints: job.constraints
     });
 
     // **写盘之前先校验 wire format**。这四条地雷的共同特征是「插件里一路绿灯，

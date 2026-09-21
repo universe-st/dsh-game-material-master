@@ -1204,6 +1204,102 @@ console.log("=== 14. 拆件质检 ===");
   check("隐藏之后的部件数不再超标", withHidden.ok, withHidden.summary);
 }
 
+console.log("=== 15. IK 约束（M5）===");
+{
+  const ikSkeleton = buildSkeleton({
+    canvasWidth: W,
+    canvasHeight: H,
+    parts: [
+      { name: "torso", file: "torso.png", x: 260, y: 180, width: 120, height: 160, scale: 1, rotation: 0, z: 0 },
+      { name: "left-upper-arm", file: "ua.png", x: 300, y: 320, width: 50, height: 130, scale: 1, rotation: 0, z: 1 },
+      { name: "left-lower-arm", file: "la.png", x: 300, y: 450, width: 46, height: 130, scale: 1, rotation: 0, z: 2 }
+    ],
+    animationIds: ["idle"],
+    constraints: [
+      { type: "ik", name: "ik-left-arm", bone: "left-lower-arm", target: "arm-target", chain: 1, bendPositive: true, weight: 1 }
+    ]
+  });
+
+  check("骨架里输出了 ik 段", Array.isArray(ikSkeleton.spine.ik) && ikSkeleton.spine.ik.length === 1);
+  const ik = ikSkeleton.spine.ik[0];
+  check("ik.bones 是从根到末端的骨骼名（含末端）",
+    ik.bones.join(",") === "left-upper-arm,left-lower-arm", ik.bones.join(","));
+  check("ik.target 指向目标骨", ik.target === "arm-target", ik.target);
+  check("ik 带 mix / bendPositive / compress / stretch / uniform",
+    ik.mix === 1 && ik.bendPositive === true && ik.compress === false && ik.stretch === false && ik.uniform === false);
+  check("目标骨被自动补进骨架", ikSkeleton.spine.bones.some((b) => b.name === "arm-target" && b.length === 0));
+
+  // 目标骨必须落在链末端的**骨尖**上：加上约束的那一刻姿态不该跳。
+  {
+    const byName = new Map(ikSkeleton.spine.bones.map((b) => [b.name, b]));
+    const worldOfBone = (name) => {
+      const bone = byName.get(name);
+      const parent = bone.parent === undefined ? undefined : worldOfBone(bone.parent);
+      if (parent === undefined) return { x: bone.x, y: bone.y, rot: (bone.rotation * Math.PI) / 180 };
+      const rad = parent.rot;
+      return {
+        x: parent.x + bone.x * Math.cos(rad) - bone.y * Math.sin(rad),
+        y: parent.y + bone.x * Math.sin(rad) + bone.y * Math.cos(rad),
+        rot: rad + (bone.rotation * Math.PI) / 180
+      };
+    };
+    const tip = worldOfBone("left-lower-arm");
+    const tipX = tip.x - Math.sin(tip.rot) * byName.get("left-lower-arm").length;
+    const tipY = tip.y + Math.cos(tip.rot) * byName.get("left-lower-arm").length;
+    const target = byName.get("arm-target");
+    check("目标骨落在链末端的骨尖上（加约束时姿态不跳）",
+      Math.hypot(target.x - tipX, target.y - tipY) < 0.02,
+      `目标 (${target.x},${target.y}) vs 骨尖 (${tipX.toFixed(2)},${tipY.toFixed(2)})`);
+  }
+
+  // 没有约束时不该凭空出现 ik 段与目标骨。
+  {
+    const plain = buildSkeleton({
+      canvasWidth: W, canvasHeight: H,
+      parts: [{ name: "head", file: "h.png", x: 200, y: 100, width: 80, height: 90, scale: 1, rotation: 0, z: 0 }],
+      animationIds: ["idle"]
+    });
+    check("没有约束时不输出 ik 段", plain.spine.ik === undefined);
+  }
+
+  // DragonBones 侧：同一个约束换一种写法（末端骨 + chain），两边必须指同一件事。
+  {
+    const db = buildDragonBonesSkeleton({
+      name: "ik", canvasWidth: W, canvasHeight: H, spine: ikSkeleton.spine, animations: ikSkeleton.animationsRaw
+    });
+    const dbIk = db.armature[0].ik;
+    check("DragonBones 导出了 ik", Array.isArray(dbIk) && dbIk.length === 1);
+    check("DragonBones 的 bone 是链末端、chain 不含末端自己",
+      dbIk[0].bone === "left-lower-arm" && dbIk[0].chain === 1 && dbIk[0].target === "arm-target",
+      JSON.stringify(dbIk[0]));
+    check("DragonBones 保留了弯曲方向与权重", dbIk[0].bendPositive === true && dbIk[0].weight === 1);
+  }
+
+  // 正例：这份骨架必须过校验器。
+  check("带 IK 的骨架通过 validateSpineWire", validateSpineWire(ikSkeleton.spine).ok,
+    validateSpineWire(ikSkeleton.spine).errors.map((e) => `${e.where} ${e.message}`).join("；"));
+
+  // 反例：每一条坏约束都要被抓住——否则校验器就是摆设。
+  const mutateIk = (fn) => {
+    const copy = JSON.parse(JSON.stringify(ikSkeleton.spine));
+    fn(copy.ik[0], copy);
+    return validateSpineWire(copy);
+  };
+  check("抓住「IK 链引用了不存在的骨骼」", !mutateIk((c) => { c.bones = ["nope", "left-lower-arm"]; }).ok);
+  check("抓住「目标骨不在骨架里」", !mutateIk((c) => { c.target = "no-such-bone"; }).ok);
+  check("抓住「目标骨在链上（自环）」", !mutateIk((c) => { c.target = "left-upper-arm"; }).ok);
+  // 只有**末端骨**的长度是必须的：它定义了「骨尖」这一端。父骨那一段用的是
+  // 「父骨原点到子骨原点的实际距离」，不依赖父骨的 length。
+  check("抓住「链末端骨骼长度为 0」", !mutateIk((c, spine) => {
+    spine.bones.find((b) => b.name === "left-lower-arm").length = 0;
+  }).ok);
+  check("父骨长度为 0 但末端正常时不算错（第一段用实际距离）", mutateIk((c, spine) => {
+    spine.bones.find((b) => b.name === "left-upper-arm").length = 0;
+  }).ok);
+  check("抓住「链不足两根骨」", !mutateIk((c) => { c.bones = ["left-lower-arm"]; }).ok);
+  check("抓住「mix 越界」", !mutateIk((c) => { c.mix = 1.5; }).ok);
+}
+
 console.log("");
 if (failures === 0) {
   console.log("全部通过 ✓");

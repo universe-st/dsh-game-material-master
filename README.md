@@ -800,7 +800,7 @@ npm run build          # tsc → lib/，并剥掉浏览器束结尾的 export {}
 node scripts/verify-minimax.mjs    # MiniMax 协议层（85 项，含请求体逐字段断言）
 node scripts/verify-pipeline.mjs   # 抽帧/抠像/合成链路（30 项，含回归用例）
 node scripts/verify-host.mjs       # 宿主冒烟（237 项，真实 cordis + 真实 HTTP）
-node scripts/verify-client.mjs     # 浏览器半区契约（197 项：阶段 ctx 键必须被转发、每个生成类调用点都带 loading 反馈、手动装配的四个坑、时间轴与拆件质检面板）
+node scripts/verify-client.mjs     # 浏览器半区契约（211 项：阶段 ctx 键必须被转发、每个生成类调用点都带 loading 反馈、手动装配的四个坑、时间轴 / 拆件质检 / IK 约束组件）
 node scripts/verify-feedback.mjs   # 浏览器半区渲染（87 项：真加载 lib/client.js，断言遮罩真的出现 / 空闲时真的不出现 / 深链接点击真的切面板）
 node scripts/verify-tools.mjs      # 对话调用面（93 项：工具 schema、方法覆盖、固定流程、审核模式、深链接契约、骨骼动画 status/review 渲染）
 node scripts/verify-live-bundle.mjs # 运行中的宿主是否已在提供新束（走 /plugins/events 拿真实 graph，再按图里的 URL 取回）

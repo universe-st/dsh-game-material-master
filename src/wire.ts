@@ -268,6 +268,32 @@ const runRigQaSchema = z.object({
   expectedParts: z.number().int().positive().max(200).optional()
 });
 /**
+ * IK 约束（M5）。
+ *
+ * `chain` 是「链长」：1 = 末端骨 + 它的父级两根骨。目标骨不在骨架里时宿主会自动
+ * 补一根可拖的点——让用户手工去建那样一根骨头是没有意义的负担。
+ */
+const setRigConstraintsSchema = z.object({
+  jobId: z.string(),
+  constraints: z.array(
+    z.object({
+      name: z.string(),
+      bone: z.string(),
+      target: z.string().optional(),
+      chain: z.number().int().min(1).max(8).optional(),
+      bendPositive: z.boolean().optional(),
+      /** 软 IK 权重 0~1。 */
+      weight: z.number().min(0).max(1).optional()
+    })
+  ),
+  by: z.enum(["ai", "human"]).optional()
+});
+const resetRigConstraintsSchema = z.object({
+  jobId: z.string(),
+  /** 不传或传空数组 = 清空全部约束。 */
+  names: z.array(z.string()).optional()
+});
+/**
  * 贴图版本（阶段⑦）。
  *
  * 每一次换色 / 重绘 / 手工上传都**新增一版**，永不覆盖原图——于是「这张不行
@@ -442,6 +468,8 @@ export const METHODS: MethodSpec[] = [
   { method: "saveRigAnimation", payload: saveRigAnimationSchema, result: jsonObject },
   { method: "resetRigAnimation", payload: resetRigAnimationSchema, result: jsonObject },
   { method: "runRigQa", payload: runRigQaSchema, result: jsonObject },
+  { method: "setRigConstraints", payload: setRigConstraintsSchema, result: jsonObject },
+  { method: "resetRigConstraints", payload: resetRigConstraintsSchema, result: jsonObject },
   { method: "tintRigParts", payload: tintRigPartsSchema, result: jsonObject },
   { method: "uploadRigTexture", payload: uploadRigTextureSchema, result: jsonObject },
   { method: "setRigTextureVersion", payload: setRigTextureVersionSchema, result: jsonObject },
