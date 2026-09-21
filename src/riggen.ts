@@ -715,11 +715,7 @@ export function rigSnapshot(job: RigJob, origin = "") {
       slots: job.rig.slots,
       animations: job.rig.animations ?? [],
       warnings: job.rig.warnings ?? [],
-      error: job.rig.error,
-      /** 上一次成功构建的骨骼表（含每根的手工偏移），界面用它画骨骼编辑器。 */
-      boneList: job.rig.boneList ?? [],
-      /** 手工偏移的**当前真源**：即使骨骼还没重跑，界面上也要能看到自己调过什么。 */
-      boneOffsets: job.boneOffsets ?? {}
+      error: job.rig.error
     },
     {
       stage: "atlas" as const,
@@ -739,6 +735,12 @@ export function rigSnapshot(job: RigJob, origin = "") {
     module: "rig" as const,
     id: job.id,
     name: job.name,
+    /**
+     * 任务最后更新时间。客户端把它放在本地草稿的重置依赖里
+     * （`useEffect(..., [job.id, job.updatedAt])`）——缺了它，服务端状态变了
+     * 界面也不会清掉旧草稿，看起来就像「改了没反应」。
+     */
+    updatedAt: job.updatedAt,
     reviewMode: job.reviewMode ?? null,
     assetBase,
     /**
@@ -802,7 +804,15 @@ export function rigSnapshot(job: RigJob, origin = "") {
       bones: job.rig.bones,
       slots: job.rig.slots,
       animations: job.rig.animations ?? [],
-      warnings: job.rig.warnings ?? []
+      warnings: job.rig.warnings ?? [],
+      /**
+       * 上一次成功构建的骨骼表（含每根的手工偏移），界面用它画骨骼编辑器。
+       * 放在顶层 `rig` 而不是 `stages[]` 里：客户端读的是前者，
+       * 两个形状各拼一份的话字段名迟早会漂移（这个坑本项目以前踩过）。
+       */
+      boneList: job.rig.boneList ?? [],
+      /** 手工偏移的**当前真源**：骨骼还没重跑时，界面上也要能看到自己调过什么。 */
+      boneOffsets: job.boneOffsets ?? {}
     },
     atlas: {
       status: job.atlas.status,

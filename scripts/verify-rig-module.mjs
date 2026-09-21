@@ -428,7 +428,10 @@ check("带运行日志", Array.isArray(view.log));
 // 逐条对着真实视图核对，字段改名 / 少返回都会立刻失败。
 {
   const clientSource = await readFile(new URL("../src/client.ts", import.meta.url), "utf8");
-  const start = clientSource.indexOf("function RigModule(");
+  // ⚠️ 扫描必须从**最早**的 rig 组件开始：曾经只从 `function RigModule(` 切起，
+  // 结果定义在它前面的 `RigBoneEditor` 读 `job.rig.boneList` 完全没被扫到，
+  // 而宿主恰好没在快照顶层 `rig` 里返回这个字段 —— 界面上骨骼编辑器就永远不渲染。
+  const start = clientSource.indexOf("function RigSemanticsPanel(");
   const body = clientSource.slice(start, clientSource.indexOf("// ── 设置页", start));
   const topLevel = new Set(Object.keys(view));
   const containers = { parts: view.parts[0], layout: view.layout, rig: view.rig, atlas: view.atlas, stages: view.stages[0], sheet: view.sheet, review: view.review };
@@ -442,21 +445,53 @@ check("带运行日志", Array.isArray(view.log));
     missing.length === 0,
     missing.length === 0 ? "" : `缺：${[...new Set(missing)].join("、")}`
   );
+  // 变量名 → 它实际指向的视图样本。
+  //
+  // 只保留**确实是视图对象**的两个名字：
+  //   · `part`  —— `job.parts.map((part) => …)`；
+  //   · `stage` —— `rigStageOf(job, key)`，形状与 `view.stages[0]` 一致。
+  // `item` / `current` / `entry` / `pt` 在装配台里是本地草稿与拖拽状态
+  // （`item.x`、`current.startX`、`entry.key`），拿它们去比视图键只会产生假失败。
+  const variableSamples = {
+    part: view.parts[0],
+    stage: view.stages[0]
+  };
+  const JS_MEMBERS = new Set([
+    "length", "map", "filter", "find", "findIndex", "some", "every", "forEach",
+    "reduce", "slice", "includes", "toString", "toFixed", "getBoundingClientRect",
+    "push", "join", "sort"
+  ]);
   const missingNested = [];
-  for (const [container, sample] of Object.entries(containers)) {
+  for (const match of body.matchAll(/(?:\$\{)?(part|stage)\??\.([A-Za-z_][A-Za-z0-9_]*)/g)) {
+    const [, variable, field] = match;
+    if (JS_MEMBERS.has(field)) continue;
+    const sample = variableSamples[variable];
     if (sample === undefined) continue;
-    const keys = new Set(Object.keys(sample));
-    const pattern = new RegExp(`(?:$\\{)?(?:part|stage|entry|item|current|pt)\\?\\.([A-Za-z_][A-Za-z0-9_]*)`, "g");
-    for (const match of body.matchAll(pattern)) {
-      const field = match[1];
-      if (!keys.has(field)) missingNested.push(`${container}.${field}`);
-    }
+    if (!(field in sample)) missingNested.push(`${variable}.${field}`);
   }
   check(
     "RigModule 读取的子字段视图里也都有",
     missingNested.length === 0,
     missingNested.length === 0 ? "" : `可能缺：${[...new Set(missingNested)].join("、")}`
   );
+
+  // 上面两条是「扫源码里的字段名」的近似手段，对 `x.map(...)` / `x.length` /
+  // `x.getBoundingClientRect()` 这类成员访问会误报。真正容易漏的是
+  // **某个面板读了 job.<容器>.<字段> 而宿主没返回**——它不报错，只是那块界面
+  // 永远不渲染（骨骼编辑器就踩过这个坑）。这里对每个「界面确实依赖」的容器字段
+  // 做精确断言，比扩正则更可靠。
+  const requiredContainerFields = [
+    ["rig", "boneList"],
+    ["rig", "boneOffsets"],
+    ["rig", "preview"],
+    ["rig", "skeleton"],
+    ["layout", "items"],
+    ["atlas", "text"]
+  ];
+  const missingExact = requiredContainerFields
+    .filter(([container, field]) => view[container] === undefined || view[container][field] === undefined)
+    .map(([container, field]) => `${container}.${field}`);
+  check("界面依赖的容器字段视图里都有", missingExact.length === 0, missingExact.join("、"));
 }
 
 console.log("=== 7. 视觉先验（自动摆位的关键入口） ===");
