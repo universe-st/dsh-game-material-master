@@ -323,6 +323,9 @@ const CALL_DESCRIPTION = [
   "  saveRigJob({jobId,name?,sheetPrompt?,suffix?,resetSheetPrompt?,settings?,approved?,stage?parts|layout|rig|atlas,part?}) /",
   "  uploadRigSource({jobId,name,data:角色整图}) / uploadRigPart({jobId,name:部件名,data:部件PNG}) / removeRigPart({jobId,name}) /",
   "  setRigPartVisibility({jobId,name,hidden}) / saveRigLayoutItem({jobId,name,x?,y?,width?,height?,rotation?,z?}) /",
+  "  setRigSemantics({jobId,parts:[{name,role?,parent?,proximal?,distal?,tags?}]})【语义：这块是什么、挂在谁身上、骨骼从哪端伸到哪端】/",
+  "  setRigBoneOffsets({jobId,bones:[{name,x?,y?,rotation?}]}) / resetRigBoneOffsets({jobId,names?})【手工骨骼偏移，重跑骨骼不会覆盖它】/",
+  "  setRigAnimationSettings({jobId,animations:[{id,duration?,amplitude?}]}) / resetRigAnimationSettings({jobId,ids?})【动画参数】/",
   "  runRigSheet({jobId})【花钱：一次 Seedream 调用，把角色拆成部件摊平图】/ runRigSegment({jobId})【本地分割，免费】/",
   "  runRigLayout({jobId,names?})【本地装配定位，免费；只给 names 就只重跑那几个部件】/",
   "  runRigBones({jobId})【本地生成骨架与动画】/ runRigAtlas({jobId})【本地打包图集】",
@@ -767,6 +770,24 @@ const PROMPT_SECTION = [
   "     然后 runRigLayout({jobId}) 重新装配。",
   "实测效果：一张真实立绘从「头被摆到脚下面、16 个部件只有 3 个落在正确区域」变成「结构正确、13/16 落在指定区域」。",
   "先验框给大一点没关系（搜索区域会自动向外放宽 35%），但**别给错区域**——给错了它就会老老实实往错的地方搜。",
+  "",
+  "### 骨骼动画的三层修改：语义 / 骨骼偏移 / 动画参数（都是本地免费，且互不覆盖）",
+  "这三层是**分开存的**，所以你重跑任何一步都不会抹掉另一层的人工改动。优先用它们，",
+  "而不是让用户重新生成整条链路：",
+  "  1. **语义** `setRigSemantics({jobId, parts:[{name, role?, parent?, proximal?, distal?, tags?}]})`",
+  "     —— 决定「这块是什么、挂在谁身上、骨骼从部件的哪一端伸到哪一端」。",
+  "     `getRigJob` 返回的 `parts[].role/parent/proximal/distal` 是当前值，顶层 `semantics` 是校验结果",
+  "     （`errors` 非空时写入会被拒绝并原样返回原因，据此修正后重试即可）。",
+  "     **改语义只作废③骨骼与④图集，②里已经摆好的位置不受影响。**",
+  "  2. **骨骼偏移** `setRigBoneOffsets({jobId, bones:[{name, x?, y?, rotation?}]})`",
+  "     —— 手工微调某根骨头（位移单位是参考图像素，旋转是度）。它与「重新推骨骼」互不覆盖，",
+  "     是「AI 重新想一遍、人调过的不丢」的保证；`resetRigBoneOffsets({jobId, names?})` 回到自动推的姿势。",
+  "  3. **动画参数** `setRigAnimationSettings({jobId, animations:[{id, duration?, amplitude?}]})`",
+  "     —— `amplitude` 统一缩放旋转与位移（动作太大/再夸张一点），`duration` 改循环秒数。",
+  "     改完要 `runRigBones({jobId})` 重算。哪些动作会生成由 `saveRigJob` 的 `settings.animations` 决定。",
+  "  ★ 判断依据：先 `getRigJob` 看 `rig.warnings`（几何推导的告警）、`semantics.errors/warnings`（结构问题）、",
+  "  `atlas.warnings`。**构建失败时先读 `stage.error`**——导出前校验（Spine 4.2 四条地雷、循环接缝、",
+  "  图集越界/缺区域）不通过会直接让那一步失败，并把具体原因写在 error 里。",
   "第 2 步 · 每步都要审：`game_material_review` 拿验收包，逐项看 status / error / 绝对 URL。",
   "第 3 步 · 按审核模式分岔：`auto` → 自己判断没问题就 `game_material_approve` 打通过并进入下一步；",
   "`manual` → 贴出 openUrl 并**停下等用户回复**，只有用户明确说「通过 / 可以」才 `game_material_approve` 并继续。",
@@ -1289,6 +1310,31 @@ function rigNextActions(snapshot: any, stage: string | undefined): string[] {
   }
   if (rig !== undefined && Array.isArray(rig.warnings) && rig.warnings.length > 0) {
     actions.push(`骨骼构建有告警：${rig.warnings.join("；")}`);
+  }
+  if (rig !== undefined && rig.status === "ready") {
+    // 这三层是「AI 与手工共存」的实际落地：任何一层重跑都不会抹掉另外两层的人工改动。
+    const semantics = snapshot.semantics;
+    if (semantics !== undefined && semantics.ok !== false && semantics.confirmed !== true && semantics.count > 0) {
+      actions.push(
+        "语义还没被确认过：`getRigJob` 的 `parts[].role/parent/proximal/distal` 是按名字推断的默认值。" +
+          "看一眼 partsMontagePath（蒙太奇图）就能判断有没有推断错的，用 setRigSemantics 改掉那几条——" +
+          "改语义只作废骨骼与图集，②里已经摆好的位置不受影响"
+      );
+    }
+    const presets = Array.isArray(rig.animationPresets) ? rig.animationPresets : [];
+    const untouched = presets.filter((preset: any) => preset.duration === preset.defaultDuration && preset.amplitude === 1);
+    if (presets.length > 0 && untouched.length === presets.length) {
+      actions.push(
+        "六个动作目前都是预设原值。如果角色的体型/节奏与预设不合（动作太大、循环太快），" +
+          "用 setRigAnimationSettings({jobId, animations:[{id, amplitude, duration}]}) 调，再 runRigBones 重算——" +
+          "幅度作用在缩放前的简写上，所以缓动不会被打乱"
+      );
+    }
+    // 导出前校验不通过会让那一步直接失败，原因写在 error 里。
+    const broken = [pick("rig"), pick("atlas")].filter((entry: any) => entry !== undefined && entry.status === "error");
+    if (broken.length > 0) {
+      actions.push("构建失败多半是**导出前校验**拦下的（Spine 4.2 wire format / 循环接缝 / 图集越界与缺区域）。先读 error 里的具体位置再改，不要盲目重跑");
+    }
   }
   const atlas = pick("atlas");
   if (atlas !== undefined && rig?.status === "ready" && atlas.status !== "ready") {

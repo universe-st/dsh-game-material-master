@@ -440,6 +440,26 @@ async function main() {
   check("提示词提醒计费", /计费/.test(prompt), "");
   check("提示词段有稳定 order（利于 KV 缓存）", Number.isFinite(captured.sections[0]?.order), String(captured.sections[0]?.order));
 
+  // ── 10. 工具描述必须覆盖「模型该怎么用」的那几个方法 ────────────────────
+  // 新增一个 AI 能调的方法、却忘了写进 `game_material_call` 的描述里，
+  // 结果就是「能力做了但模型不知道」——这类漏掉在编译期完全看不出来。
+  {
+    const callTool = (captured.tools ?? []).find((entry) => entry?.name === "game_material_call");
+    const callDescription = JSON.stringify(callTool?.description ?? "");
+    const mustBeDocumented = [
+      "setRigSemantics",
+      "setRigBoneOffsets",
+      "resetRigBoneOffsets",
+      "setRigAnimationSettings",
+      "resetRigAnimationSettings",
+      "setRigLayoutHints"
+    ];
+    const missing = mustBeDocumented.filter((method) => !callDescription.includes(method));
+    check(`骨骼动画的三层修改方法都写进了工具描述（共 ${callDescription.length} 字符）`, missing.length === 0, missing.join("、"));
+    check("提示词说明「重跑不会抹掉人工改动」", /互不覆盖|不会覆盖|不会被覆盖/.test(prompt), "");
+    check("提示词说明构建失败要先读 error", /导出前校验|构建失败/.test(prompt), "");
+  }
+
   await rm(HOME, { recursive: true, force: true });
 
   console.log("");
