@@ -1217,6 +1217,14 @@ export function rigSnapshot(job: RigJob, origin = "") {
        */
       constraints: job.constraints ?? [],
       constraintTargets: (job.constraints ?? []).map((entry) => entry.target),
+      /**
+       * 蒙皮网格与 FFD 变形（M5）。
+       *
+       * 一起给界面，是因为编辑面板必须能回答「这块细分了吗、现在摆幅多大」——
+       * 少一个字段，界面上那个滑杆就只能显示默认值，用户改完看不出到底存了什么。
+       */
+      meshes: job.meshes ?? {},
+      deforms: job.deforms ?? {},
       animationPresets: RIG_ANIMATIONS.map((preset) => ({
         id: preset.id,
         label: preset.label,

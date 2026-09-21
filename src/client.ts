@@ -4833,6 +4833,150 @@
       );
     }
 
+    /**
+     * 蒙皮网格与 FFD 变形面板（M5 的 L1 / L3）。
+     *
+     * 面板刻意做得很薄：网格密度、摆幅、循环时长、固定端四个旋钮 + 一个「给裙摆加飘动」
+     * 的快捷键。**逐帧拖顶点**的编辑器不在这里——那要在对齐了网格的画布上做，
+     * 而画布在预览 iframe 里；先让「裙摆飘起来」有个一键入口，比先做全套编辑器更有用。
+     */
+    function RigMeshPanel({ job, api, run, busy, activeKey }) {
+      const meshes = job.rig?.meshes ?? {};
+      const deforms = job.rig?.deforms ?? {};
+      const boneNames = (job.rig?.boneList ?? []).map((bone) => bone.name).filter((name) => name !== "root");
+      const [pick, setPick] = React.useState("");
+      if (boneNames.length === 0) return null;
+      const targets = Object.keys(meshes);
+      const current = pick === "" ? (targets[0] ?? boneNames[boneNames.length - 1]) : pick;
+      const sizeOf = (name) => {
+        const part = job.parts.find((entry) => entry.name === name);
+        return Math.max(8, Math.round(Math.min(part?.width ?? 80, part?.height ?? 80) * 0.08));
+      };
+
+      const write = (name, patch) =>
+        void run(async () => {
+          await api.setRigMesh({ jobId: job.id, meshes: [{ name, ...patch }], by: "human" });
+          // 网格会改变附件的**类型**（region → mesh），骨骼与图集都得重做。
+          await api.runRigBones({ jobId: job.id });
+        }, `已更新「${name}」的网格`, activeKey);
+
+      return h(
+        "div",
+        { "data-testid": "rig-mesh", style: { marginTop: 12 } },
+        h("h3", { style: { fontSize: 13, margin: "0 0 4px" } },
+          `蒙皮网格（${targets.length > 0 ? `${targets.length} 个部件已细分` : "无"}）`),
+        h("p", { className: "SPR_hint", style: { marginTop: 0 } },
+          "把部件切成网格之后就能对顶点做 FFD 变形——裙摆、披风、长发这类「上缘不动、下缘甩出去」" +
+          "用刚体骨骼是动不出来的。网格是规则三角化，密度越高越软，预览也越吃性能。"),
+        targets.length > 0
+          ? h(
+              "table",
+              { className: "SPR_table", style: { width: "100%", fontSize: 12, borderCollapse: "collapse", marginTop: 8 } },
+              h("thead", null,
+                h("tr", null,
+                  h("th", { style: { textAlign: "left" } }, "部件"),
+                  h("th", { style: { textAlign: "left" } }, "列=行"),
+                  h("th", { style: { textAlign: "left" } }, "摆幅"),
+                  h("th", { style: { textAlign: "left" } }, "循环(s)"),
+                  h("th", { style: { textAlign: "left" } }, "固定端"),
+                  h("th", null, "")
+                )
+              ),
+              h("tbody", null,
+                targets.map((name) => {
+                  const spec = meshes[name];
+                  const wave = deforms[name];
+                  return h(
+                    "tr",
+                    { key: name, "data-testid": `rig-mesh-row-${name}` },
+                    h("td", null, name),
+                    h("td", null,
+                      h(NumField, {
+                        label: "", value: spec.cols, min: 1, max: 16, step: 1,
+                        onChange: (value) => write(name, { cols: value, rows: value })
+                      })
+                    ),
+                    h("td", null, wave === undefined
+                      ? h("button", {
+                          type: "button", className: "SPR_miniBtn",
+                          "data-testid": `rig-mesh-wave-${name}`,
+                          onClick: () => write(name, { deform: { amplitude: sizeOf(name) } })
+                        }, "加飘动")
+                      : h(NumField, {
+                          label: "", value: wave.amplitude, min: 0, max: 200, step: 1,
+                          onChange: (value) => write(name, { deform: { ...wave, amplitude: value } })
+                        })
+                    ),
+                    h("td", null, wave === undefined ? h("span", { style: { opacity: 0.4 } }, "—")
+                      : h(NumField, {
+                          label: "", value: wave.duration, min: 0.2, max: 6, step: 0.1,
+                          onChange: (value) => write(name, { deform: { ...wave, duration: value } })
+                        })
+                    ),
+                    h("td", null, wave === undefined ? h("span", { style: { opacity: 0.4 } }, "—")
+                      : h("select", {
+                          className: "SPR_input",
+                          "data-testid": `rig-mesh-anchor-${name}`,
+                          value: wave.anchor,
+                          onChange: (event) => write(name, { deform: { ...wave, anchor: event.target.value } })
+                        },
+                        h("option", { value: "top" }, "上缘"),
+                        h("option", { value: "bottom" }, "下缘"),
+                        h("option", { value: "none" }, "整体"))
+                    ),
+                    h("td", null,
+                      h(Btn, {
+                        danger: true,
+                        "data-testid": `rig-mesh-del-${name}`,
+                        onClick: () => void run(async () => {
+                          await api.resetRigMesh({ jobId: job.id, names: [name] });
+                          await api.runRigBones({ jobId: job.id });
+                        }, `已取消「${name}」的网格`, activeKey)
+                      }, "取消")
+                    )
+                  );
+                })
+              )
+            )
+          : null,
+        h(
+          "div",
+          { className: "SPR_rigEditorRow", style: { marginTop: 8 } },
+          h("span", { className: "SPR_refRow" }, "加网格"),
+          h("select", {
+            className: "SPR_input",
+            "data-testid": "rig-mesh-pick",
+            value: current,
+            onChange: (event) => setPick(event.target.value)
+          }, boneNames.map((name) => h("option", { key: name, value: name }, name))),
+          h(Btn, {
+            primary: true,
+            "data-testid": "rig-mesh-add",
+            onClick: () => write(current, { cols: 6, rows: 6 })
+          }, "细分这个部件"),
+          // 一键入口：用户想的是「让裙摆飘起来」，不是「给我一个 6×6 网格」。
+          h(Btn, {
+            "data-testid": "rig-mesh-skirt",
+            onClick: () => {
+              const skirt = boneNames.find((name) => name === "hip") ?? boneNames[boneNames.length - 1];
+              write(skirt, { cols: 6, rows: 6, deform: { amplitude: 12, cycles: 1, direction: 0, anchor: "top", duration: 1.6 } });
+            }
+          }, "给裙摆加飘动"),
+          h("span", { className: "SPR_hint" }, "网格与变形都是本地计算，免费")
+        ),
+        targets.length > 0
+          ? h("div", { className: "SPR_rigEditorRow" },
+              h(Btn, {
+                "data-testid": "rig-mesh-clear",
+                onClick: () => void run(async () => {
+                  await api.resetRigMesh({ jobId: job.id });
+                  await api.runRigBones({ jobId: job.id });
+                }, "已清除全部网格与变形", activeKey)
+              }, "清空全部"))
+          : null
+      );
+    }
+
     /** 一行滑杆（换色面板用）。 */
     function RangeRow({ label, value, min, max, step, onChange }) {      return h(
         "label",
@@ -6467,6 +6611,7 @@
                           h(RigAnimationPanel, { job, api, run, busy, activeKey: K_RIG_BONES }),
                           h(RigTimelineEditor, { job, api, run, busy, activeKey: K_RIG_BONES, onRebuild: true }),
                           h(RigConstraintPanel, { job, api, run, busy, activeKey: K_RIG_BONES }),
+                          h(RigMeshPanel, { job, api, run, busy, activeKey: K_RIG_BONES }),
                           h(RigBoneEditor, { job, api, run, busy, activeKey: K_RIG_BONES }),
                           // 两条导出路径同源：Spine 的 skeleton.json 与 DragonBones 的 _ske.json。
                           job.rig?.dragonBones?.skeleton !== null && job.rig?.dragonBones?.skeleton !== undefined

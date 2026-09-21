@@ -537,6 +537,19 @@ function checkRigContracts(text, label) {
     ["清空全部", 'data-testid": "rig-ik-clear"']
   ]) {
     check(`${label}：约束编辑器有${feature}`, text.includes(token), token);
+  }
+  // 蒙皮网格与 FFD 面板（M5）：网格与变形都在这里调，一键入口给「让裙摆飘起来」。
+  for (const [feature, token] of [
+    ["蒙皮面板", 'data-testid": "rig-mesh"'],
+    ["选部件", 'data-testid": "rig-mesh-pick"'],
+    ["细分部件", 'data-testid": "rig-mesh-add"'],
+    ["一键给裙摆加飘动", 'data-testid": "rig-mesh-skirt"'],
+    ["逐部件加飘动", "rig-mesh-wave-"],
+    ["改固定端", "rig-mesh-anchor-"],
+    ["取消单个网格", "rig-mesh-del-"],
+    ["清空全部网格", 'data-testid": "rig-mesh-clear"']
+  ]) {
+    check(`${label}：蒙皮面板有${feature}`, text.includes(token), token);
   }  // 撤销/重做的两处时序陷阱，都是实测撞出来的：  //  ① 把 setHistory([]) 挂在 [job.id, job.updatedAt] 上 —— commit 自己就会改
   //     updatedAt，于是每提交一次就清空撤销栈，撤销按钮永远是灰的；
   //  ② undo 把「改动前」的快照塞进重做栈 —— 重做还原的还是改动前那份，点了没反应。
