@@ -25,7 +25,9 @@ import {
   resizeRgba
 } from "../lib/rigpose.js";
 import { buildSkeleton, buildAtlasText, packAtlas, defaultPartNames, RIG_SLOTS, DEFAULT_DRAW_ORDER } from "../lib/spine.js";
+import { validateAtlas, validateSkeletonAtlasMatch, validateSpineWire } from "../lib/rigvalidate.js";
 import { buildPreviewHtml } from "../lib/rigpreview.js";
+import { readFile } from "node:fs/promises";
 
 let failures = 0;
 function check(name, ok, detail = "") {
@@ -475,15 +477,124 @@ check("骨骼父级顺序正确（父在前）", spine.bones.every((bone, index)
 check("没有骨骼把自己当父级", spine.bones.every((bone) => bone.parent !== bone.name));
 
 console.log("=== 8. 图集打包 ===");
-const sizes = placed.map((item) => ({ name: item.name, width: item.rgba.width, height: item.rgba.height }));
-void sizes;
-const packed = packAtlas(placed.map((item) => ({ name: item.name, width: item.rgba.width, height: item.rgba.height })), 2);
-check("图集为 2 的幂", (packed.width & (packed.width - 1)) === 0 && (packed.height & (packed.height - 1)) === 0, `${packed.width}×${packed.height}`);
-check("全部区域都被放置", packed.placements.length === placed.length);
-check("区域两两不重叠", !packed.placements.some((a, i) => packed.placements.some((b, j) => j > i && a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height)));
-const atlasText = buildAtlasText("skeleton.png", packed.width, packed.height, packed.placements);
+const packed = packAtlas(placed.map((item) => ({ name: item.name, width: item.rgba.width, height: item.rgba.height })), { padding: 2 });
+const page = packed.pages[0];
+check("单页装得下十几件部件", packed.pages.length === 1, `${packed.pages.length} 页`);
+check("图集为 2 的幂", (page.width & (page.width - 1)) === 0 && (page.height & (page.height - 1)) === 0, `${page.width}×${page.height}`);
+check("全部区域都被放置", page.placements.length === placed.length);
+check("区域两两不重叠", !page.placements.some((a, i) => page.placements.some((b, j) => j > i && a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height)));
+const atlasText = buildAtlasText(packed.pages);
 check("atlas 文本首行为页名", atlasText.split("\n")[0] === "skeleton.png");
-check("atlas 文本包含每个区域", packed.placements.every((p) => atlasText.includes(`\n${p.name}\n`)));
+check("atlas 文本包含每个区域", page.placements.every((p) => atlasText.includes(`\n${p.name}\n`)));
+check("未裁剪时 orig 等于 size、offset 为 0", atlasText.includes("  orig: ") && atlasText.includes("  offset: 0, 0"));
+check("图集通过校验", validateAtlas(packed.pages, { expected: placed.map((i) => i.name) }).ok);
+
+console.log("=== 8b. 图集的三个已知缺陷（参考项目都有） ===");
+{
+  // ① 超宽件：参考项目的换行判断只在「放不下」时换行，却从不检查「一件本身就比页宽还宽」，
+  //    于是 paste 静默裁掉超出部分，而 .atlas 里仍写完整的 size。
+  const overwide = packAtlas([{ name: "wide", width: 900, height: 40 }, { name: "small", width: 30, height: 30 }], { padding: 2, maxSize: 4096 });
+  const widePage = overwide.pages[0];
+  const wideItem = widePage.placements.find((p) => p.name === "wide");
+  check("超宽件被完整装进页里（页宽让出空间）", wideItem.x + wideItem.width <= widePage.width, `x=${wideItem.x} w=${wideItem.width} pageW=${widePage.width}`);
+  check("超宽件没有触发越界", validateAtlas(overwide.pages, { expected: ["wide", "small"] }).ok);
+
+  // ② 分页：超过单页上限时开新页，而不是无限长高或静默裁切。
+  const many = Array.from({ length: 12 }, (_, i) => ({ name: `p${i}`, width: 300, height: 300 }));
+  const multi = packAtlas(many, { padding: 2, maxSize: 512 });
+  check("装不下时会分页", multi.pages.length > 1, `${multi.pages.length} 页`);
+  check("每页都不超过上限", multi.pages.every((p) => p.width <= 512 && p.height <= 512), multi.pages.map((p) => `${p.width}×${p.height}`).join(" "));
+  check("分页后所有件都在", multi.pages.reduce((n, p) => n + p.placements.length, 0) === many.length);
+  check("分页后每页内部不越界", validateAtlas(multi.pages, { expected: many.map((i) => i.name), maxSize: 512 }).ok);
+
+  // ③ 真实 orig / offset（裁剪）。
+  const trimmed = packAtlas([{ name: "trimmed", width: 40, height: 50, origWidth: 64, origHeight: 64, offsetX: -12, offsetY: -7 }], { padding: 2 });
+  const trimText = buildAtlasText(trimmed.pages);
+  check("裁剪件写真实 orig", trimText.includes("  orig: 64, 64"));
+  check("裁剪件写真实 offset", trimText.includes("  offset: -12, -7"));
+  check("裁剪件 size 是裁剪后的尺寸", trimText.includes("  size: 40, 50"));
+  check("裁剪件通过校验", validateAtlas(trimmed.pages, { expected: ["trimmed"] }).ok);
+
+  // 越界必须被拦住（参考项目是静默裁切）。
+  const broken = [{ name: "page.png", width: 64, height: 64, placements: [{ name: "a", x: 40, y: 0, width: 40, height: 10 }] }];
+  const brokenReport = validateAtlas(broken, { expected: ["a"] });
+  check("区域越界 → error", !brokenReport.ok && brokenReport.errors.some((e) => e.code === "region-out-of-bounds"), brokenReport.summary);
+
+  // 部件在图集里没有区域 → error（参考项目只打 WARNING）。
+  const missingReport = validateAtlas(packed.pages, { expected: [...placed.map((i) => i.name), "不存在的部件"] });
+  check("缺区域 → error", !missingReport.ok && missingReport.errors.some((e) => e.code === "region-missing"), missingReport.summary);
+}
+
+console.log("=== 8c. Spine 4.2 四条地雷的校验器 ===");
+{
+  const good = validateSpineWire(spine);
+  check("正常生成物校验通过", good.ok, good.errors.map((e) => `${e.where}:${e.message}`).join(" | "));
+
+  // ── 现成的「坏 / 好」夹具 ────────────────────────────────────────────
+  // 来自参考项目 `spine-animation-ai/examples/sombrero/`：两份都声明自己是
+  // 4.2，但 `skeleton.json` 其实是 3.8 写法（用 `angle`、translate 的 curve 只给
+  // 4 个数、控制点是归一化的），`sombrero.json` 才是真正合规的那份。
+  // 仓库里没有任何测试去断言它们的差别——这里补上：校验器必须分得开。
+  {
+    const bad = JSON.parse(await readFile(new URL("./fixtures/spine42/bad-38-style.json", import.meta.url), "utf8"));
+    const badReport = validateSpineWire(bad);
+    const badCodes = new Set(badReport.errors.map((e) => e.code));
+    check("坏夹具（声明 4.2 但用 3.8 写法）被判失败", !badReport.ok, badReport.summary);
+    check("认出 `angle` 写法", badCodes.has("rotate-angle"));
+    check("认出控制点不是绝对量", badCodes.has("curve-not-absolute"));
+    check("认出末帧带 curve", badCodes.has("curve-on-last-frame"));
+
+    const goodFixture = JSON.parse(await readFile(new URL("./fixtures/spine42/good-42-style.json", import.meta.url), "utf8"));
+    const goodReport = validateSpineWire(goodFixture);
+    check("好夹具（真正合规的 4.2）通过", goodReport.ok, goodReport.errors.slice(0, 3).map((e) => `${e.where}:${e.message}`).join(" | "));
+  }
+
+  const baseFrames = () => [
+    { time: 0, value: 0, curve: [0.25, 0, 0.75, 1] },
+    { time: 0.5, value: 10 }
+  ];
+
+  // ① angle
+  const angle = validateSpineWire({ animations: { a: { bones: { b: { rotate: [{ time: 0, angle: 0 }, { time: 1, angle: 5 }] } } } } });
+  check("angle → error", !angle.ok && angle.errors.some((e) => e.code === "rotate-angle"), angle.summary);
+
+  // ② curve 长度：translate 需要 8 个，只给 4 个
+  const shortCurve = validateSpineWire({ animations: { a: { bones: { b: { translate: [{ time: 0, x: 0, y: 0, curve: [0.25, 0, 0.75, 1] }, { time: 1, x: 10, y: 5 }] } } } } });
+  check("translate 只给 4 个控制点 → error", !shortCurve.ok && shortCurve.errors.some((e) => e.code === "curve-length"), shortCurve.summary);
+
+  // ③ 控制点不是绝对量（写成 0..1 归一化）
+  const normalized = validateSpineWire({ animations: { a: { bones: { b: { rotate: [{ time: 100, value: 0, curve: [0.25, 0, 0.75, 1] }, { time: 200, value: 10 }] } } } } });
+  check("归一化控制点 → error", !normalized.ok && normalized.errors.some((e) => e.code === "curve-not-absolute"), normalized.summary);
+
+  // ④ 末帧带 curve
+  const lastCurve = validateSpineWire({ animations: { a: { bones: { b: { rotate: [...baseFrames(), { time: 1, value: 0, curve: [1, 0, 1, 1] }] } } } } });
+  check("末帧带 curve → error", !lastCurve.ok && lastCurve.errors.some((e) => e.code === "curve-on-last-frame"), lastCurve.summary);
+
+  // 合法：stepped + 正确的 8 控制点
+  const legal = validateSpineWire({
+    animations: {
+      a: {
+        bones: {
+          b: {
+            rotate: [{ time: 0, value: 0, curve: "stepped" }, { time: 0.5, value: 3 }],
+            translate: [{ time: 0, x: 0, y: 0, curve: [0.1, 0, 0.3, 2, 0.1, 0, 0.3, 2] }, { time: 0.5, x: 4, y: 2 }]
+          }
+        }
+      }
+    }
+  });
+  check("stepped 与 8 控制点都合法", legal.ok, legal.errors.map((e) => `${e.where}:${e.message}`).join(" | "));
+
+  // 时间不递增
+  const badTime = validateSpineWire({ animations: { a: { bones: { b: { rotate: [{ time: 1, value: 0 }, { time: 1, value: 5 }] } } } } });
+  check("时间不递增 → error", !badTime.ok && badTime.errors.some((e) => e.code === "time-order"), badTime.summary);
+
+  // 骨架 ↔ 图集一致性
+  const mismatch = validateSkeletonAtlasMatch(spine, packed.pages);
+  check("骨架与图集一致", mismatch.ok, mismatch.errors.map((e) => e.where).join("、"));
+  const mismatchBad = validateSkeletonAtlasMatch({ skins: [{ attachments: { slotA: { attMissing: {} } } }] }, packed.pages);
+  check("挂点找不到区域 → error", !mismatchBad.ok && mismatchBad.errors.some((e) => e.code === "attachment-missing-region"), mismatchBad.summary);
+}
 
 console.log("=== 9. 预览 HTML ===");
 const html = buildPreviewHtml({

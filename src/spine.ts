@@ -467,6 +467,17 @@ const TIMELINE_PROPERTIES: Record<string, Array<[string, number]>> = {
 };
 
 /**
+ * 一条时间轴驱动几个属性。
+ *
+ * 这个数字直接决定 bezier 控制点该写 4 个还是 8 个——写错了运行时就会越界读
+ * `undefined`，NaN 顺着骨骼变换扩散，整只骨架渲染一帧后消失（见 `convertTimeline`
+ * 的注释）。所以它必须能被导出前的校验器读到，而不是只活在 `spine.ts` 里。
+ */
+export function timelinePropertyCount(kind: string): number {
+  return TIMELINE_PROPERTIES[kind]?.length ?? 0;
+}
+
+/**
  * 把一条时间轴就地改写成 Spine 4.2 wire format。三个坑（照搬参考项目的注释）：
  *
  * 1. 旋转值写在 `value` 下，不是 `angle`——4.x 运行时遇到 `angle` 会当成 0，骨骼不动。
@@ -853,14 +864,60 @@ export interface AtlasPlacement {
   name: string;
   x: number;
   y: number;
+  /** 在图集里实际占用的尺寸（**裁剪后**的尺寸）。 */
   width: number;
   height: number;
+  /**
+   * 未裁剪的原始尺寸。Spine 用 `orig` 确定渲染尺寸、用 `offset` 把裁剪后的
+   * 区域摆回原位——所以「图集里放的是裁掉透明边的小图」不等于「部件变小了」。
+   *
+   * 缺省等于 `width`/`height`（未裁剪）。
+   */
+  origWidth?: number;
+  origHeight?: number;
+  /** 裁剪偏移，通常是负数（Spine 的 `offset:` 语义）。缺省 `0, 0`。 */
+  offsetX?: number;
+  offsetY?: number;
 }
 
-export interface AtlasPackResult {
+export interface AtlasPage {
+  /** 页面图片名（写进 `.atlas` 的第一行）。 */
+  name: string;
   width: number;
   height: number;
   placements: AtlasPlacement[];
+}
+
+export interface AtlasPageInput {
+  name: string;
+  width: number;
+  height: number;
+  origWidth?: number;
+  origHeight?: number;
+  offsetX?: number;
+  offsetY?: number;
+}
+
+export interface AtlasPackResult {
+  /**
+   * 图集页。绝大多数情况下只有一页；单页装不下（超过 `maxSize`）时才分页——
+   * 参考项目的打包器**没有分页**，超过上限会静默裁切，`.atlas` 里却仍写完整尺寸，
+   * 到引擎里就是错位的图。
+   */
+  pages: AtlasPage[];
+}
+
+export interface AtlasPackOptions {
+  padding?: number;
+  /** 单页最大边长（2 的幂）。超过就分页。默认 4096。 */
+  maxSize?: number;
+  /**
+   * 第一页的图片文件名；多页时第二页起是 `xxx2.png`、`xxx3.png`。
+   *
+   * 由打包器统一命名，而不是留给调用方在外面补——页名写进 `.atlas` 的第一行，
+   * 和磁盘上的文件名必须严格一致，漏了就是「整张图找不到」。
+   */
+  pageName?: string;
 }
 
 function nextPow2(value: number): number {
@@ -879,49 +936,110 @@ function nextPow2(value: number): number {
  * 这里不追求最优 packing：部件数量在十几个量级，行式装箱已经足够紧凑，
  * 而且**结果可复现**——同样的输入永远得到同样的 atlas 坐标，
  * 用户重跑不会因为坐标漂移而误以为「产物变了」。
+ *
+ * 相对参考项目修掉两个缺陷：
+ *   ① **超宽件**：它的换行判断只在 `rx + w + padding > atlasW` 时换行，
+ *      却从不检查「一件本身就比页宽还宽」，于是 `paste` 静默裁掉超出部分，
+ *      `.atlas` 里仍写完整 `size` → 引擎里画出错位图。
+ *      这里把页宽的初值取成 `max(面积估算, 最宽件 + 2×padding)`。
+ *   ② **无分页**：装不下时按 `maxSize` 开新页，而不是无限长高或静默裁切。
  */
-export function packAtlas(sizes: Array<{ name: string; width: number; height: number }>, padding = 2): AtlasPackResult {
-  if (sizes.length === 0) return { width: 1, height: 1, placements: [] };
+export function packAtlas(sizes: AtlasPageInput[], options: AtlasPackOptions = {}): AtlasPackResult {
+  const padding = Math.max(0, Math.round(options.padding ?? 2));
+  const maxSize = Math.max(16, Math.round(options.maxSize ?? 4096));
+  const baseName = options.pageName ?? "skeleton.png";
+  /** 首页用原名；第二页起在扩展名前插序号。 */
+  const pageNameOf = (index: number): string => {
+    if (index === 0) return baseName;
+    const dot = baseName.lastIndexOf(".");
+    return dot === -1 ? `${baseName}${index + 1}` : `${baseName.slice(0, dot)}${index + 1}${baseName.slice(dot)}`;
+  };
+  if (sizes.length === 0) return { pages: [] };
 
   const totalArea = sizes.reduce((sum, item) => sum + item.width * item.height, 0);
-  const estimate = Math.sqrt(totalArea) * 1.3;
-  const atlasWidth = nextPow2(Math.max(estimate, ...sizes.map((item) => item.width + padding * 2)));
+  const widest = Math.max(...sizes.map((item) => item.width + padding * 2));
+  let pageWidth = nextPow2(Math.max(Math.sqrt(totalArea) * 1.3, widest));
+  // 页宽被 maxSize 夹住时，比 maxSize 还宽的件就真的放不下了——这一条由
+  // `validateAtlas` 报出来，这里不静默裁切。
+  if (pageWidth > maxSize) pageWidth = maxSize;
 
   const sorted = [...sizes].sort((a, b) => b.height - a.height || a.name.localeCompare(b.name));
-  const placements: AtlasPlacement[] = [];
-  let cursorX = padding;
-  let cursorY = padding;
-  let rowHeight = 0;
-  let maxWidth = 0;
+  const pages: AtlasPage[] = [];
+  let current: { width: number; height: number; placements: AtlasPlacement[]; cursorX: number; cursorY: number; rowHeight: number; maxWidth: number } = {
+    width: pageWidth,
+    height: 0,
+    placements: [],
+    cursorX: padding,
+    cursorY: padding,
+    rowHeight: 0,
+    maxWidth: 0
+  };
+
+  const flush = (): void => {
+    if (current.placements.length === 0) return;
+    pages.push({
+      name: pageNameOf(pages.length),
+      width: nextPow2(Math.min(Math.max(current.maxWidth, pageWidth), maxSize)),
+      height: nextPow2(current.cursorY + current.rowHeight + padding),
+      placements: current.placements
+    });
+  };
 
   for (const item of sorted) {
-    if (cursorX + item.width + padding > atlasWidth) {
-      cursorX = padding;
-      cursorY += rowHeight + padding;
-      rowHeight = 0;
+    if (current.cursorX + item.width + padding > pageWidth) {
+      current.cursorX = padding;
+      current.cursorY += current.rowHeight + padding;
+      current.rowHeight = 0;
     }
-    placements.push({ name: item.name, x: cursorX, y: cursorY, width: item.width, height: item.height });
-    maxWidth = Math.max(maxWidth, cursorX + item.width + padding);
-    rowHeight = Math.max(rowHeight, item.height);
-    cursorX += item.width + padding;
+    // 换行之后仍然超出本页高度上限 → 开新页。
+    if (current.cursorY + item.height + padding > maxSize) {
+      flush();
+      current = { width: pageWidth, height: 0, placements: [], cursorX: padding, cursorY: padding, rowHeight: 0, maxWidth: 0 };
+    }
+    current.placements.push({
+      name: item.name,
+      x: current.cursorX,
+      y: current.cursorY,
+      width: item.width,
+      height: item.height,
+      origWidth: item.origWidth,
+      origHeight: item.origHeight,
+      offsetX: item.offsetX,
+      offsetY: item.offsetY
+    });
+    current.maxWidth = Math.max(current.maxWidth, current.cursorX + item.width + padding);
+    current.rowHeight = Math.max(current.rowHeight, item.height);
+    current.cursorX += item.width + padding;
   }
+  flush();
 
-  return { width: nextPow2(maxWidth), height: nextPow2(cursorY + rowHeight + padding), placements };
+  return { pages };
 }
 
-/** 生成 Spine `.atlas` 文本（与参考项目 `make_atlas.py` 输出格式一致）。 */
-export function buildAtlasText(pageName: string, width: number, height: number, placements: AtlasPlacement[]): string {
-  const lines = [pageName, `size: ${width},${height}`, "format: RGBA8888", "filter: Linear,Linear", "repeat: none"];
-  for (const item of placements) {
-    lines.push(
-      item.name,
-      "  rotate: false",
-      `  xy: ${item.x}, ${item.y}`,
-      `  size: ${item.width}, ${item.height}`,
-      `  orig: ${item.width}, ${item.height}`,
-      "  offset: 0, 0",
-      "  index: -1"
-    );
+/**
+ * 生成 Spine `.atlas` 文本（与参考项目 `make_atlas.py` 输出格式一致）。
+ *
+ * 与参考项目的差别：`orig` / `offset` 写**真实值**。它恒写 `orig == size` 且
+ * `offset: 0, 0`，等于永远不裁透明边、也永远不记录裁剪偏移；一旦源图有透明边，
+ * 整张图（含空白）都会被塞进图集，白白撑大体积。
+ */
+export function buildAtlasText(pages: AtlasPage[]): string {
+  const lines: string[] = [];
+  for (const page of pages) {
+    lines.push(page.name, `size: ${page.width},${page.height}`, "format: RGBA8888", "filter: Linear,Linear", "repeat: none");
+    for (const item of page.placements) {
+      const origWidth = item.origWidth ?? item.width;
+      const origHeight = item.origHeight ?? item.height;
+      lines.push(
+        item.name,
+        "  rotate: false",
+        `  xy: ${item.x}, ${item.y}`,
+        `  size: ${item.width}, ${item.height}`,
+        `  orig: ${origWidth}, ${origHeight}`,
+        `  offset: ${item.offsetX ?? 0}, ${item.offsetY ?? 0}`,
+        "  index: -1"
+      );
+    }
   }
   return `${lines.join("\n")}\n`;
 }

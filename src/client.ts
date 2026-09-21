@@ -5199,11 +5199,27 @@
                             ),
                             job.atlas?.text !== null && job.atlas?.text !== undefined ? h("a", { className: "SPR_link", href: job.atlas.text, target: "_blank", rel: "noreferrer" }, "查看 skeleton.atlas") : null,
                             job.atlas?.image !== null && job.atlas?.image !== undefined ? h("a", { className: "SPR_link", href: job.atlas.image, download: "skeleton.png" }, "下载 skeleton.png") : null,
-                            job.atlas?.width !== undefined ? h(Chip, { kind: "ready", text: `${job.atlas.width}×${job.atlas.height} · ${job.atlas.regions} 区域` }) : null
+                            job.atlas?.width !== undefined ? h(Chip, { kind: "ready", text: `${job.atlas.width}×${job.atlas.height} · ${job.atlas.regions} 区域${(job.atlas.pages ?? []).length > 1 ? ` · ${job.atlas.pages.length} 页` : ""}` }) : null
                           ),
+                          (job.atlas?.warnings ?? []).length > 0
+                            ? h("p", { className: "SPR_hint", style: { color: "var(--dsw-alias-state-warning-primary, #b45309)" } },
+                                `图集提示：${job.atlas.warnings.join("；")}`)
+                            : null,
                           job.atlas?.url !== null && job.atlas?.url !== undefined
                             ? h("div", { className: "SPR_rigAtlasWrap" }, h("img", { src: job.atlas.url, alt: "atlas" }))
                             : h("p", { className: "SPR_hint", style: { marginTop: 10 } }, job.rig?.status === "ready" ? "点「打包纹理图集」生成 skeleton.png + skeleton.atlas。" : "先完成第③步骨骼构建。"),
+                          // 多页图集：逐页给下载与预览（页名与 .atlas 第一行严格一致）。
+                          (job.atlas?.pages ?? []).length > 1
+                            ? h(
+                                "div",
+                                { className: "SPR_rigEditorRow" },
+                                h("span", { className: "SPR_refRow" }, "分页"),
+                                job.atlas.pages.map((page) =>
+                                  h("a", { key: page.file, className: "SPR_link", href: `/${page.file}`, target: "_blank", rel: "noreferrer" },
+                                    `${page.file.split("/").pop()}（${page.width}×${page.height} · ${page.regions} 区域）`)
+                                )
+                              )
+                            : null,
                           h(
                             "div",
                             { className: "SPR_toolbar", style: { marginTop: 12 } },

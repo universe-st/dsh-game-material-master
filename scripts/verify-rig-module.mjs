@@ -318,6 +318,10 @@ check("preview.html 已生成", await exists(riggen.rigAssetPath(job.id, "rig/pr
 check("骨骼数 = root + 部件数", state.rig.bones === state.parts.length + 1, String(state.rig.bones));
 check("六个动画齐全", (state.rig.animations ?? []).length === 6, (state.rig.animations ?? []).join(","));
 check("没有告警", (state.rig.warnings ?? []).length === 0, (state.rig.warnings ?? []).join(" | "));
+// 证明「导出前校验」真的接在构建流程里，而不只是定义了一个没人调的函数。
+check("构建日志里记了 Spine 4.2 校验通过",
+  state.log.some((entry) => typeof entry.message === "string" && entry.message.includes("Spine 4.2 校验通过")),
+  state.log.slice(-2).map((entry) => entry.message).join(" | "));
 
 const skeleton = JSON.parse(await readFile(riggen.rigAssetPath(job.id, "rig/skeleton.json"), "utf8"));
 check("骨架版本为 4.2", skeleton.skeleton.spine === "4.2.0");
@@ -380,6 +384,25 @@ check("图集区域数 = 部件数", state.atlas.regions === state.parts.length,
     }
   }
   check("挂点尺寸与图集区域一致", mismatch.length === 0, mismatch.join(" | "));
+
+  // ── 图集新契约：页信息、真实 orig/offset、校验提示 ──────────────────
+  check("图集状态里带页信息", Array.isArray(state.atlas.pages) && state.atlas.pages.length >= 1, JSON.stringify(state.atlas.pages));
+  check("首页就是 skeleton.png", state.atlas.pages[0].file === "atlas/skeleton.png", state.atlas.pages[0].file);
+  check("页尺寸与 atlas 状态一致", state.atlas.pages[0].width === state.atlas.width && state.atlas.pages[0].height === state.atlas.height);
+  check("区域总数等于各页之和", state.atlas.pages.reduce((n, p) => n + p.regions, 0) === state.atlas.regions);
+  check("图集校验没有留下 error", state.atlas.error === undefined, state.atlas.error ?? "");
+  {
+    // 每个区域块都必须写 orig 与 offset（参考项目恒写 orig==size / offset 0,0，
+    // 等于永远不裁透明边）。
+    const atlasBody = await readFile(riggen.rigAssetPath(job.id, "atlas/skeleton.atlas"), "utf8");
+    const origLines = atlasBody.match(/^ {2}orig: /gm) ?? [];
+    const offsetLines = atlasBody.match(/^ {2}offset: /gm) ?? [];
+    check("每个区域都有 orig 行", origLines.length === regions.length, `${origLines.length} vs ${regions.length}`);
+    check("每个区域都有 offset 行", offsetLines.length === regions.length, `${offsetLines.length} vs ${regions.length}`);
+    // 这一批部件是全不透明的矩形，不该被裁——裁剪只在真有透明边时发生。
+    const zeroOffsets = atlasBody.match(/^ {2}offset: 0, 0$/gm) ?? [];
+    check("全不透明的部件不会被误裁（offset 全为 0,0）", zeroOffsets.length === regions.length, `${zeroOffsets.length} vs ${regions.length}`);
+  }
 }
 
 console.log("=== 6. 任务视图契约（界面与对话工具共用同一份） ===");
@@ -626,6 +649,47 @@ state = await riggen.readRigJob(job.id);
 check("部件已删除", !state.parts.some((part) => part.name === "left-foot"));
 check("删除后装配记录被清空", Object.keys(state.layout.items).length === 0);
 check("删除后骨骼与图集重置", state.rig.status === "empty" && state.atlas.status === "empty");
+
+console.log("=== 10b. 带透明边的部件会被裁边入图 ===");
+{
+  // 参考项目恒写 `orig == size` 且 `offset: 0, 0`：透明边会被原样塞进图集，
+  // 白白撑大体积。这里换一张四周留白 20px 的部件，验证真的裁了、且偏移算对了。
+  const padded = createRgba(80, 90);
+  texturedRect(padded, 20, 25, 40, 40, [180, 90, 60], 1.1);
+  await riggen.uploadRigPart(job.id, "left-foot.png", encodePng(padded.data, padded.width, padded.height).toString("base64"));
+  // 换图会让下游全部作废，所以按正常流程重跑一遍（都是本地计算，免费）。
+  await riggen.solveRigLayout(job.id);
+  await riggen.buildRigOutput(job.id);
+  await riggen.buildAtlas(job.id);
+  const afterTrim = await riggen.readRigJob(job.id);
+  check("重跑后图集就绪", afterTrim.atlas.status === "ready" && afterTrim.atlas.error === undefined, afterTrim.atlas.error ?? "");
+
+  const text = await readFile(riggen.rigAssetPath(job.id, "atlas/skeleton.atlas"), "utf8");
+  const block = text.split("\nleft-foot\n")[1] ?? "";
+  // 注意：部件先被缩放到**装配尺寸**再裁透明边，所以 orig 是装配尺寸而不是
+  // 上传时的 80×90 —— 这里断言的是相对关系（orig > size、offset 为负），
+  // 而不是写死具体像素。
+  const sizeMatch = / {2}size: (\d+), (\d+)/.exec(block);
+  const origMatch = / {2}orig: (\d+), (\d+)/.exec(block);
+  const offsetMatch = / {2}offset: (-?\d+), (-?\d+)/.exec(block);
+  const [, sizeW, sizeH] = sizeMatch ?? [];
+  const [, origW, origH] = origMatch ?? [];
+  const [, offsetX, offsetY] = offsetMatch ?? [];
+  check("带透明边的部件被裁掉边（orig > size）",
+    Number(origW) > Number(sizeW) && Number(origH) > Number(sizeH),
+    `size=${sizeW}×${sizeH} orig=${origW}×${origH}`);
+  check("裁剪偏移是负的（Spine 的 offset 语义）", Number(offsetX) < 0 && Number(offsetY) < 0, `offset=${offsetX},${offsetY}`);
+  check("offset + size 落在 orig 之内（否则图集告诉引擎的坐标是自相矛盾的）",
+    Number(offsetX) + Number(sizeW) <= Number(origW) && Number(offsetY) + Number(sizeH) <= Number(origH),
+    `${offsetX}+${sizeW} <= ${origW} / ${offsetY}+${sizeH} <= ${origH}`);
+
+  // 挂点的 width/height 仍然是**原尺寸**（= orig），所以渲染结果不变——
+  // 这正是「图集里的图小了，部件没变小」的关键。
+  const spineAfter = JSON.parse(await readFile(riggen.rigAssetPath(job.id, "rig/skeleton.json"), "utf8"));
+  const att = spineAfter.skins[0].attachments["left-foot"]?.["left-foot"];
+  check("挂点尺寸仍是原尺寸（与 orig 一致）", att !== undefined && Math.abs(att.width - afterTrim.layout.items["left-foot"].width) <= 1,
+    att === undefined ? "缺挂点" : `${att.width} vs ${afterTrim.layout.items["left-foot"].width}`);
+}
 
 console.log("=== 11. 清理 ===");
 await riggen.deleteRigJob(job.id);
