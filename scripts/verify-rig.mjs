@@ -23,7 +23,11 @@ import {
   sideBySide,
   toGrayMask,
   resizeRgba,
-  tintRgba
+  tintRgba,
+  padToSquare,
+  maskAndFit,
+  erodeAlpha,
+  imageStats
 } from "../lib/rigpose.js";
 import { buildSkeleton, buildAtlasText, packAtlas, defaultPartNames, RIG_SLOTS, DEFAULT_DRAW_ORDER } from "../lib/spine.js";
 import { validateAnimationLoops, validateAtlas, validateSkeletonAtlasMatch, validateSpineWire } from "../lib/rigvalidate.js";
@@ -689,6 +693,72 @@ console.log("=== 8e. 换色（贴图变体的基础） ===");
 
   check("换色不改尺寸", hue.width === src.width && hue.height === src.height);
   check("原图不被就地修改", src.data[0] === 255 && src.data[4] === 0);
+}
+
+console.log("=== 8f. AI 重绘的三个基础操作 ===");
+{
+  // ① 正方化：细长部件要先补成正方形，模型才不会重新构图。
+  const tall = createRgba(20, 60);
+  for (let y = 10; y < 50; y++) for (let x = 5; x < 15; x++) {
+    const at = (y * 20 + x) * 4;
+    tall.data[at] = 200; tall.data[at + 1] = 40; tall.data[at + 2] = 40; tall.data[at + 3] = 255;
+  }
+  const square = padToSquare(tall);
+  check("补成正方形", square.size === 60 && square.image.width === 60 && square.image.height === 60, `${square.image.width}×${square.image.height}`);
+  check("补边是居中的", square.padX === 20 && square.padY === 0, `pad=${square.padX},${square.padY}`);
+  const centerAt = ((30 * 60) + 30) * 4;
+  check("部件落在正方形中央", square.image.data[centerAt] === 200 && square.image.data[centerAt + 3] === 255);
+  const cornerAt = 0;
+  check("补边是白底且不透明", square.image.data[cornerAt] === 255 && square.image.data[cornerAt + 3] === 255);
+
+  // ② 裁回 + 缩放 + 用原图 alpha 当掩码：轮廓必须保持原样。
+  const fake = createRgba(60, 60, [10, 200, 10, 255]); // 模型交回来的「整张都是绿的」
+  const masked = maskAndFit(fake, tall, square, 20, 60);
+  check("缩放回原尺寸", masked.width === 20 && masked.height === 60, `${masked.width}×${masked.height}`);
+  check("轮廓按原图 alpha 裁掉（模型画的背景被切掉）", masked.data[3] === 0 && masked.data[((30 * 20) + 10) * 4 + 3] === 255,
+    `角 alpha=${masked.data[3]} 中心 alpha=${masked.data[((30 * 20) + 10) * 4 + 3]}`);
+  check("保留模型给的像素颜色", masked.data[((30 * 20) + 10) * 4 + 1] > 150);
+
+  // ②b **模型返回的尺寸几乎总是和补边正方形不同**（Seedream 固定给 2048×2048）。
+  //    不先缩放就直接按 padX/padY 取样，读到的只是大图左上角一块平坦区域——
+  //    症状是「模型明明画对了，我们却拿到一片纯色」。这条断言就是为了钉住它。
+  const bigSame = createRgba(240, 240, [10, 200, 10, 255]); // 240 = 4× 的 60
+  // 部件在补边正方形里占 x∈[25,35)、y∈[10,50)（padX=20），放大 4 倍就是
+  // x∈[100,140)、y∈[40,200)。**只在部件投影区画红块**，这样：
+  //   · 修好之后（先缩放到正方形再裁）中心读到红色；
+  //   · 没修时（直接按 padX/padY 从大图取样）读到的是左上角的绿色。
+  for (let y = 40; y < 200; y++) for (let x = 100; x < 140; x++) {
+    const at = (y * 240 + x) * 4;
+    bigSame.data[at] = 255; bigSame.data[at + 1] = 0; bigSame.data[at + 2] = 0;
+  }
+  const maskedBig = maskAndFit(bigSame, tall, square, 20, 60);
+  const bigCenter = ((30 * 20) + 10) * 4;
+  check("模型返回大图时先缩放再裁（不会读到左上角一片纯色）",
+    maskedBig.data[bigCenter] > 200 && maskedBig.data[bigCenter + 1] < 80,
+    `中心 rgb(${maskedBig.data[bigCenter]},${maskedBig.data[bigCenter + 1]},${maskedBig.data[bigCenter + 2]})`);
+  check("大图路径下轮廓同样保持", maskedBig.data[3] === 0 && maskedBig.data[bigCenter + 3] === 255);
+
+  // ③ 腐蚀 alpha：削掉 AI 部件边缘的白晕。
+  const solid = createRgba(9, 9, [255, 255, 255, 255]);
+  const eroded1 = erodeAlpha(solid, 1);
+  const eroded2 = erodeAlpha(solid, 2);
+  const alphaAt = (image, x, y) => image.data[(y * image.width + x) * 4 + 3];
+  check("腐蚀 1 次把外圈清掉", alphaAt(eroded1, 0, 4) === 0 && alphaAt(eroded1, 4, 4) === 255, `边=${alphaAt(eroded1, 0, 4)} 心=${alphaAt(eroded1, 4, 4)}`);
+  check("腐蚀 2 次清得更深", alphaAt(eroded2, 1, 4) === 0 && alphaAt(eroded2, 4, 4) === 255, `边=${alphaAt(eroded2, 1, 4)} 心=${alphaAt(eroded2, 4, 4)}`);
+  check("半径 0 = 原样", Buffer.compare(erodeAlpha(solid, 0).data, solid.data) === 0);
+  check("腐蚀不改原图", solid.data[3] === 255);
+
+  // ④ 结果健全性：纯色结果必须能被识别出来（否则用户会拿到一版白块贴图）。
+  const blank = createRgba(10, 10, [252, 252, 252, 255]);
+  const blankStats = imageStats(blank);
+  check("纯白图的标准差接近 0", blankStats.stdDev < 2, `stdDev=${blankStats.stdDev.toFixed(2)}`);
+  check("纯白图被判为「没内容」（低于阈值）", blankStats.stdDev < 6);
+  const artwork = createRgba(10, 10, [252, 252, 252, 255]);
+  for (let i = 0; i < 30; i++) { artwork.data[i * 4] = 20; artwork.data[i * 4 + 1] = 40; artwork.data[i * 4 + 2] = 90; }
+  const artStats = imageStats(artwork);
+  check("有内容的图标准差明显更大", artStats.stdDev > 60, `stdDev=${artStats.stdDev.toFixed(1)}`);
+  check("只统计不透明像素", imageStats(createRgba(4, 4, [0, 0, 0, 0])).opaque === 0);
+  check("平均值合理", Math.abs(artStats.meanLuma - (imageStats(artwork).meanLuma)) < 1e-9);
 }
 
 console.log("=== 9. 预览 HTML ===");

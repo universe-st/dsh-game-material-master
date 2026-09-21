@@ -141,6 +141,155 @@ export function tintRgba(src: Rgba, options: TintOptions): Rgba {
   return { data: out, width: src.width, height: src.height };
 }
 
+// ── 逐部件重绘的两个基础操作 ────────────────────────────────────────────
+
+/**
+ * 把一张图**居中放进正方形画布**，并返回裁回来所需的信息。
+ *
+ * 为什么需要它：生图模型会按自己的画幅习惯重排画面（reskin-app 的
+ * `_pad_to_aspect_ratio` 就是为这件事写的——「把『生成模型会改画幅』消灭在
+ * 进入流水线之前」）。部件图往往是细长的（胳膊、腿），直接丢给模型极易被重新
+ * 构图。先补成正方、让模型在正方里画，再按同样的正方裁回来，最后缩回原尺寸，
+ * 位置关系就稳定了。
+ */
+export function padToSquare(
+  src: Rgba,
+  background: [number, number, number] = [255, 255, 255]
+): { image: Rgba; padX: number; padY: number; size: number } {  const size = Math.max(src.width, src.height);
+  const image = createRgba(size, size, [background[0], background[1], background[2], 255]);
+  const padX = Math.floor((size - src.width) / 2);
+  const padY = Math.floor((size - src.height) / 2);
+  for (let y = 0; y < src.height; y++) {
+    for (let x = 0; x < src.width; x++) {
+      const from = (y * src.width + x) * 4;
+      const alpha = src.data[from + 3];
+      if (alpha === 0) continue;
+      const to = ((y + padY) * size + (x + padX)) * 4;
+      image.data[to] = src.data[from];
+      image.data[to + 1] = src.data[from + 1];
+      image.data[to + 2] = src.data[from + 2];
+      image.data[to + 3] = alpha;
+    }
+  }
+  return { image, padX, padY, size };
+}
+
+/**
+ * 按给定的 alpha 掩码裁剪 + 缩放回目标尺寸。
+ *
+ * 这是「AI 重绘」闭环的最后一步：模型交回来的图**尺寸与构图都不可信**，
+ * 所以先按正方形裁回来、缩回原尺寸，再用原图的 alpha 当掩码——
+ * **轮廓保持原样**，模型画出来的任何背景都被切掉。
+ *
+ * 这对本插件尤其重要：装配框与骨骼锚点都绑定在原来的轮廓上，
+ * 轮廓一变，摆好的位置就全错了。
+ *
+ * ⚠️ **`crop` 的坐标是「补边后正方形」的坐标系**（例如 216×216），而模型返回的
+ * 图往往完全是另一个尺寸（Seedream 固定给 2048×2048）。所以这里必须**先把结果
+ * 缩放到正方形尺寸再裁**——不缩放就直接按 `padX/padY` 取样，读到的只是大图左上角
+ * 一小块平坦区域，表现是「模型明明画对了，我们却拿到一片纯色」。
+ * 这个坑很隐蔽：失败症状看起来像模型不行，实际是自己的坐标错了。
+ */
+export function maskAndFit(src: Rgba, mask: Rgba, crop: { padX: number; padY: number; size: number }, targetWidth: number, targetHeight: number): Rgba {
+  // ⓪ 先把模型输出对齐到补边正方形的尺寸。
+  const square = src.width === crop.size && src.height === crop.size
+    ? src
+    : resizeRgba(src, Math.max(1, crop.size), Math.max(1, crop.size));
+
+  // ① 从正方形里裁掉补边，得到与原图同构的矩形。
+  const rect = createRgba(mask.width, mask.height);
+  for (let y = 0; y < mask.height; y++) {
+    for (let x = 0; x < mask.width; x++) {
+      const sx = x + crop.padX;
+      const sy = y + crop.padY;
+      if (sx < 0 || sy < 0 || sx >= square.width || sy >= square.height) continue;
+      const from = (sy * square.width + sx) * 4;
+      const to = (y * mask.width + x) * 4;
+      rect.data[to] = square.data[from];
+      rect.data[to + 1] = square.data[from + 1];
+      rect.data[to + 2] = square.data[from + 2];
+      rect.data[to + 3] = square.data[from + 3];
+    }
+  }
+  // ② 缩回原尺寸。
+  const fitted = resizeRgba(rect, Math.max(1, targetWidth), Math.max(1, targetHeight));
+  // ③ 用原图 alpha 当掩码：轮廓不变，模型的背景被切掉。
+  for (let i = 0; i < fitted.width * fitted.height; i++) {
+    const at = i * 4;
+    const maskAlpha = i < mask.width * mask.height ? mask.data[at + 3] : 0;
+    fitted.data[at + 3] = Math.min(fitted.data[at + 3], maskAlpha);
+  }
+  return fitted;
+}
+
+/**
+ * 腐蚀 alpha（每次是 3×3 的最小值滤波，重复 `radius` 次）。
+ *
+ * 用途：AI 生成的部件边缘几乎总有一圈**白晕**（模型把「纯白背景」和「发光的
+ * 边缘」混在一起）。按半径分档腐蚀掉最外圈，可以显著减轻它。
+ * 参考项目 reskin-app 用的也是这个思路（形态学 erode，且**细部件腐蚀更小**）。
+ */
+export function erodeAlpha(src: Rgba, radius: number): Rgba {
+  if (radius <= 0) return { data: Buffer.from(src.data), width: src.width, height: src.height };
+  let current = Buffer.from(src.data);
+  const { width, height } = src;
+  const next = Buffer.alloc(width * height * 4);
+  for (let step = 0; step < radius; step++) {
+    next.set(current);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        let min = 255;
+        for (let dy = -1; dy <= 1; dy++) {
+          const ny = y + dy;
+          if (ny < 0 || ny >= height) {
+            min = 0;
+            break;
+          }
+          for (let dx = -1; dx <= 1; dx++) {
+            const nx = x + dx;
+            if (nx < 0 || nx >= width) {
+              min = 0;
+              break;
+            }
+            const alpha = current[(ny * width + nx) * 4 + 3];
+            if (alpha < min) min = alpha;
+          }
+          if (min === 0) break;
+        }
+        next[(y * width + x) * 4 + 3] = min;
+      }
+    }
+    current = Buffer.from(next);
+  }
+  return { data: current, width, height };
+}
+
+/**
+ * 图像统计：不透明像素数、平均亮度、亮度标准差。
+ *
+ * 用途是**判定「模型到底画出东西没有」**。实测过一次很有代表性的失败：
+ * 送进去的是一张「浅肤色手 + 白底补边」的图，生图模型直接交回一张纯白——
+ * 如果照单全收，用户拿到的就是一版白块贴图，而且**从版本列表上看不出它坏了**。
+ * 有这组数字就能在落盘前拦住，并说清原因。
+ */
+export function imageStats(src: Rgba, alphaThreshold = 128): { opaque: number; meanLuma: number; stdDev: number } {
+  let opaque = 0;
+  let sum = 0;
+  let sumSquares = 0;
+  for (let i = 0; i < src.width * src.height; i++) {
+    const at = i * 4;
+    if (src.data[at + 3] < alphaThreshold) continue;
+    const luma = (src.data[at] + src.data[at + 1] + src.data[at + 2]) / 3;
+    sum += luma;
+    sumSquares += luma * luma;
+    opaque++;
+  }
+  if (opaque === 0) return { opaque: 0, meanLuma: 0, stdDev: 0 };
+  const mean = sum / opaque;
+  const variance = Math.max(0, sumSquares / opaque - mean * mean);
+  return { opaque, meanLuma: mean, stdDev: Math.sqrt(variance) };
+}
+
 // ── 基础像素操作 ────────────────────────────────────────────────────────
 
 export function createRgba(width: number, height: number, fill: [number, number, number, number] = [0, 0, 0, 0]): Rgba {

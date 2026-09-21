@@ -98,6 +98,14 @@ export interface Config {
   arkBaseUrl: string;
   /** 生图模型 ID，也支持推理接入点 ID（ep-xxxx）。 */
   arkModel: string;
+  /**
+   * **部件重绘**单独用的模型 ID；空串 = 跟随 `arkModel`（默认）。
+   *
+   * 拆件与重绘对模型的要求本来就不同（一个是「按提示词画一整张摊平图」，
+   * 一个是「原地改这一小块、保持轮廓」），分开设置留出了切换空间。
+   * 默认跟随主模型——没有证据表明某个模型在这个任务上系统性更好。
+   */
+  arkRedrawModel: string;
   /** `2K` / `1K` / `4K`，或显式 `宽x高`。 */
   arkSize: string;
   arkWatermark: boolean;
@@ -175,6 +183,8 @@ export const DEFAULT_CONFIG: Config = {
   arkApiKey: "",
   arkBaseUrl: "https://ark.cn-beijing.volces.com/api/v3",
   arkModel: "doubao-seedream-4-0-250828",
+  /** 默认跟随主模型；需要时可在设置里单独指定。 */
+  arkRedrawModel: "",
   arkSize: "2K",
   arkWatermark: false,
   arkTimeoutMs: 180000,
@@ -278,6 +288,7 @@ export function normalizeConfig(input: unknown): Config {
     arkApiKey: asString(raw.arkApiKey, DEFAULT_CONFIG.arkApiKey),
     arkBaseUrl: asString(raw.arkBaseUrl, DEFAULT_CONFIG.arkBaseUrl).replace(/\/+$/, ""),
     arkModel: asString(raw.arkModel, DEFAULT_CONFIG.arkModel),
+    arkRedrawModel: asString(raw.arkRedrawModel, DEFAULT_CONFIG.arkRedrawModel),
     arkSize: asString(raw.arkSize, DEFAULT_CONFIG.arkSize),
     arkWatermark: asBool(raw.arkWatermark, DEFAULT_CONFIG.arkWatermark),
     arkTimeoutMs: asInt(raw.arkTimeoutMs, DEFAULT_CONFIG.arkTimeoutMs, 10000, 900000),

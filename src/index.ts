@@ -8,7 +8,7 @@
 * 另外用 `ctx.webServer` 注册一条 prefix 路由，把项目目录里的图片和视频
 * 直接发给浏览器——否则界面每帧都要靠 RPC 传 base64，又慢又费内存。
 */
-import { createReadStream, statSync } from "node:fs";
+import { createReadStream, readdirSync, statSync } from "node:fs";
 import { mkdir, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -58,18 +58,33 @@ const ROUTE_PREFIX = "/dsh-game-material-master";
  * 本模块**被 import 时**捕获的自身信息，用于 `/_health`。
  *
  * 关键在「被 import 时」：宿主半区是进程启动时冻结的模块图，改了 `lib/*.js` 之后
- * 如果没有真正重新 import，这里的 `mtime` 就还是旧的。于是 `GET
+ * 如果没有真正重新 import，这里的数值就还是旧的。于是 `GET
  * /dsh-game-material-master/_health` 变成一条**廉价且确定**的探针——
  * 用来回答「运行中的宿主到底吃到了哪一版代码」，而不用去猜。
- * （Playwright 端到端测试与 `scripts/verify-live-bundle.mjs` 都依赖它。）
+ *
+ * ⚠️ 别只看 `moduleMtimeMs`：`tsc` 对**内容没变**的输出文件不重写，所以只改
+ * `riggen.js` 时 `index.js` 的 mtime 纹丝不动——曾经拿它当探针，结果误判成
+ * 「宿主没重载」而多花了一次付费调用。`builtAtMs` 取的是**整个产物目录里最新的
+ * 那个 mtime**，任何一次 build 都会让它前进。
  */
-const BOOT_INFO: { module?: string; mtimeMs?: number; bootedAt: number } = (() => {
-  const info: { module?: string; mtimeMs?: number; bootedAt: number } = { bootedAt: Date.now() };
+const BOOT_INFO: { module?: string; moduleMtimeMs?: number; builtAtMs?: number; bootedAt: number } = (() => {
+  const info: { module?: string; moduleMtimeMs?: number; builtAtMs?: number; bootedAt: number } = { bootedAt: Date.now() };
   try {
     const self = fileURLToPath(import.meta.url);
     info.module = basename(self);
-    info.mtimeMs = statSync(self).mtimeMs;
-    void dirname(self);
+    info.moduleMtimeMs = statSync(self).mtimeMs;
+    // 同目录下所有构建产物的最新 mtime。
+    let newest = info.moduleMtimeMs;
+    for (const entry of readdirSync(dirname(self))) {
+      if (!entry.endsWith(".js")) continue;
+      try {
+        const stamp = statSync(join(dirname(self), entry)).mtimeMs;
+        if (stamp > newest) newest = stamp;
+      } catch {
+        /* 单个文件读不到就跳过 */
+      }
+    }
+    info.builtAtMs = newest;
   } catch {
     /* 取不到就只报 bootedAt，探针退化成「进程内不变」仍可用 */
   }
@@ -1144,6 +1159,14 @@ export class GameStudioGateway extends TypertRemoteService {
   async removeRigTextureVersion(payload) {
     const input = asRecord(payload);
     return { ok: true, ...(await riggen.removeRigTextureVersion(asString(input.jobId), asString(input.name), Number(input.version))) };
+  }
+
+  /** AI 逐部件重绘（花钱）。生图要几十秒，所以走后台任务 + `game_material_wait`。 */
+  async runRigRedraw(payload) {
+    const input = asRecord(payload);
+    return riggen.startRigRedraw(asString(input.jobId), asString(input.name), asString(input.prompt), {
+      erode: typeof input.erode === "number" ? input.erode : undefined
+    });
   }
 
   /**

@@ -328,6 +328,7 @@ const CALL_DESCRIPTION = [
   "  setRigAnimationSettings({jobId,animations:[{id,duration?,amplitude?}]}) / resetRigAnimationSettings({jobId,ids?})【动画参数】/",
   "  tintRigParts({jobId,names?|tag?,tint:{hue?,saturation?,lightness?,brightness?,contrast?,rgb?},note?})【换色，落成新版本】/",
   "  uploadRigTexture({jobId,name,data}) / setRigTextureVersion({jobId,name,version}) / removeRigTextureVersion({jobId,name,version})【贴图版本】/",
+  "  runRigRedraw({jobId,name,prompt,erode?})【★花钱：一次 Seedream 调用，用生图模型重绘单个部件】/",
   "  runRigSheet({jobId})【花钱：一次 Seedream 调用，把角色拆成部件摊平图】/ runRigSegment({jobId})【本地分割，免费】/",
   "  runRigLayout({jobId,names?})【本地装配定位，免费；只给 names 就只重跑那几个部件】/",
   "  runRigBones({jobId})【本地生成骨架与动画】/ runRigAtlas({jobId})【本地打包图集】",

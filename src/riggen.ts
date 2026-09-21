@@ -41,7 +41,11 @@ import {
   compositeParts,
   createRgba,
   detectBackground,
+  erodeAlpha,
   groupComponentsByProximity,
+  imageStats,
+  maskAndFit,
+  padToSquare,
   resizeRgba,
   rotateRgba,
   segmentWithLabels,
@@ -82,6 +86,7 @@ import {
   defaultSemanticsOf,
   mergeSemantics,
   validateSemantics,
+  ROLE_NOUNS,
   type PartSemantics,
   type SemanticsIssue
 } from "./rigsemantics.js";
@@ -1454,8 +1459,172 @@ export async function tintRigParts(
   return { touched: parts.length, versions };
 }
 
-/** 手工上传一张贴图顶掉当前版本（同样是**新增一版**，不覆盖）。 */
-export async function uploadRigTexture(
+// ── AI 逐部件重绘（花钱，可选）──────────────────────────────────────────
+
+export const REDRAW_TASK_KEY = "redraw";
+
+/**
+ * 补边用的底色。
+ *
+ * **不能用白色**：部件常有浅色的（浅肤色手、白袜、白围裙），补成白底之后整张图
+ * 几乎是纯白，模型看不到主体，实测会直接交回一张空白图。
+ * 中灰对浅色与深色部件都有对比度，而且这一层底色在结果里会被 alpha 掩码切掉，
+ * 不会污染像素。
+ */
+const REDRAW_PAD_COLOR: [number, number, number] = [128, 128, 128];
+
+/** 结果的最低亮度标准差：低于它就认为「模型没画出内容」。 */
+const MIN_REDRAW_CONTRAST = 6;
+
+/** 一次重绘的提示词。
+ *
+ * 写法上踩过两个真实的坑，注释留在原处免得后人重踩：
+ *
+ *   ① **必须有具体主语**。实测提示词里最具体的一句是「flat clean background of a
+ *      single solid colour」，模型就老老实实交回一张纯色图——补边是白底就返回白、
+ *      换成灰底就返回灰。所以主语（「一只手」这类）由**语义层的角色**给出，
+ *      这比反复强调整体约束有用得多。
+ *   ② **不要叫模型去画背景**。背景在我们的流水线里会被 alpha 掩码切掉，
+ *      提它只会分散模型的注意力。
+ */
+export function buildRedrawPrompt(instruction: string, options: { role?: string } = {}): string {
+  const detail = instruction.trim() === "" ? "keep the original look, only clean it up" : instruction.trim();
+  const noun = ROLE_NOUNS[(options.role ?? "") as keyof typeof ROLE_NOUNS] ?? "body part";
+  return [
+    `A single detached ${noun} of a 2D game character, shown alone on a plain background.`,
+    "",
+    `Repaint it as follows: ${detail}.`,
+    "",
+    "Requirements:",
+    `- draw the ${noun} clearly, filling roughly the same area and position as in the reference image;`,
+    "- keep the same silhouette and pose as the reference image;",
+    "- it is ONE body part only; never assemble a whole character;",
+    "- no text, no watermark, no background scenery.",
+    "",
+    "Negative: blank image, empty canvas, missing subject, full body, multiple connected parts."
+  ].join("\n");
+}
+
+/** 提示词摘要：写进版本的 `note`，回退时能看懂这一版是什么。 */
+function summarizePrompt(prompt: string): string {
+  const flat = prompt.replace(/\s+/g, " ").trim();
+  return flat.length <= 28 ? flat : `${flat.slice(0, 28)}…`;
+}
+
+/**
+ * 用生图模型重绘**单个部件**（花钱：一次 Seedream 调用）。
+ *
+ * 与参考项目 reskin-app 的根本区别：它把**整张 atlas / 整张合成图**丢给模型，
+ * 回来必须再用 SAM / 连通域 / IoU 模板反向切回各个 slot。这里是**一个部件进、
+ * 一个部件出**——所以那一整套反向切分**完全不需要**。
+ *
+ * 三步保证「重绘后位置不乱」：
+ *   ① 先把部件补成**正方形**再送出去（模型会按自己的画幅习惯重排画面）；
+ *   ② 按同样的正方形裁回来、缩回原尺寸；
+ *   ③ 用原图的 **alpha 当掩码**——轮廓保持原样，模型画出来的背景被切掉。
+ * 轮廓不变是硬要求：装配框与骨骼锚点都绑在原来的轮廓上。
+ *
+ * 结果落成**新版本**（`source: "redraw"`），所以「这张不行」随时切回上一版。
+ */
+export async function redrawRigPart(
+  jobId: string,
+  name: string,
+  prompt: string,
+  options: { erode?: number; note?: string } = {}
+): Promise<{ name: string; version: number; width: number; height: number }> {
+  const job = await readRigJob(jobId);
+  if (job === undefined) throw new Error(`任务不存在：${jobId}`);
+  const part = job.parts.find((entry) => entry.name === name);
+  if (part === undefined) throw new Error(`没有这个部件：${name}`);
+  const active = activeVersionOf(part);
+  if (active === undefined) throw new Error(`「${name}」还没有贴图`);
+
+  const config = await loadConfig();
+  if (config.arkApiKey.trim() === "") throw new Error("尚未配置火山方舟 API Key，无法重绘（可以在界面里手工换色或上传替换，都不花钱）");
+
+  const decoded = await decodeToRgba(rigAssetPath(jobId, active.file), 2048);
+  const original: Rgba = { data: decoded.rgba, width: decoded.width, height: decoded.height };
+  const square = padToSquare(original, REDRAW_PAD_COLOR);
+  const dataUri = `data:image/png;base64,${encodePng(square.image.data, square.image.width, square.image.height).toString("base64")}`;
+
+  const redrawModel = config.arkRedrawModel.trim() === "" ? config.arkModel : config.arkRedrawModel.trim();
+  const result = await generateImage({
+    baseUrl: config.arkBaseUrl,
+    apiKey: config.arkApiKey,
+    model: redrawModel,
+    prompt: buildRedrawPrompt(prompt, { role: part.role }),
+    images: [dataUri],
+    size: config.arkSize,
+    watermark: config.arkWatermark,
+    timeoutMs: config.arkTimeoutMs
+  });
+
+  // 模型交回来的图要落盘才能解码（解码器是 ffmpeg，吃文件路径）。
+  const tempFile = join(rigJobDir(jobId), "parts", `.redraw-${Date.now()}.${result.ext}`);
+  await mkdir(join(rigJobDir(jobId), "parts"), { recursive: true });
+  let finished: Rgba;
+  try {
+    await writeFile(tempFile, result.bytes);
+    const raw = await decodeToRgba(tempFile, 2048);
+    const masked = maskAndFit({ data: raw.rgba, width: raw.width, height: raw.height }, original, square, original.width, original.height);
+    // 边缘白晕是这类流程的普遍问题；按半径分档腐蚀最外圈。
+    finished = erodeAlpha(masked, Math.max(0, Math.round(options.erode ?? 1)));
+  } finally {
+    await rm(tempFile, { force: true }).catch(() => undefined);
+  }
+
+  // **落盘前先判断「模型到底画出东西没有」。**
+  // 实测过：送进浅色部件 + 白底补边时，模型会直接交回一张纯白；照单全收的话
+  // 用户拿到的是一版白块贴图，而且从版本列表上看不出它坏了。
+  // 宁可这一次明确失败（日志与错误里说清原因），也不要留下坏数据。
+  const stats = imageStats(finished);
+  if (stats.opaque === 0) {
+    throw new Error("重绘结果在轮廓内没有任何不透明像素，已丢弃（没有新增版本）");
+  }
+  if (stats.stdDev < MIN_REDRAW_CONTRAST) {
+    throw new Error(
+      `重绘结果几乎是纯色（亮度 ${stats.meanLuma.toFixed(0)}、标准差 ${stats.stdDev.toFixed(1)}），` +
+        `模型「${redrawModel}」没有画出内容，已丢弃（没有新增版本）。` +
+        "可以换个更具体的提示词，或在「设置 → 游戏素材大师 → 部件重绘模型」里换一个模型；" +
+        "只是想让颜色变一下的话，「换色」是免费的。"
+    );
+  }
+
+  // 重新读一次：生图可能耗时很久，期间任务可能已经被改过。
+  const fresh = await readRigJob(jobId);
+  if (fresh === undefined) throw new Error(`任务不存在：${jobId}`);
+  const node = fresh.parts.find((entry) => entry.name === name);
+  if (node === undefined) throw new Error(`部件已被删除：${name}`);
+  const created = await addTextureVersion(jobId, node, {
+    source: "redraw",
+    note: options.note ?? summarizePrompt(prompt),
+    rgba: finished
+  });
+  invalidateTextures(fresh);
+  appendJobLog(fresh.log, "info", `已重绘「${name}」（v${created.v}，提示词：${summarizePrompt(prompt)}）`);
+  await writeRigJob(fresh);
+  return { name, version: created.v, width: created.width, height: created.height };
+}
+
+/** 后台执行重绘（生图要几十秒，不能阻塞 RPC）。 */
+export function startRigRedraw(
+  jobId: string,
+  name: string,
+  prompt: string,
+  options: { erode?: number } = {}
+): { started: boolean; reason?: string } {
+  try {
+    assertIdle(jobId, REDRAW_TASK_KEY, "部件重绘");
+  } catch (error) {
+    return { started: false, reason: messageOf(error) };
+  }
+  const started = kick(jobId, REDRAW_TASK_KEY, async () => {
+    await redrawRigPart(jobId, name, prompt, options);
+  });
+  return started ? { started: true } : { started: false, reason: "重绘已在进行中" };
+}
+
+/** 手工上传一张贴图顶掉当前版本（同样是**新增一版**，不覆盖）。 */export async function uploadRigTexture(
   jobId: string,
   name: string,
   base64: string,

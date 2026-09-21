@@ -340,6 +340,29 @@ console.log("=== 1e. 贴图版本（M6）===");
   check("改名后每个版本的文件都在", (await Promise.all(versionsOf(renamed).map((v) => exists(riggen.rigAssetPath(job.id, v.file))))).every(Boolean));
   await riggen.renameRigPart(job.id, "head2", "head");
 
+  // AI 重绘：没配 API Key 时必须**明确报错**，而不是静默留下一版坏贴图。
+  {
+    const before = (await riggen.readRigJob(job.id)).parts.find((p) => p.name === "head2" || p.name === "head");
+    let message = "";
+    try {
+      await riggen.redrawRigPart(job.id, before.name, "换成深蓝色");
+    } catch (error) {
+      message = String(error?.message ?? error);
+    }
+    check("没配 API Key 时重绘明确报错", /API Key/.test(message), message);
+    const after = (await riggen.readRigJob(job.id)).parts.find((p) => p.name === before.name);
+    check("重绘失败不会留下新版本", versionsOf(after).length === versionsOf(before).length);
+    check("重绘提示词强调「保持轮廓」", riggen.buildRedrawPrompt("加高光").includes("same silhouette"));
+    // 提示词必须有**具体主语**：实测只强调约束时模型会交回纯色图。
+    check("重绘提示词用语义角色给出具体主语",
+      riggen.buildRedrawPrompt("加高光", { role: "hand" }).includes("detached hand") &&
+        riggen.buildRedrawPrompt("加高光", { role: "hand" }).includes("the hand") &&
+        !riggen.buildRedrawPrompt("加高光").includes("hand"),
+      "");
+    check("重绘提示词不再叫模型画背景（那句会导致纯色图）",
+      !/flat clean background|solid colour background/i.test(riggen.buildRedrawPrompt("加高光", { role: "hand" })));
+  }
+
   // 视图要把版本列表给界面（否则「切回原版」无从点起）。
   const viewWithTextures = riggen.rigSnapshot(await riggen.readRigJob(job.id));
   const viewHead = viewWithTextures.parts.find((part) => part.name === "head");
