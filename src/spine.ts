@@ -25,6 +25,7 @@
 
 import { createHash } from "node:crypto";
 import { buildRigMesh, buildWaveDeform } from "./rigmesh.js";
+import { pathSegmentLengths, type RigPathSpec } from "./rigpath.js";
 
 // ── 拆件槽位定义 ────────────────────────────────────────────────────────
 
@@ -900,6 +901,8 @@ export interface BuildSkeletonOptions {
   meshes?: Record<string, { cols: number; rows: number }>;
   /** FFD 变形（M5 的 L3）：部件名 → 波形参数。导出时会采样成 deform 时间轴。 */
   deforms?: Record<string, { mode: "wave"; amplitude: number; cycles: number; direction: number; anchor: "top" | "bottom" | "none"; duration: number }>;
+  /** Path 约束（M5）：名字 → 路径 + 沿它排列的骨链。点用**参考图像素**。 */
+  paths?: Record<string, { points: number[]; closed: boolean; bones: string[]; spacing: number; translateMix: number; rotateMix: number }>;
 }
 
 /**
@@ -1340,6 +1343,58 @@ export function buildSkeleton(
     });
   }
 
+  // ── Path 约束 ────────────────────────────────────────────────────────
+  //
+  // Spine 的 path 约束要求目标是一个**带 PathAttachment 的槽位**，所以这里顺手建一个
+  // 无贴图的槽挂在 `root` 上：路径是全局的（当前设计里它不跟随骨骼）。
+  // 槽位没有贴图，渲染器取不到 image 就会跳过，不影响绘制顺序。
+  const pathConstraints: any[] = [];
+  for (const [name, entry] of Object.entries(options.paths ?? {})) {
+    const chain = (entry.bones ?? []).filter((bone) => boneNames.has(bone));
+    if (chain.length === 0) {
+      warnings.push(`Path「${name}」没有可用的骨骼链，已跳过`);
+      continue;
+    }
+    if (entry.points.length < 4) {
+      warnings.push(`Path「${name}」点数不足，已跳过`);
+      continue;
+    }
+    const spec: RigPathSpec = { points: entry.points, closed: entry.closed === true };
+    const lengths = pathSegmentLengths(spec);
+    // 路径点转成**骨骼世界坐标**：槽挂在 root（世界原点），所以 attachment 的顶点
+    // 直接用世界坐标即可，不必再相对某根骨骼做一次逆变换。
+    const vertices: number[] = [];
+    for (let i = 0; i + 1 < entry.points.length; i += 2) {
+      const world = toWorld(entry.points[i], entry.points[i + 1], options.canvasWidth, options.canvasHeight);
+      vertices.push(round(world.x, 3), round(world.y, 3));
+    }
+    const slotName = `path:${name}`;
+    slots.push({ name: slotName, bone: "root", attachment: name });
+    attachments[slotName] = {
+      [name]: {
+        type: "path",
+        vertices,
+        lengths,
+        closed: spec.closed === true,
+        // 恒定速度：让沿路径的采样按**弧长**而不是按段索引走，与预览器的算法一致。
+        constantSpeed: true
+      }
+    };
+    pathConstraints.push({
+      name,
+      order: pathConstraints.length,
+      bones: chain,
+      target: "root",
+      // spacing > 0 是「固定间距」，否则「均匀铺满整条路径」。
+      positionMode: entry.spacing > 0 ? "fixed" : "percent",
+      spacingMode: "length",
+      rotateMode: "tangent",
+      rotation: 0,
+      translateMix: Math.max(0, Math.min(1, num(entry.translateMix, 1))),
+      rotateMix: Math.max(0, Math.min(1, num(entry.rotateMix, 1)))
+    });
+  }
+
   const spine = {
     skeleton: {
       hash,
@@ -1353,6 +1408,7 @@ export function buildSkeleton(
     bones,
     slots,
     ik: ik.length === 0 ? undefined : ik,
+    path: pathConstraints.length === 0 ? undefined : pathConstraints,
     skins: [{ name: "default", attachments }],
     animations
   };

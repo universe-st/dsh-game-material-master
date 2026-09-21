@@ -3900,7 +3900,9 @@ export async function buildRigOutput(jobId: string): Promise<void> {
       // 蒙皮网格：只有列在这里的部件才细分（其余仍走整块贴图渲染）。
       meshes: job.meshes,
       // FFD 变形：导出时被采样成 deform/ffd 时间轴（每个动画各一份、首尾闭合）。
-      deforms: job.deforms
+      deforms: job.deforms,
+      // Path 约束：点用参考图像素，由 buildSkeleton 转成骨骼世界坐标。
+      paths: job.paths
     });
 
     // **写盘之前先校验 wire format**。这四条地雷的共同特征是「插件里一路绿灯，

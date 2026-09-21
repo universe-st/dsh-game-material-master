@@ -1494,6 +1494,82 @@ console.log("=== 17. Path 约束（M5）===");
     return box.minX === 0 && box.minY === 0 && box.maxX === 30 && box.maxY === 40;
   })());
   check("归一化会保留 closed", normalizePath({ points: [0, 0, 10, 10], closed: true }).closed === true);
+
+  // 导出：Spine 的 path 约束要带一个**路径槽位 + PathAttachment**；
+  // DragonBones 要的是「链的第一根 + 目标骨骼」加数字枚举。
+  {
+    const pathed = buildSkeleton({
+      canvasWidth: W,
+      canvasHeight: H,
+      parts: [
+        { name: "torso", file: "torso.png", x: 200, y: 300, width: 120, height: 160, scale: 1, rotation: 0, z: 0 },
+        { name: "left-upper-arm", file: "ua.png", x: 300, y: 320, width: 50, height: 130, scale: 1, rotation: 0, z: 1 },
+        { name: "left-lower-arm", file: "la.png", x: 300, y: 450, width: 46, height: 130, scale: 1, rotation: 0, z: 2 }
+      ],
+      animationIds: ["idle"],
+      paths: {
+        "path-arm": {
+          points: [300, 300, 340, 400, 300, 500],
+          closed: false,
+          bones: ["left-upper-arm", "left-lower-arm"],
+          spacing: 0,
+          translateMix: 1,
+          rotateMix: 0.8
+        }
+      }
+    });
+    check("骨架里输出了 path 段", Array.isArray(pathed.spine.path) && pathed.spine.path.length === 1);
+    const pc = pathed.spine.path[0];
+    check("path.bones 是从根到末端的骨骼名", pc.bones.join(",") === "left-upper-arm,left-lower-arm", pc.bones.join(","));
+    check("path 的枚举字段齐全（positionMode/spacingMode/rotateMode）",
+      pc.positionMode === "percent" && pc.spacingMode === "length" && pc.rotateMode === "tangent", JSON.stringify(pc));
+    check("path 保留了 translateMix / rotateMix", pc.translateMix === 1 && pc.rotateMix === 0.8);
+    const pathAtt = pathed.spine.skins[0].attachments[`path:${pc.name}`][pc.name];
+    check("建了路径槽位与 path 附件", pathAtt !== undefined && pathAtt.type === "path");
+    check("path 附件顶点数 = 点数", pathAtt.vertices.length / 2 === 3, String(pathAtt.vertices.length / 2));
+    check("path 附件段数 = 点数 − 1（开放路径）", pathAtt.lengths.length === 2, String(pathAtt.lengths.length));
+    check("恒定速度开启（与预览器的弧长算法一致）", pathAtt.constantSpeed === true);
+    check("带 Path 的骨架通过 validateSpineWire", validateSpineWire(pathed.spine).ok,
+      validateSpineWire(pathed.spine).errors.map((e) => `${e.where} ${e.message}`).join("；"));
+
+    // 反例：静默失效的四种都不该溜过去。
+    const mutatePath = (fn) => {
+      const copy = JSON.parse(JSON.stringify(pathed.spine));
+      fn(copy);
+      return validateSpineWire(copy);
+    };
+    check("抓住「Path 链引用了不存在的骨骼」", !mutatePath((s) => { s.path[0].bones = ["nope", "left-lower-arm"]; }).ok);
+    check("抓住「缺少路径槽位」", !mutatePath((s) => { delete s.skins[0].attachments["path:path-arm"]; }).ok);
+    check("抓住「lengths 段数与顶点数不匹配」", !mutatePath((s) => { s.skins[0].attachments["path:path-arm"]["path-arm"].lengths = [1]; }).ok);
+    check("抓住「目标骨骼不在骨架里」", !mutatePath((s) => { s.path[0].target = "no-such-bone"; }).ok);
+
+    const db = buildDragonBonesSkeleton({
+      name: "path", canvasWidth: W, canvasHeight: H, spine: pathed.spine, animations: pathed.animationsRaw
+    });
+    const dbPath = db.armature[0].path;
+    check("DragonBones 导出了 path 约束", Array.isArray(dbPath) && dbPath.length === 1);
+    check("DragonBones 的 bone 是链的**第一根**", dbPath[0].bone === "left-upper-arm", dbPath[0].bone);
+    check("枚举转成了数字（percent→1 / length→0 / tangent→0）",
+      dbPath[0].positionMode === 1 && dbPath[0].spacingMode === 0 && dbPath[0].rotateMode === 0, JSON.stringify(dbPath[0]));
+    const pathDisplay = db.armature[0].skin[0].slot.find((s) => s.name === `path:${pc.name}`).display[0];
+    check("DragonBones 的路径 display 是 path 类型", pathDisplay.type === "path" && pathDisplay.vertices.length === 6, pathDisplay.type);
+    check("DragonBones 校验通过", validateDragonBones(db).ok, validateDragonBones(db).errors.map((e) => e.code).join(","));
+  }
+
+  // 贴图一致性检查必须**跳过 path 附件**：它天然没有图集区域，不排除的话
+  // 「加了 Path 约束」会报成「挂点找不到同名区域」，把一条正常功能卡死。
+  {
+    const pathed = buildSkeleton({
+      canvasWidth: W, canvasHeight: H,
+      parts: [{ name: "head", file: "h.png", x: 100, y: 100, width: 80, height: 90, scale: 1, rotation: 0, z: 0 },
+              { name: "neck", file: "n.png", x: 100, y: 200, width: 40, height: 40, scale: 1, rotation: 0, z: 1 }],
+      animationIds: ["idle"],
+      paths: { "p": { points: [0, 0, 50, 50], closed: false, bones: ["neck"], spacing: 0, translateMix: 1, rotateMix: 1 } }
+    });
+    const pages = [{ name: "skeleton", placements: [{ name: "head" }, { name: "neck" }] }];
+    const result = validateSkeletonAtlasMatch(pathed.spine, pages);
+    check("图集一致性检查跳过 path 附件", result.ok, result.errors.map((e) => `${e.where} ${e.message}`).join("；"));
+  }
 }
 
 console.log("");

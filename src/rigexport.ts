@@ -176,11 +176,13 @@ export function buildDragonBonesSkeleton(options: DragonBonesSkeletonOptions): a
     // 顶点沿用骨架里的坐标（部件中心为原点），两条导出路径共用同一份——
     // 各自重算一次网格迟早会因为参数不同而错位，而错位的表现是「贴图按错误的拓扑贴」。
     const isMesh = attachment.type === "mesh" && Array.isArray(attachment.vertices);
+    // `path` 附件也不是贴图：它是一串顶点 + 闭合标记，给 Path 约束当轨道用。
+    const isPath = attachment.type === "path";
     return {
       name: slot.name,
       display: [
         {
-          type: isMesh ? "mesh" : "image",
+          type: isMesh ? "mesh" : isPath ? "path" : "image",
           name: slot.attachment,
           // 图集里的区域名就是部件名，`path` 与之一致才能取到贴图。
           path: slot.attachment,
@@ -191,6 +193,12 @@ export function buildDragonBonesSkeleton(options: DragonBonesSkeletonOptions): a
                 triangles: attachment.triangles,
                 width: round(num(attachment.width, 0), 4),
                 height: round(num(attachment.height, 0), 4)
+              }
+            : {}),
+          ...(isPath
+            ? {
+                vertices: attachment.vertices,
+                closed: attachment.closed === true
               }
             : {}),
           pivot: { x: 0.5, y: 0.5 },
@@ -226,6 +234,31 @@ export function buildDragonBonesSkeleton(options: DragonBonesSkeletonOptions): a
       bendPositive: constraint.bendPositive !== false,
       weight: Math.max(0, Math.min(1, num(constraint.mix, 1))),
       scale: false
+    });
+  }
+
+  // ── Path 约束 ────────────────────────────────────────────────────────
+  //
+  // Spine 用的是字符串枚举，DragonBones 用数字：不转的话运行时会把
+  // `"percent"` 当成 0（fixed），于是「均匀铺满」悄悄变成「只铺开头一段」。
+  const PATH_POSITION_MODE: Record<string, number> = { fixed: 0, percent: 1 };
+  const PATH_SPACING_MODE: Record<string, number> = { length: 0, fixed: 1, percent: 2, proportional: 3 };
+  const PATH_ROTATE_MODE: Record<string, number> = { tangent: 0, chain: 1, chainScale: 2 };
+  const pathConstraints: any[] = [];
+  for (const constraint of Array.isArray(spine?.path) ? spine.path : []) {
+    const chain: string[] = Array.isArray(constraint?.bones) ? constraint.bones.filter((name: unknown) => typeof name === "string") : [];
+    if (chain.length === 0) continue;
+    pathConstraints.push({
+      name: String(constraint.name ?? `path-${pathConstraints.length}`),
+      // DragonBones 用「链的**第一根**骨 + 目标骨骼」，与 Spine 的「整条数组」不同。
+      bone: chain[0],
+      target: String(constraint.target ?? "root"),
+      positionMode: PATH_POSITION_MODE[String(constraint.positionMode ?? "percent")] ?? 1,
+      spacingMode: PATH_SPACING_MODE[String(constraint.spacingMode ?? "length")] ?? 0,
+      rotateMode: PATH_ROTATE_MODE[String(constraint.rotateMode ?? "tangent")] ?? 0,
+      rotation: num(constraint.rotation, 0),
+      translateMix: Math.max(0, Math.min(1, num(constraint.translateMix, 1))),
+      rotateMix: Math.max(0, Math.min(1, num(constraint.rotateMix, 1)))
     });
   }
 
@@ -301,6 +334,7 @@ export function buildDragonBonesSkeleton(options: DragonBonesSkeletonOptions): a
         bone: bones,
         slot: slots,
         ...(ik.length === 0 ? {} : { ik }),
+        ...(pathConstraints.length === 0 ? {} : { path: pathConstraints }),
         skin: [{ name: "default", slot: skinSlots }],
         animation,
         defaultActions: []
