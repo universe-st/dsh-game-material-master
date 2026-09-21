@@ -21,12 +21,15 @@
 ## 安装
 
 ```bash
-# npm 安装（发布后）
+# npm 安装
 dsh plugin --profile web add dsh-game-material-master
 
 # 本地目录安装（开发时）
 dsh plugin --profile web add /path/to/dsh-game-material-master
 ```
+
+包已发布到 npm：[dsh-game-material-master](https://www.npmjs.com/package/dsh-game-material-master)
+（当前 `0.1.0`，`latest`）。本包没有运行时依赖，`dsh plugin add` 拉下来即可用。
 
 装完**重启 DSH**（宿主半区在启动时装入）。浏览器半区按磁盘上的 `lib/client.js`
 现取，刷新浏览器即可生效。
