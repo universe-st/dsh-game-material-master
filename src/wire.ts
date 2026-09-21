@@ -240,6 +240,34 @@ const resetRigAnimationSettingsSchema = z.object({
   ids: z.array(z.string()).optional()
 });
 /**
+ * 关键帧编辑（M3 的时间轴编辑器）。
+ *
+ * 逐台取、整份存：「取一台动画的可编辑数据」与「整份写回」。
+ * 不做逐关键帧的 patch——时间轴的增删改三者互相牵连（删一帧会同时改两个段的
+ * 缓动归属），服务端再去解析 patch 等于把同一套语义实现两遍，多一处能出错的地方。
+ */
+const getRigAnimationSchema = z.object({ jobId: z.string(), id: z.string() });
+const saveRigAnimationSchema = z.object({
+  jobId: z.string(),
+  id: z.string(),
+  /**
+   * 不传 = **实例化**：按当前参数把预设烘成显式关键帧，之后以数据为准。
+   * 传了 = 整份替换。结构见 `riggen.RigCustomAnimation`。
+   */
+  animation: z.unknown().optional()
+});
+const resetRigAnimationSchema = z.object({ jobId: z.string(), id: z.string() });
+/**
+ * 拆件质检（阶段①②之间）。
+ *
+ * `expectedParts`（参考图里大致有几个独立部位）只能靠视觉判断，所以由 agent
+ * 看图后填；不填就跳过这项判断——宁可不报，也不要瞎报。
+ */
+const runRigQaSchema = z.object({
+  jobId: z.string(),
+  expectedParts: z.number().int().positive().max(200).optional()
+});
+/**
  * 贴图版本（阶段⑦）。
  *
  * 每一次换色 / 重绘 / 手工上传都**新增一版**，永不覆盖原图——于是「这张不行
@@ -410,6 +438,10 @@ export const METHODS: MethodSpec[] = [
   { method: "resetRigBoneOffsets", payload: resetRigBoneOffsetsSchema, result: jsonObject },
   { method: "setRigAnimationSettings", payload: setRigAnimationSettingsSchema, result: jsonObject },
   { method: "resetRigAnimationSettings", payload: resetRigAnimationSettingsSchema, result: jsonObject },
+  { method: "getRigAnimation", payload: getRigAnimationSchema, result: jsonObject },
+  { method: "saveRigAnimation", payload: saveRigAnimationSchema, result: jsonObject },
+  { method: "resetRigAnimation", payload: resetRigAnimationSchema, result: jsonObject },
+  { method: "runRigQa", payload: runRigQaSchema, result: jsonObject },
   { method: "tintRigParts", payload: tintRigPartsSchema, result: jsonObject },
   { method: "uploadRigTexture", payload: uploadRigTextureSchema, result: jsonObject },
   { method: "setRigTextureVersion", payload: setRigTextureVersionSchema, result: jsonObject },

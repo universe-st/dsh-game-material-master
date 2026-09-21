@@ -713,6 +713,58 @@ export function animationDurationOf(id: string, settings: RigAnimationSettings =
   return settings[id]?.duration ?? preset?.duration ?? 0;
 }
 
+/** 编辑器里的那一份动画数据（简写 + 它自己的时长与是否循环）。 */
+export interface RigAnimationDraft {
+  duration: number;
+  loop: boolean;
+  bones: Record<string, Record<string, AuthoredKeyframe[]>>;
+  source?: "preset" | "ai" | "human";
+}
+
+/**
+ * 从预设**实例化**一份可编辑的动画。
+ *
+ * 时间轴编辑器第一次碰到某台动画时用它当初始值——「编辑」这个动作的本质是
+ * 「把参数化的预设固化成一份显式的关键帧数据，从此以数据为准」。参数
+ * （`animationSettings` 的时长 / 幅度）在这里已经被烘进关键帧，之后再改参数
+ * 不会影响这份数据，这是刻意的：否则「手调过的帧」会被下一次调参悄悄改掉。
+ */
+export function instantiateAnimation(
+  id: string,
+  boneNames: string[],
+  settings: RigAnimationSettings = {}
+): RigAnimationDraft | undefined {
+  const preset = ANIMATION_BY_ID.get(id);
+  if (preset === undefined) return undefined;
+  const shorthand = buildAnimationShorthands(boneNames, [id], settings)[id];
+  if (shorthand === undefined) return undefined;
+  // 末帧永远不带 curve：Spine 的 curve 描述的是「以本帧为起点」的下一段，末帧没有下一段，
+  // 写了也永远不会被读到（方案附录 A 第 4 条）。预设生成器给每帧都挂了默认缓动，
+  // 这里清掉——编辑器里的数据不该有「永远不会生效的字段」，用户会以为自己改到了什么。
+  for (const kinds of Object.values<any>(shorthand.bones)) {
+    for (const frames of Object.values<any>(kinds)) {
+      if (Array.isArray(frames) && frames.length > 0) frames[frames.length - 1].curve = null;
+    }
+  }
+  return {
+    duration: animationDurationOf(id, settings),
+    loop: preset.loop,
+    bones: shorthand.bones,
+    source: "preset"
+  };
+}
+
+/** 一条时间轴在简写里驱动哪些字段（用于校验与界面）。 */
+export function timelineValueKeys(kind: string): string[] {
+  return (TIMELINE_PROPERTIES[kind] ?? []).map(([name]) => name);
+}
+
+/** 简写时间轴里的「旋转」字段名是 `angle`（`toSpine42` 之后才改名 `value`）。 */
+export function keyframeValueKeys(kind: string): string[] {
+  if (kind === "rotate") return ["angle"];
+  return timelineValueKeys(kind);
+}
+
 // ── 从装配结果构建骨架 ──────────────────────────────────────────────────
 
 export interface RigPlacedPart {
@@ -1006,11 +1058,20 @@ export function buildSkeleton(
   // 简写留一份给 DragonBones：它的 curve 是 0~1 归一化，而 `toSpine42` 会就地把
   // curve 绝对化，走过一遍就拿不回来了。
   const animationsRaw = buildAnimationShorthands(orderedBoneNames, options.animationIds, settings);
-  const animations = buildAnimations(orderedBoneNames, options.animationIds, settings);
+  // 手工/AI 编辑过的动画在这里**顶掉**预设实例（而不是在转换之后再塞进去）。
+  //
+  // 早先的写法是先 `buildAnimations`（内部已 `toSpine42`）再赋值 customAnimations、
+  // 最后又调一次 `toSpine42`——那一遍会把**已经绝对化**的预设 curve 当归一化值
+  // 再绝对化一次（`time1 + span × 已绝对值`），运动直接算飞。合并必须发生在
+  // 简写层，转换只做一次。
   if (options.customAnimations !== undefined) {
-    for (const [key, value] of Object.entries(options.customAnimations)) animations[key] = value;
-    toSpine42(animations);
+    for (const [key, value] of Object.entries(options.customAnimations)) {
+      if (value === null || value === undefined) continue;
+      animationsRaw[key] = value;
+    }
   }
+  const animations = JSON.parse(JSON.stringify(animationsRaw));
+  toSpine42(animations);
   if (Object.keys(animations).length === 0) {
     warnings.push("没有生成任何动画：所选预设依赖的骨骼名在本次拆件里都不存在");
   }

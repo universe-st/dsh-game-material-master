@@ -496,6 +496,35 @@ function checkRigContracts(text, label) {
     `${label}：④ 阶段逐页给出 DragonBones 贴图描述`,
     text.includes('data-testid": "rig-atlas-db"') && text.includes("job.atlas.dragonBones.map"),
     "缺少 rig-atlas-db 区块"
+  );
+  // 时间轴编辑器（M3）：动画从「参数」变成「可编辑数据」的界面落点。
+  for (const [feature, token] of [
+    ["时间轴面板", 'data-testid": "rig-timeline"'],
+    ["关键帧轨道", 'data-testid": "rig-tl-track"'],
+    ["选中帧的编辑区", 'data-testid": "rig-tl-edit"'],
+    ["播放/擦洗之外还能加轨道", '`rig-tl-add-${kind}`'],
+    ["缩放轨道（scale 轨道是 M3 新增的）", '["rotate", "translate", "scale"]'],
+    ["还原到预设", 'data-testid": "rig-tl-revert"'],
+    ["缓动预设按钮", '`rig-tl-ease-${preset.id}`'],
+    ["拖动关键帧（松手才提交）", "dragRef"]
+  ]) {
+    check(`${label}：时间轴有${feature}`, text.includes(token), token);
+  }
+  // 拆件质检面板：**装配之前**就该告诉用户「这批拆件能不能信」。
+  check(
+    `${label}：有拆件质检面板`,
+    text.includes('data-testid": "rig-qa"') && text.includes("job.qa"),
+    "缺少 rig-qa 面板"
+  );
+  check(
+    `${label}：质检支持重跑与「参考图大约几个部位」`,
+    text.includes('data-testid": "rig-qa-rerun"') && text.includes('data-testid": "rig-qa-expected"'),
+    "缺少质检操作入口"
+  );
+  check(
+    `${label}：质检面板列出 message 与 suggestion`,
+    text.includes("issue.suggestion") && text.includes("SPR_qaFix"),
+    "建议没渲染出来"
   );  // 撤销/重做的两处时序陷阱，都是实测撞出来的：  //  ① 把 setHistory([]) 挂在 [job.id, job.updatedAt] 上 —— commit 自己就会改
   //     updatedAt，于是每提交一次就清空撤销栈，撤销按钮永远是灰的；
   //  ② undo 把「改动前」的快照塞进重做栈 —— 重做还原的还是改动前那份，点了没反应。

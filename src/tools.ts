@@ -1166,6 +1166,10 @@ function renderStatus(value: any): string {
     return lines.join("\n");
   }
   const lines = [`${value.name}（${value.id}）${value.busy ? " — ⏳ 有任务在跑" : ""}`];
+  // 拆件质检放在最前面：它管的是「这批拆件能不能信」，直接决定后面几步值不值得做。
+  if (value.qa !== null && value.qa !== undefined) {
+    lines.push(`  ${renderRigQa(value.qa)}`);
+  }
   if (Array.isArray(value.stages)) {
     for (const stage of value.stages) {
       lines.push(`  ${renderStageLine(stage)}`);
@@ -1188,6 +1192,19 @@ function renderStatus(value: any): string {
   return lines.join("\n");
 }
 
+/** 拆件质检：把结论、重复件和建议都摆出来，agent 才能据此决定下一步。 */
+function renderRigQa(qa: any): string {
+  const head = `拆件质检：${qa.ok ? "通过" : "**不通过**"}（可信度 ${Math.round((qa.score ?? 0) * 100)}%）— ${qa.summary ?? ""}`;
+  const lines = [head];
+  for (const issue of qa.issues ?? []) {
+    const mark = issue.level === "error" ? "✗" : "⚠";
+    lines.push(`      ${mark} [${issue.code}] ${issue.message}`);
+    if (typeof issue.suggestion === "string" && issue.suggestion !== "") lines.push(`        → ${issue.suggestion}`);
+  }
+  if (qa.expectedParts !== undefined) lines.push(`      （参考图目测约 ${qa.expectedParts} 个独立部位）`);
+  return lines.join("\n");
+}
+
 function renderWait(value: any): string {
   const head = value.settled ? `已跑完（${(value.elapsedMs / 1000).toFixed(1)}s）` : `仍在跑（等待 ${(value.elapsedMs / 1000).toFixed(1)}s 后超时）`;
   return `${head}\n${renderStatus(value)}`;
@@ -1195,6 +1212,7 @@ function renderWait(value: any): string {
 
 function renderReview(value: any): string {
   const lines = [`${value.name}（${value.id}）验收包${value.busy ? " — ⏳ 仍有任务在跑" : ""}`];
+  if (value.qa !== null && value.qa !== undefined) lines.push(renderRigQa(value.qa));
   if (Array.isArray(value.stages)) {
     for (const stage of value.stages) {
       lines.push(`${stage.title}${stage.stale ? " · 需重做" : ""}`);
@@ -1292,6 +1310,29 @@ function imageNextActions(snapshot: any): string[] {
 function rigNextActions(snapshot: any, stage: string | undefined): string[] {
   const byStage = Object.fromEntries((snapshot.stages as any[]).map((entry: any) => [entry.stage, entry]));
   const actions: string[] = [];
+
+  // 拆件质检的结论优先于一切阶段建议：它不通过时，后面每一步都在错误素材上做功。
+  const qa = snapshot.qa;
+  if (qa !== null && qa !== undefined && qa.ok !== true) {
+    const duplicate = (qa.issues ?? []).find((issue: any) => issue.code === "duplicate-parts");
+    const lowConfidence = (qa.issues ?? []).find((issue: any) => issue.code === "layout-low-confidence");
+    if (duplicate !== undefined) {
+      actions.push(
+        "**拆件质检不通过：有部件被重复画了多遍**。先用 read_image 看 partsMontagePath 确认哪几块是同一部位，" +
+          "用 setRigPartVisibility({jobId,name,hidden:true}) 隐藏多余的（每组留 1 块），再重跑 runRigQa 与 runRigLayout"
+      );
+    }
+    if (lowConfidence !== undefined) {
+      actions.push(
+        "**装配相似度整体偏低**：模板匹配对「重新绘制过、与参考图不像」的部件失手。" +
+          "用 read_image 看 sourcePath 与 partsMontagePath，判断每块在参考图的位置，" +
+          "setRigLayoutHints 写大致框后 runRigLayout；被遮挡的部位（例如裙下的整段大腿）直接给最终位置"
+      );
+    }
+  } else if (qa !== null && qa !== undefined && qa.ok === true && qa.issues?.length > 0) {
+    actions.push("拆件质检有提示项（见上面的 ⚠）：值得看一眼，但不阻塞");
+  }
+
   const pick = (key: string) => (stage === undefined || stage === key ? byStage[key] : undefined);
 
   const parts = pick("parts");

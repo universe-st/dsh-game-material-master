@@ -220,16 +220,19 @@ const VALUE_TOLERANCE = 0.05;
  *
  * 这是纯本地、免费、可断言的检查，正好适合放在导出前。
  */
-export function validateAnimationLoops(spine: any): ValidationReport {
+export function validateAnimationLoops(spine: any, loopOverrides?: Record<string, boolean>): ValidationReport {
   const errors: ValidationIssue[] = [];
   const warnings: ValidationIssue[] = [];
 
   const loopIds = new Set(RIG_ANIMATIONS.filter((item) => item.loop).map((item) => item.id));
+  // 手工/AI 编辑过的动画自己声明是否循环：预设的默认值不能覆盖用户的意图，
+  // 一台故意不闭合的「一次性」动作不该被判成错误。
+  const isLooping = (id: string) => loopOverrides?.[id] ?? loopIds.has(id);
   const animations = spine?.animations;
   if (animations === null || typeof animations !== "object") return report(errors, warnings);
 
   for (const [animationName, animation] of Object.entries<any>(animations)) {
-    if (!loopIds.has(animationName)) continue;
+    if (!isLooping(animationName)) continue;
     const boneTracks = animation?.bones;
     if (boneTracks === null || typeof boneTracks !== "object") continue;
 

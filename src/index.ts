@@ -1111,6 +1111,49 @@ export class GameStudioGateway extends TypertRemoteService {
     return { ok: true, ...(await riggen.resetRigAnimationSettings(asString(input.jobId), ids)) };
   }
 
+  /** 取一台动画的可编辑关键帧数据（时间轴编辑器用）。 */
+  async getRigAnimation(payload) {
+    const input = asRecord(payload);
+    return { ok: true, ...(await riggen.getRigAnimation(asString(input.jobId), asString(input.id))) };
+  }
+
+  /**
+   * 整份写回一台动画。
+   *
+   * `animation` 缺省时是**实例化**：用当前参数把预设烘成显式关键帧，
+   * 之后这台动画就以数据为准——参数旋钮不再影响它（刻意如此，否则
+   * 手调过的帧会被下一次调参悄悄改掉）。
+   */
+  async saveRigAnimation(payload) {
+    const input = asRecord(payload);
+    return {
+      ok: true,
+      ...(await riggen.saveRigAnimation(asString(input.jobId), {
+        id: asString(input.id),
+        animation: input.animation
+      }))
+    };
+  }
+
+  /** 还原一台动画到预设。 */
+  async resetRigAnimation(payload) {
+    const input = asRecord(payload);
+    return { ok: true, ...(await riggen.resetRigAnimation(asString(input.jobId), asString(input.id))) };
+  }
+
+  /**
+   * 重跑拆件质检。
+   *
+   * 分割后会自动跑一次（那一次要解码全部部件 PNG，只在拆完时做）；这里是手动入口，
+   * 用于「改了语义/隐藏了部件之后重新评估」，以及让 agent 把看图得到的
+   * `expectedParts`（参考图里大致有几个独立部位）写进去。
+   */
+  async runRigQa(payload) {
+    const input = asRecord(payload);
+    const expected = typeof input.expectedParts === "number" ? input.expectedParts : undefined;
+    return { ok: true, ...(await riggen.runRigQa(asString(input.jobId), expected)) };
+  }
+
   /**
    * 换色（本地计算，免费）。
    *

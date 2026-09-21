@@ -578,6 +578,94 @@ check("预览 HTML 内联了骨架", html.includes('"spine\\":\\"4.2.0') || html
     `${headBack.rotation} vs ${baseline.rotation}`);
 }
 
+console.log("=== 4b. 关键帧编辑（M3）===");
+{
+  // 先确认「实例化」给出的是显式关键帧，且与预设同构。
+  const draft = await riggen.getRigAnimation(job.id, "walk");
+  check("能取到 walk 的可编辑数据", draft.id === "walk" && draft.bones !== undefined);
+  check("未编辑时标记为预设", draft.custom === false);
+  check("实例化后带显式关键帧", Object.values(draft.bones).every((kinds) =>
+    Object.values(kinds).every((frames) => Array.isArray(frames) && frames.length >= 2)));
+  check("每条轨道时间从 0 开始且严格递增", Object.values(draft.bones).every((kinds) =>
+    Object.values(kinds).every((frames) =>
+      frames[0].time === 0 && frames.every((frame, i) => i === 0 || frame.time > frames[i - 1].time))));
+  check("末帧不携带 curve（它描述的是「以本帧为起点」的下一段）", Object.values(draft.bones).every((kinds) =>
+    Object.values(kinds).every((frames) => frames[frames.length - 1].curve === null || frames[frames.length - 1].curve === undefined)));
+  check("实例化不写盘（还没开始编辑）", (state.animations ?? {})[ "walk" ] === undefined);
+
+  // 验收判据：把 head 的一个关键帧从 1.5° 改成 4°，导出 JSON 里必须是 4。
+  const headFrames = draft.bones.head.rotate;
+  const targetIndex = headFrames.findIndex((frame) => Math.abs(frame.angle - 1.5) < 0.01);
+  check("预设 walk 的 head 有一个 1.5° 的关键帧", targetIndex > 0, JSON.stringify(headFrames.map((f) => f.angle)));
+  headFrames[targetIndex] = { ...headFrames[targetIndex], angle: 4 };
+
+  const saved = await riggen.saveRigAnimation(job.id, { id: "walk", animation: draft });
+  check("保存后统计出轨道与帧数", saved.tracks > 0 && saved.keyframes > 0, `${saved.tracks} 轨 / ${saved.keyframes} 帧`);
+  check("保存没有产生数据问题", saved.issues.length === 0, saved.issues.join(" | "));
+  const afterSave = await riggen.readRigJob(job.id);
+  check("手工动画写进了任务", afterSave.animations?.walk !== undefined);
+  check("任务视图里能看到「已改」标记", riggen.rigSnapshot(afterSave).rig.customAnimations.includes("walk"));
+
+  // 改动作废骨骼与图集（动画变了，产物必须重算）。
+  check("改动作废了骨骼", afterSave.rig.status !== "ready", afterSave.rig.status);
+
+  await riggen.buildRigOutput(job.id);
+  const edited = JSON.parse(await readFile(riggen.rigAssetPath(job.id, "rig/skeleton.json"), "utf8"));
+  const walkHead = edited.animations.walk.bones.head.rotate;
+  check("导出 JSON 里出现了 4（验收判据）", walkHead.some((frame) => Math.abs(frame.value - 4) < 1e-6),
+    JSON.stringify(walkHead.map((f) => f.value)));
+  check("整条轨道不再是预设的 1.5", !walkHead.some((frame) => Math.abs(frame.value - 1.5) < 1e-6));
+  check("bezier 仍是 4 个控制点（rotate 单属性）",
+    walkHead.slice(0, -1).every((frame) => frame.curve === undefined || frame.curve === "stepped" || frame.curve.length === 4),
+    JSON.stringify(walkHead.map((f) => (Array.isArray(f.curve) ? f.curve.length : f.curve))));
+  check("curve 是绝对量（落在自己所属的时间区间内）", walkHead.slice(0, -1).every((frame, i) => {
+    if (!Array.isArray(frame.curve)) return true;
+    const t1 = walkHead[i].time;
+    const t2 = walkHead[i + 1].time;
+    return frame.curve[0] >= t1 - 1e-6 && frame.curve[0] <= t2 + 1e-6 &&
+      frame.curve[2] >= t1 - 1e-6 && frame.curve[2] <= t2 + 1e-6;
+  }));
+  // 编辑过的动画「不再被参数影响」是刻意的：否则手调过的帧会被下一次调参悄悄改掉。
+  check("编辑后不受幅度参数影响", await (async () => {
+    await riggen.setRigAnimationSettings(job.id, [{ id: "walk", amplitude: 3 }], { by: "human" });
+    await riggen.buildRigOutput(job.id);
+    const again = JSON.parse(await readFile(riggen.rigAssetPath(job.id, "rig/skeleton.json"), "utf8"));
+    return again.animations.walk.bones.head.rotate.some((frame) => Math.abs(frame.value - 4) < 1e-6);
+  })());
+  await riggen.resetRigAnimationSettings(job.id, ["walk"]);
+
+  // 没被编辑过的动画仍走参数化路径。
+  check("未编辑的动画仍随参数变化", await (async () => {
+    await riggen.setRigAnimationSettings(job.id, [{ id: "idle", amplitude: 2 }], { by: "human" });
+    await riggen.buildRigOutput(job.id);
+    const again = JSON.parse(await readFile(riggen.rigAssetPath(job.id, "rig/skeleton.json"), "utf8"));
+    const values = again.animations.idle.bones.torso.rotate.map((frame) => frame.value);
+    return values.some((value) => Math.abs(value) > 1.5);
+  })());
+  await riggen.resetRigAnimationSettings(job.id, ["idle"]);
+
+  // 非法数据要被拒绝，而不是写进产物。
+  let rejected = false;
+  try {
+    await riggen.saveRigAnimation(job.id, {
+      id: "walk",
+      animation: { duration: 0.8, loop: true, bones: { head: { rotate: [] } } }
+    });
+  } catch (error) {
+    rejected = true;
+  }
+  check("空轨道的动画会被拒绝", rejected);
+
+  // 还原：回到预设。
+  await riggen.resetRigAnimation(job.id, "walk");
+  const afterReset = await riggen.readRigJob(job.id);
+  check("还原后任务里不再有手工动画", (afterReset.animations ?? {}).walk === undefined);
+  await riggen.buildRigOutput(job.id);
+  const restoredWalk = JSON.parse(await readFile(riggen.rigAssetPath(job.id, "rig/skeleton.json"), "utf8"));
+  check("还原后 head 回到预设值", !restoredWalk.animations.walk.bones.head.rotate.some((frame) => Math.abs(frame.value - 4) < 1e-6));
+  state = await riggen.readRigJob(job.id);
+}
+
 console.log("=== 5. 图集打包 ===");
 await riggen.buildAtlas(job.id);
 state = await riggen.readRigJob(job.id);
@@ -653,7 +741,10 @@ check("界面要的 prompts/settings 都在", typeof view.prompts.sheet === "str
 check("layout.items 是逐部件记录", typeof view.layout.items === "object" && Object.keys(view.layout.items).length === state.parts.length);
 check("rig.preview / skeleton 都是可打开的 URL", typeof view.rig.preview === "string" && view.rig.preview.endsWith(".html"));
 check("atlas.url / text 都在", typeof view.atlas.url === "string" && typeof view.atlas.text === "string");
-check("parts 带 url / placed / score", view.parts.every((part) => "url" in part && "placed" in part && "score" in part));
+// `score` **允许缺失**：它描述的是自动匹配的质量，位置一旦由人给过就清掉了
+// （留着会让拆件质检拿一个陈旧分数当「这次装配准不准」的证据）。
+check("parts 带 url / placed（score 只有自动匹配过的才有）",
+  view.parts.every((part) => "url" in part && "placed" in part && (part.score === undefined || typeof part.score === "number")));
 check("review.unmatched 是数组", Array.isArray(view.review.unmatched));
 check("带运行日志", Array.isArray(view.log));
 

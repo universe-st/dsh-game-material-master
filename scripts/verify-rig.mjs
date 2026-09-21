@@ -31,6 +31,7 @@ import {
 } from "../lib/rigpose.js";
 import { buildSkeleton, buildAtlasText, packAtlas, defaultPartNames, RIG_SLOTS, DEFAULT_DRAW_ORDER } from "../lib/spine.js";
 import { buildDragonBonesSkeleton, buildDragonBonesTexture, DRAGONBONES_FRAME_RATE } from "../lib/rigexport.js";
+import { assessParts, findDuplicateParts } from "../lib/rigqa.js";
 import {
   validateAnimationLoops,
   validateAtlas,
@@ -1083,6 +1084,124 @@ console.log("=== 13. 默认网格的骨架不该有互环 ===");
   check("默认网格不产生任何告警", grid.warnings.length === 0, grid.warnings.join(" | "));
   check("默认网格的骨骼表是拓扑序", grid.spine.bones.every((bone) =>
     bone.parent === undefined || grid.spine.bones.findIndex((b) => b.name === bone.parent) < grid.spine.bones.findIndex((b) => b.name === bone.name)));
+}
+
+console.log("=== 14. 拆件质检 ===");
+{
+  // 用合成图形构造这次真实踩到的形态：同一部位画了多遍 + 完全不同的部件混在一起。
+  // 判据必须能区分「同一块重画」和「长得像但确实不同」。
+  const legLike = (wobble) => {
+    const image = createRgba(60, 140);
+    for (let y = 0; y < 140; y++) {
+      for (let x = 0; x < 60; x++) {
+        // 上宽下窄的腿形；`wobble` 制造一点点抗锯齿级差异（模拟重画时的微小出入）。
+        const half = 26 - (y / 140) * 12 + (y > 100 ? wobble : 0);
+        if (Math.abs(x - 30) > half) continue;
+        const idx = (y * 60 + x) * 4;
+        image.data[idx] = 240;
+        image.data[idx + 1] = 200;
+        image.data[idx + 2] = 190;
+        image.data[idx + 3] = 255;
+      }
+    }
+    return image;
+  };
+  const shoeLike = (flip) => {
+    const image = createRgba(70, 50);
+    for (let y = 0; y < 50; y++) {
+      for (let x = 0; x < 70; x++) {
+        const dx = flip ? 69 - x : x;
+        if (dx < 8 || dx > 52 || y < 12) continue;
+        const idx = (y * 70 + x) * 4;
+        image.data[idx] = 40;
+        image.data[idx + 1] = 40;
+        image.data[idx + 2] = 110;
+        image.data[idx + 3] = 255;
+      }
+    }
+    return image;
+  };
+  const parts = [
+    { name: "leg-a", rgba: legLike(0) },
+    { name: "leg-b", rgba: legLike(1) },
+    { name: "leg-c", rgba: legLike(2) },
+    { name: "leg-d", rgba: legLike(0) },
+    { name: "shoe-a", rgba: shoeLike(false) },
+    { name: "shoe-b", rgba: shoeLike(true) },
+    { name: "head", rgba: (() => {
+      const image = createRgba(90, 90);
+      for (let y = 0; y < 90; y++) {
+        for (let x = 0; x < 90; x++) {
+          if (Math.hypot(x - 45, y - 45) > 42) continue;
+          const idx = (y * 90 + x) * 4;
+          image.data[idx] = 120; image.data[idx + 1] = 150; image.data[idx + 2] = 220; image.data[idx + 3] = 255;
+        }
+      }
+      return image;
+    })() }
+  ];
+
+  const duplicates = findDuplicateParts(parts);
+  const legGroup = duplicates.find((group) => group.parts.includes("leg-a"));
+  const shoeGroup = duplicates.find((group) => group.parts.includes("shoe-a"));
+  check("抓到「同一部位画了 4 遍」", legGroup !== undefined && legGroup.parts.length === 4, JSON.stringify(legGroup?.parts));
+  check("同向重合才并组，左右镜像件不并进来", shoeGroup === undefined || shoeGroup.symmetric === true, JSON.stringify(shoeGroup));
+  check("圆形头不会被误判成腿或鞋", duplicates.every((group) => !group.parts.includes("head")), JSON.stringify(duplicates.map((g) => g.parts)));
+  check("组数正确（2 组）", duplicates.length === 2, String(duplicates.length));
+
+  // 反例：正常的一组部件不该被报成重复。
+  const distinct = [
+    { name: "a", rgba: legLike(0) },
+    { name: "b", rgba: shoeLike(false) },
+    { name: "c", rgba: parts[6].rgba }
+  ];
+  check("三个互不相同的部件不报重复", findDuplicateParts(distinct).length === 0);
+
+  // 装配相似度：这次的实测值是 0.08~0.5，必须被判成「不可信」。
+  const badLayout = assessParts({
+    partCount: 12,
+    matches: [
+      { name: "head", score: 0.421, matched: true },
+      { name: "torso", score: 0.357, matched: true },
+      { name: "hip", score: 0.517, matched: true },
+      { name: "left-hand", score: 0.179, matched: true },
+      { name: "right-hand-17", score: 0.198, matched: true },
+      { name: "right-upper-leg", score: 0.359, matched: true },
+      { name: "left-upper-leg", score: 0.117, matched: true },
+      { name: "neck-18", score: 0.316, matched: true },
+      { name: "right-upper-arm", score: 0.427, matched: true },
+      { name: "left-upper-arm", score: 0.367, matched: true }
+    ]
+  });
+  check("低相似度被判成 error", !badLayout.ok);
+  check("低相似度的 error 码正确", badLayout.issues.some((issue) => issue.code === "layout-low-confidence"));
+  check("低相似度给得出「先给先验再重跑」的建议",
+    badLayout.issues.find((issue) => issue.code === "layout-low-confidence")?.suggestion?.includes("setRigLayoutHints") === true);
+  check("可信度分数很低", badLayout.score < 0.3, String(badLayout.score));
+
+  const goodLayout = assessParts({
+    partCount: 12,
+    matches: [
+      { name: "head", score: 0.82, matched: true },
+      { name: "torso", score: 0.74, matched: true },
+      { name: "hip", score: 0.91, matched: true }
+    ]
+  });
+  check("高相似度 + 无重复 = 通过", goodLayout.ok, goodLayout.summary);
+  check("通过时分数明显高于低相似度那一组", goodLayout.score > 0.7 && goodLayout.score > badLayout.score, `${goodLayout.score} vs ${badLayout.score}`);
+
+  // 部件数明显多于参考图可见部位数 → 直接点名「疑似重复」。
+  const tooMany = assessParts({ partCount: 18, expectedParts: 14 });
+  check("部件数超出目测部位数被判成 error", !tooMany.ok);
+  check("部件数超标的 error 码正确", tooMany.issues.some((issue) => issue.code === "too-many-parts"));
+  check("没给 expectedParts 就不做这项判断", assessParts({ partCount: 18 }).issues.every((issue) => issue.code !== "too-many-parts"));
+  // 隐藏的部件不该参与统计（这次正是靠隐藏 6 块重复件修好的）。
+  const withHidden = assessParts({
+    partCount: 12,
+    matches: [{ name: "head", score: 0.9, matched: true }],
+    expectedParts: 14
+  });
+  check("隐藏之后的部件数不再超标", withHidden.ok, withHidden.summary);
 }
 
 console.log("");
