@@ -52,7 +52,8 @@ const approvedSchema = z.object({
  */
 const setReviewModeSchema = z.object({
   id: z.string(),
-  module: z.enum(["sprite", "image", "sequence"]),
+  /** 四个模块都要能设审核模式——骨骼动画（rig）早期漏了，见 index.ts 的注释。 */
+  module: z.enum(["sprite", "image", "sequence", "rig"]),
   reviewMode: z.enum(["auto", "manual"])
 });
 const runImageSchema = z.object({ projectId: z.string(), key: z.string(), prompt: z.string().optional() });
@@ -183,6 +184,30 @@ const setRigLayoutHintsSchema = z.object({
       .nullable()
   )
 });
+/**
+ * 语义层（阶段③）。
+ *
+ * 只传**要改的字段**：这是细粒度失效传播的前提——改一个部件的 `parent`
+ * 不该让整份语义表重新生成，也不该丢掉别人调过的锚点。
+ */
+const setRigSemanticsSchema = z.object({
+  jobId: z.string(),
+  parts: z.array(
+    z.object({
+      name: z.string(),
+      role: z.string().optional(),
+      /** null 表示挂到 root。 */
+      parent: z.string().nullable().optional(),
+      proximal: z.tuple([z.number(), z.number()]).optional(),
+      distal: z.tuple([z.number(), z.number()]).optional(),
+      tags: z.array(z.string()).optional()
+    })
+  ),
+  /** 强制按人形校验（不给时按「有没有 head 角色」自动判断）。 */
+  humanoid: z.boolean().optional(),
+  /** 改动来源，用于把 `semanticsSource` 记成 ai 还是 human。 */
+  by: z.enum(["ai", "human"]).optional()
+});
 
 /**
  * 浏览器半区上报自己真实的 `location.origin`。
@@ -274,6 +299,7 @@ export const METHODS: MethodSpec[] = [
   { method: "saveRigLayoutItem", payload: rigLayoutItemSchema, result: okSchema },
   { method: "saveRigLayoutItems", payload: saveRigLayoutItemsSchema, result: okSchema },
   { method: "setRigLayoutHints", payload: setRigLayoutHintsSchema, result: okSchema },
+  { method: "setRigSemantics", payload: setRigSemanticsSchema, result: jsonObject },
   { method: "runRigSheet", payload: rigJobIdSchema, result: startedSchema },
   { method: "runRigSegment", payload: rigJobIdSchema, result: startedSchema },
   { method: "runRigLayout", payload: runRigLayoutSchema, result: startedSchema },

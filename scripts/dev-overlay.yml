@@ -1,0 +1,24 @@
+# 开发/测试用的 cordis patch 覆盖层。
+#
+# 用途：给测试宿主打开「宿主半区热重载」，让改完 `lib/*.js` 立即生效，
+# 不必重启 Harness（重启会掐断正在跑的 agent 会话）。
+#
+# 为什么需要显式加这一行：profile 虽然声明了 `patchReload: live`，但启动时创建
+# cordis-plugin-hmr 用的是 `{ root: [] }`，而 `Hmr.Config.base` 是必填的——创建失败
+# 被 catch 吞掉，于是 HMR 服务根本不存在，`watchUserPatches` 也连带跳过（它要求
+# `ctx.get("hmr")` 存在）。这里补上 `base`，HMR 才真正工作。
+#
+# 用法（测试宿主）：
+#   dsh --profile web --patch scripts/dev-overlay.yml --port 43121 --no-open
+#
+# ⚠️ `base` 会被 `new URL(base, ctx.baseUrl)` 解析后再 fileURLToPath，所以**必须写成
+# file:// URL**；写成 `D:/...` 会被当成 `d:` scheme 而抛 ERR_INVALID_URL_SCHEME。
+#
+# 不用于生产：正式启动走用户 profile 的 patch 层，本文件只在测试时通过 --patch 注入。
+- insert:
+    - id: gmm-dev-hmr
+      name: '@deepseek-ai/cordis-plugin-hmr'
+      config:
+        base: file:///D:/Workspace/myworks/dsh-game-material-master/lib
+        root: ["."]
+        debounce: 150

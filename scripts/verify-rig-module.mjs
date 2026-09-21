@@ -112,6 +112,75 @@ check("部件名取自文件名", state.parts.every((part) => part.name in TRUTH
 check("上传的部件标记为 uploaded", state.parts.every((part) => part.source === "uploaded"));
 check("上传部件后下游状态被清空", state.layout.status === "empty" && state.rig.status === "empty" && state.atlas.status === "empty");
 
+console.log("=== 1b. 语义层 ===");
+{
+  check(
+    "上传后每个部件都被补齐了语义",
+    state.parts.every((part) => typeof part.role === "string" && Array.isArray(part.proximal) && Array.isArray(part.distal)),
+    state.parts.map((p) => `${p.name}:${p.role}`).join(", ")
+  );
+  check("语义来源标为 default", state.parts.every((part) => part.semanticsSource === "default"));
+
+  const view = riggen.validateRigSemantics(state);
+  check("默认语义无 error", view.errors.length === 0, view.errors.map((e) => `${e.name}:${e.message}`).join(" | "));
+  check(
+    "默认父级与 v1 表一致（torso 挂 root、腿挂 root）",
+    state.parts.find((p) => p.name === "torso").parent === undefined &&
+      state.parts.find((p) => p.name === "left-upper-leg").parent === undefined,
+    state.parts.map((p) => `${p.name}->${p.parent}`).join(", ")
+  );
+
+  // 改父级：把两条大腿挂到躯干下（一个真实的手工纠正动作）。
+  const changed = await riggen.setRigSemantics(job.id, [
+    { name: "left-upper-leg", parent: "torso" },
+    { name: "right-upper-leg", parent: "torso" }
+  ]);
+  check("语义变更成功", changed.ok === true, JSON.stringify(changed.errors));
+  let afterSem = await riggen.readRigJob(job.id);
+  check("父级已落盘", afterSem.parts.find((p) => p.name === "left-upper-leg").parent === "torso");
+  check("来源变成 human", afterSem.parts.find((p) => p.name === "left-upper-leg").semanticsSource === "human");
+  check("只动了被点名的部件（torso 的父级没被重置）", afterSem.parts.find((p) => p.name === "torso").parent === undefined);
+  check("改语义作废骨骼与图集", afterSem.rig.status === "empty" && afterSem.atlas.status === "empty");
+
+  // 成环必须被拒绝，且**不能落盘**。
+  const cycle = await riggen.setRigSemantics(job.id, [
+    { name: "torso", parent: "left-upper-leg" },
+    { name: "left-upper-leg", parent: "torso" }
+  ]);
+  check("成环被拒绝", cycle.ok === false && cycle.errors.some((e) => e.message.includes("成环")), JSON.stringify(cycle.errors));
+  const afterCycle = await riggen.readRigJob(job.id);
+  check("被拒绝时没有落盘", afterCycle.parts.find((p) => p.name === "torso").parent === undefined);
+
+  // 改锚点：把「头」的近端从底边中点挪到左下角（一个真实的手工纠正动作）。
+  await riggen.setRigSemantics(job.id, [{ name: "head", proximal: [0.25, 1] }]);
+  const afterAnchor = await riggen.readRigJob(job.id);
+  check("锚点变更落盘", JSON.stringify(afterAnchor.parts.find((p) => p.name === "head").proximal) === JSON.stringify([0.25, 1]),
+    JSON.stringify(afterAnchor.parts.find((p) => p.name === "head").proximal));
+
+  // 退化锚点（近端 = 远端）会被自动纠正并给出 warning——骨骼长度为 0 会让方向失去意义。
+  const degenerate = await riggen.setRigSemantics(job.id, [{ name: "head", proximal: [0.5, 0] }]);
+  check("近端与远端重合时给出 warning", degenerate.ok === true && degenerate.warnings.some((w) => w.message.includes("重合")),
+    JSON.stringify(degenerate.warnings));
+  const afterDegenerate = await riggen.readRigJob(job.id);
+  check("退化锚点被纠正回角色默认", JSON.stringify(afterDegenerate.parts.find((p) => p.name === "head").proximal) === JSON.stringify([0.5, 1]),
+    JSON.stringify(afterDegenerate.parts.find((p) => p.name === "head").proximal));
+
+  // 不存在的部件必须抛错（而不是静默忽略）。
+  let threw = false;
+  try {
+    await riggen.setRigSemantics(job.id, [{ name: "no-such-part", parent: "torso" }]);
+  } catch {
+    threw = true;
+  }
+  check("改不存在的部件会报错", threw);
+
+  // 回复到默认语义，后面的装配/骨骼断言才有意义。
+  await riggen.setRigSemantics(job.id, [
+    { name: "left-upper-leg", parent: undefined },
+    { name: "right-upper-leg", parent: undefined }
+  ]);
+}
+
 console.log("=== 2. 装配定位 ===");
 const t0 = Date.now();
 await riggen.solveRigLayout(job.id);
@@ -165,6 +234,19 @@ for (const group of MIRRORED_GROUPS) {
     ok,
     actual.map((item, index) => `${item.x},${item.y} ${item.width}×${item.height}(应 ${expect[index].x},${expect[index].y})`).join(" | ")
   );
+}
+
+// 语义只影响骨骼推导，**不该毁掉已经做好的装配**——否则用户每改一次角色
+// 就要重新摆一遍，而角色恰恰是最需要反复试的字段。
+{
+  const beforeSem = await riggen.readRigJob(job.id);
+  const beforeItems = JSON.stringify(beforeSem.layout.items);
+  await riggen.setRigSemantics(job.id, [{ name: "torso", role: "accessory" }]);
+  const afterSem = await riggen.readRigJob(job.id);
+  check("改语义保留装配结果", JSON.stringify(afterSem.layout.items) === beforeItems && afterSem.layout.status === "ready");
+  check("改语义后骨骼被作废", afterSem.rig.status === "empty");
+  // 改回躯干，后面按标准骨架断言。
+  await riggen.setRigSemantics(job.id, [{ name: "torso", role: "torso" }]);
 }
 
 console.log("=== 3. 手工微调 + 局部重跑 ===");

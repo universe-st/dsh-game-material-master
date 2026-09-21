@@ -574,6 +574,15 @@ export interface RigPlacedPart {
   method?: string;
   manual?: boolean;
   hidden?: boolean;
+  /**
+   * 语义层给出的父部件名（`rigsemantics.ts`）。给了就用它，没给才回落到
+   * 按名字关键词猜——这是「语义显式化」在骨骼推导上的落点：
+   * 用户/AI 改一次 `parent`，骨架立刻跟着变，不必去调名字。
+   */
+  parent?: string;
+  /** 语义层给出的锚点（归一化到部件包围盒，y 向下）。 */
+  proximal?: [number, number];
+  distal?: [number, number];
 }
 
 export interface BuildSkeletonOptions {
@@ -636,10 +645,32 @@ export function buildSkeleton(options: BuildSkeletonOptions): { spine: any; bone
   const boneNames = new Set(visible.map((part) => part.name));
   boneNames.add("root");
 
-  /** 解析父骨骼：不存在或成环时退回到 torso / hip / root。 */
+  /** 解析父骨骼：显式语义优先，其次按名字关键词猜；不存在或成环时退回到 torso / hip / root。 */
   const resolveParent = (name: string, seen: Set<string>): string | undefined => {
-    let parent = parentBoneOf(name);
-    while (parent !== undefined && !boneNames.has(parent)) parent = parentBoneOf(parent);
+    // ① 语义层显式指定的父级优先。它可能指向一个被隐藏/未生成的部件——
+    //    那种情况下不能让骨架断链，所以继续走 ②。
+    const explicit = byName.get(name)?.parent;
+    let parent: string | undefined =
+      explicit !== undefined && explicit !== name && boneNames.has(explicit) ? explicit : undefined;
+
+    // ② 按名字关键词沿语义链往上找第一个真实存在的骨骼。
+    //    加 guard 是因为 `parentBoneOf` 的关键词规则本身可能成环
+    //    （例如某个名字同时命中两组关键词），无界循环会让整个推导卡死。
+    if (parent === undefined) {
+      const guard = new Set<string>();
+      let cursor = parentBoneOf(name);
+      while (cursor !== undefined && !guard.has(cursor)) {
+        guard.add(cursor);
+        if (cursor !== name && boneNames.has(cursor)) {
+          parent = cursor;
+          break;
+        }
+        const next = parentBoneOf(cursor);
+        if (next === cursor) break;
+        cursor = next;
+      }
+    }
+
     // 语义链可能绕回自己（例如「胯部」的父级按语义也算胯部），必须在这里断开，
     // 否则骨骼表里会出现 parent == name 的自环，渲染时无限递归。
     if (parent === name) parent = undefined;
@@ -686,7 +717,11 @@ export function buildSkeleton(options: BuildSkeletonOptions): { spine: any; bone
     const part = byName.get(name);
     if (part === undefined) continue;
 
-    const { proximal, distal } = anchorsOf(name);
+    // 锚点：语义层给了就用它（人在界面上拖过、或 AI 判断过），没给才回落到
+    // 角色的默认锚点。这是「初始姿态逐像素还原」的前提下唯一允许改动的输入。
+    const fallbackAnchors = anchorsOf(name);
+    const proximal = part.proximal ?? fallbackAnchors.proximal;
+    const distal = part.distal ?? fallbackAnchors.distal;
     const proxPx = part.x + proximal[0] * part.width;
     const proxPy = part.y + proximal[1] * part.height;
     const distPx = part.x + distal[0] * part.width;

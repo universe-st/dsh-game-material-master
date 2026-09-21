@@ -400,6 +400,25 @@ async function main() {
   }
   check("client.ts 里没有任何 import（必须是经典脚本）", !/^\s*import\s/m.test(clientSource), "");
 
+  // ── 8b. 语义角色的两边一致性 ──────────────────────────────────────────
+  // 浏览器半区不能 import，所以 RIG_ROLES / ROLE_LABELS 必然是一份拷贝。
+  // 这里逐项比对宿主导出的真源，防止「界面上能选、宿主不认识」这类漂移。
+  {
+    const semantics = await import("../lib/rigsemantics.js");
+    const hostRoles = [...semantics.RIG_ROLES];
+    const clientRoles = [...clientSource.matchAll(/\{\s*key:\s*"(\w+)",\s*label:\s*"([^"]+)"\s*\}/g)].map((m) => [m[1], m[2]]);
+    const missing = hostRoles.filter((role) => !clientRoles.some(([key]) => key === role));
+    const extra = clientRoles.filter(([key]) => !hostRoles.includes(key));
+    check("客户端角色列表覆盖宿主的全部角色", missing.length === 0, missing.join("、"));
+    check("客户端没有宿主不认识的额外角色", extra.length === 0, extra.map(([key]) => key).join("、"));
+    const labelMismatch = hostRoles.filter((role) => {
+      const found = clientRoles.find(([key]) => key === role);
+      return found !== undefined && found[1] !== semantics.ROLE_LABELS[role];
+    });
+    check("角色的中文名两边一致", labelMismatch.length === 0, labelMismatch.join("、"));
+    check("客户端角色数量与宿主一致", clientRoles.length === hostRoles.length, `${clientRoles.length} vs ${hostRoles.length}`);
+  }
+
   // ── 8. 浏览器半区的方法清单与宿主 manifest 必须一一对应 ─────────────────
   console.log("\n8) 远程方法清单一致性");
   const listed = [...clientSource.matchAll(/^\s*\["(\w+)",\s*(true|false)\],?$/gm)].map((match) => match[1]);

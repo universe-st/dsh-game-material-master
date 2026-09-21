@@ -64,6 +64,13 @@ import {
   type RigPlacedPart
 } from "./spine.js";
 import { buildPreviewHtml } from "./rigpreview.js";
+import {
+  defaultSemanticsOf,
+  mergeSemantics,
+  validateSemantics,
+  type PartSemantics,
+  type SemanticsIssue
+} from "./rigsemantics.js";
 import type { NodeStatus } from "./store.js";
 
 export type RigStageKey = "parts" | "layout" | "rig" | "atlas";
@@ -93,6 +100,24 @@ export interface RigPartNode {
   hidden?: boolean;
   error?: string;
   updatedAt?: number;
+
+  // ── 语义层（`rigsemantics.ts`）─────────────────────────────────────
+  /**
+   * 语义角色。它决定默认锚点、默认父级，以及「哪些动画预设能作用在它身上」。
+   * 没填时按部件名推断（`roleOfName`），所以 v1 的历史任务与直接上传部件的
+   * 路径都不需要用户先填表。
+   */
+  role?: string;
+  /** 父部件名；`undefined` 表示直接挂 root。改它会立刻改变骨架层级。 */
+  parent?: string;
+  /** 近端锚点（归一化到部件包围盒，y 向下）——骨骼原点落在这里。 */
+  proximal?: [number, number];
+  /** 远端锚点；骨骼朝向 = 近端 → 远端。 */
+  distal?: [number, number];
+  /** 自由标签，供 AI 按组批量操作（改色 / 重绘）。 */
+  tags?: string[];
+  /** 语义来源：`default` 表兜底 / `ai` 模型提案 / `human` 人改过。 */
+  semanticsSource?: "default" | "ai" | "human";
 }
 
 export interface RigSheetState {
@@ -430,7 +455,13 @@ function normalizeRigJob(raw: any): RigJob {
           approved: part.approved === true,
           hidden: part.hidden === true,
           error: typeof part.error === "string" ? part.error : undefined,
-          updatedAt: Number.isFinite(part.updatedAt) ? part.updatedAt : undefined
+          updatedAt: Number.isFinite(part.updatedAt) ? part.updatedAt : undefined,
+          role: typeof part.role === "string" && part.role !== "" ? part.role : undefined,
+          parent: typeof part.parent === "string" && part.parent !== "" ? part.parent : undefined,
+          proximal: Array.isArray(part.proximal) && part.proximal.length === 2 ? [num(part.proximal[0], 0.5), num(part.proximal[1], 0)] : undefined,
+          distal: Array.isArray(part.distal) && part.distal.length === 2 ? [num(part.distal[0], 0.5), num(part.distal[1], 1)] : undefined,
+          tags: Array.isArray(part.tags) ? part.tags.filter((tag: unknown) => typeof tag === "string") : undefined,
+          semanticsSource: part.semanticsSource === "ai" || part.semanticsSource === "human" ? part.semanticsSource : part.semanticsSource === "default" ? "default" : undefined
         }))
     : [];
 
@@ -604,7 +635,14 @@ export function rigSnapshot(job: RigJob, origin = "") {
       manual: item?.manual === true,
       score: item?.score,
       coverage: item?.coverage,
-      error: part.error
+      error: part.error,
+      // 语义层：界面要能就地改，agent 要能读到「它认为这块是什么」。
+      role: part.role ?? null,
+      parent: part.parent ?? null,
+      proximal: part.proximal ?? null,
+      distal: part.distal ?? null,
+      tags: part.tags ?? [],
+      semanticsSource: part.semanticsSource ?? null
     };
   });
 
@@ -685,6 +723,25 @@ export function rigSnapshot(job: RigJob, origin = "") {
     prompt: job.prompts.sheet,
     suffix: job.prompts.suffix,
     settings: job.settings,
+    /**
+     * 语义层的整体视图。
+     *
+     * 放在顶层而不是塞进某个阶段里，因为它是**装配与骨骼的共同输入**：
+     * 界面要在两个阶段都能看到「这块是什么、挂在谁身上」，agent 也要能拿到
+     * 「语义是否已经确认过、有没有结构问题」再决定下一步。
+     */
+    semantics: (() => {
+      const view = validateRigSemantics(job);
+      const ready = semanticPartsOf(job);
+      return {
+        ready: ready.length > 0 && ready.every((part) => part.role !== undefined),
+        confirmed: ready.length > 0 && ready.every((part) => part.semanticsSource === "human" || part.semanticsSource === "ai"),
+        count: ready.length,
+        ok: view.ok,
+        errors: view.errors,
+        warnings: view.warnings
+      };
+    })(),
     // 拆件图阶段单独给一份，界面要直接拿 url 显示原图。
     sheet: { status: job.sheet.status, approved: job.sheet.approved === true, url: url(job.sheet.file), file: job.sheet.file, error: job.sheet.error },
     layout: {
@@ -797,6 +854,9 @@ export async function uploadRigPart(jobId: string, name: string, base64: string)
   else job.parts.push(node);
   // 部件变了，后面的阶段全部作废。
   invalidateFrom(job, "parts");
+  // 新上传的部件补一次语义——文件名就是它唯一的语义线索（`head.png` → 头部），
+  // 其余字段按角色默认填上；用户之后可以只改不对的那几条。
+  ensurePartSemantics(job);
   appendJobLog(job.log, "info", `已上传部件「${partName}」（${decoded.width}×${decoded.height}）`);
   await writeRigJob(job);
   return { name: partName, width: decoded.width, height: decoded.height };
@@ -810,7 +870,10 @@ export async function removeRigPart(jobId: string, name: string): Promise<void> 
   job.parts = job.parts.filter((part) => part.name !== name);
   delete job.layout.items[name];
   if (node.file !== undefined) await rm(rigAssetPath(jobId, node.file), { force: true }).catch(() => undefined);
+  // 别的部件的父级可能指向它；先摘掉再修复，避免留下悬空父级。
+  for (const other of job.parts) if (other.parent === name) other.parent = undefined;
   invalidateFrom(job, "parts");
+  ensurePartSemantics(job);
   appendJobLog(job.log, "info", `已删除部件「${name}」`);
   await writeRigJob(job);
 }
@@ -839,8 +902,18 @@ export async function renameRigPart(jobId: string, from: string, to: string): Pr
   }
   node.name = name;
   node.label = partLabel(name);
+  // 改名会改变语义推断（`left-lower-arm` 与 `blob-3` 的角色完全不同），
+  // 所以把别人的父级引用改过来，再重算这一条的角色/锚点。
+  for (const other of job.parts) if (other.parent === from) other.parent = name;
+  node.role = undefined;
+  node.proximal = undefined;
+  node.distal = undefined;
+  node.semanticsSource = undefined;
+  // ⚠️ 只作废「骨骼与图集」，**不动装配结果**：改名改的是角色/父级/锚点，
+  // 而布局位置与名字无关。作废到 layout 会让用户白丢一次手工摆位。
   invalidateFrom(job, "rig");
-  appendJobLog(job.log, "info", `部件「${from}」已改名为「${name}」`);
+  ensurePartSemantics(job);
+  appendJobLog(job.log, "info", `部件「${from}」已改名为「${name}」（语义已按新名字重算）`);
   await writeRigJob(job);
 }
 
@@ -1005,6 +1078,155 @@ export function stopRigPoller(jobId: string): void {
   const timer = pollers.get(jobId);
   if (timer !== undefined) clearInterval(timer);
   pollers.delete(jobId);
+}
+
+// ── 语义层（阶段③）──────────────────────────────────────────────────────
+
+/** 参与语义的部件：只有 ready 且没被隐藏的部件才进骨架。 */
+function semanticPartsOf(job: RigJob): RigPartNode[] {
+  return job.parts.filter((part) => part.status === "ready" && part.hidden !== true);
+}
+
+/** 把一个部件节点摊成语义层的输入形状。 */
+function semanticsInputOf(parts: RigPartNode[]): Array<Partial<PartSemantics> & { name: string }> {
+  return parts.map((part) => ({
+    name: part.name,
+    role: part.role as PartSemantics["role"],
+    parent: part.parent,
+    proximal: part.proximal,
+    distal: part.distal,
+    tags: part.tags,
+    source: part.semanticsSource
+  }));
+}
+
+/**
+ * 补齐缺失的语义。
+ *
+ * **这是「不填表也能跑」的落点**：拆件刚跑完、或用户刚上传完部件时，每个部件
+ * 都还没有语义；这里用 `defaultSemanticsOf` 一次性补全（角色按名字推断、父级按
+ * 角色链推导、锚点取角色默认）。之后 AI 或人只需要改**不对的那几条**。
+ *
+ * 返回补齐的条数，便于在日志里说清楚「这一步做了什么」。
+ */
+export function ensurePartSemantics(job: RigJob): number {
+  const parts = semanticPartsOf(job);
+  if (parts.length === 0) return 0;
+  const fresh = defaultSemanticsOf(parts.map((part) => part.name));
+  const byName = new Map(fresh.map((item) => [item.name, item]));
+  let filled = 0;
+  for (const part of parts) {
+    if (part.role !== undefined && part.proximal !== undefined && part.distal !== undefined) continue;
+    const item = byName.get(part.name);
+    if (item === undefined) continue;
+    if (part.role === undefined) part.role = item.role;
+    if (part.parent === undefined) part.parent = item.parent;
+    if (part.proximal === undefined) part.proximal = item.proximal;
+    if (part.distal === undefined) part.distal = item.distal;
+    if (part.tags === undefined) part.tags = item.tags;
+    if (part.semanticsSource === undefined) part.semanticsSource = "default";
+    filled++;
+  }
+
+  // 顺手做一次**修复**：删部件 / 隐藏部件 / 改名字之后，父级可能指向已经不存在的
+  // 部件。悬空父级会让骨架断链，成环会让渲染无限递归——两者都必须在写入前清掉。
+  // 放在这里而不是每个调用点，是因为「改变部件集合」的入口有好几个（分割、上传、
+  // 删除、隐藏、改名），漏掉任何一个都会留下坏数据。
+  const repaired = validateSemantics(semanticsInputOf(semanticPartsOf(job)));
+  writeSemantics(job, repaired.parts);
+  return filled;
+}
+
+export interface RigSemanticsView {
+  parts: PartSemantics[];
+  errors: SemanticsIssue[];
+  warnings: SemanticsIssue[];
+  ok: boolean;
+}
+
+/**
+ * 校验当前任务的语义。
+ *
+ * 失败也返回可用的 `parts`（语义层的校验函数保证这一点），所以界面永远能显示
+ * 「哪里不对」，而不是一片空白。
+ */
+export function validateRigSemantics(job: RigJob, options: { humanoid?: boolean } = {}): RigSemanticsView {
+  const parts = semanticPartsOf(job);
+  const result = validateSemantics(semanticsInputOf(parts), options);
+  return { parts: result.parts, errors: result.errors, warnings: result.warnings, ok: result.ok };
+}
+
+/** 把校验后的语义写回部件节点。 */
+function writeSemantics(job: RigJob, parts: PartSemantics[]): void {
+  const byName = new Map(parts.map((part) => [part.name, part]));
+  for (const node of job.parts) {
+    const item = byName.get(node.name);
+    if (item === undefined) continue;
+    node.role = item.role;
+    node.parent = item.parent;
+    node.proximal = item.proximal;
+    node.distal = item.distal;
+    node.tags = item.tags;
+    node.semanticsSource = item.source;
+  }
+}
+
+export interface SetRigSemanticsResult {
+  ok: boolean;
+  touched: number;
+  errors: SemanticsIssue[];
+  warnings: SemanticsIssue[];
+}
+
+/**
+ * 局部修改语义（AI 或人）。
+ *
+ * 只改传进来的字段——这是细粒度失效传播的前提：改一个部件的 `parent` 不应该
+ * 让整份语义表重新生成，也不应该丢掉别人调过的锚点。
+ *
+ * 校验不通过时**不落盘**：错误会原样返回给调用方（界面/agent），
+ * 由它决定是修正还是强制写入。理由是语义错误会一路传到骨架与导出，
+ * 静默写进去比直接拒绝代价大得多。
+ */
+export async function setRigSemantics(
+  jobId: string,
+  patches: Array<{ name: string } & Partial<Omit<PartSemantics, "name">>>,
+  options: { humanoid?: boolean; by?: "ai" | "human" } = {}
+): Promise<SetRigSemanticsResult> {
+  const job = await readRigJob(jobId);
+  if (job === undefined) throw new Error(`任务不存在：${jobId}`);
+  if (patches.length === 0) return { ok: true, touched: 0, errors: [], warnings: [] };
+
+  const known = new Set(job.parts.map((part) => part.name));
+  for (const patch of patches) {
+    if (!known.has(patch.name)) throw new Error(`没有这个部件：${patch.name}`);
+  }
+
+  ensurePartSemantics(job);
+  const by = options.by ?? "human";
+  const merged = mergeSemantics(semanticsInputOf(semanticPartsOf(job)), patches).map((item) => {
+    const touched = patches.some((patch) => patch.name === item.name);
+    return touched ? { ...item, source: by } : item;
+  });
+
+  const validated = validateSemantics(merged, { humanoid: options.humanoid });
+  if (!validated.ok) {
+    return { ok: false, touched: 0, errors: validated.errors, warnings: validated.warnings };
+  }
+
+  writeSemantics(job, validated.parts);
+  // ⚠️ 只作废「骨骼与图集」，**不动装配结果**：语义（角色/父级/锚点）只影响
+  // 骨骼推导，而部件摆在画布上的位置与语义无关。作废到 layout 会让用户改一次
+  // 角色就白丢一次手工摆位——而角色恰恰是最需要反复试的字段。
+  invalidateFrom(job, "rig");
+  appendJobLog(
+    job.log,
+    "info",
+    `语义已更新：${patches.map((patch) => patch.name).join("、")}` +
+      (validated.warnings.length > 0 ? `；${validated.warnings.length} 条提示` : "")
+  );
+  await writeRigJob(job);
+  return { ok: true, touched: patches.length, errors: [], warnings: validated.warnings };
 }
 
 // ── 阶段①：拆件 ────────────────────────────────────────────────────────
@@ -1234,6 +1456,9 @@ export async function segmentSheet(jobId: string): Promise<void> {
   const fresh = await readRigJob(jobId);
   if (fresh === undefined) return;
   fresh.parts = next;
+  // 分割完立刻补齐语义：这样「格子名 → 角色 → 父级/锚点」是一条确定链路，
+  // 用户可以先去装配、也可以先改语义，两条路都不需要先填一张表。
+  const filledSemantics = ensurePartSemantics(fresh);
   fresh.layout = { status: "empty", items: {} };
   fresh.rig = { status: "empty" };
   fresh.atlas = { status: "empty" };
@@ -1291,7 +1516,8 @@ export async function segmentSheet(jobId: string): Promise<void> {
     "info",
     `分割完成：${next.filter((p) => p.source === "generated").length} 个部件` +
       (missing.length > 0 ? `；这些格子没有检测到部件：${missing.join("、")}` : "") +
-      (mergedFragments > 0 ? `；有 ${mergedFragments} 个碎块被并进了相邻的部件` : "")
+      (mergedFragments > 0 ? `；有 ${mergedFragments} 个碎块被并进了相邻的部件` : "") +
+      (filledSemantics > 0 ? `；已补齐 ${filledSemantics} 个部件的语义（角色/父级/锚点）` : "")
   );
   // 生图模型不按网格摆的情况并不罕见（实测常把「上臂+小臂+手」连成一整块，
   // 或者把角色摊成两三行松散布局）。这时格子归属就没有意义了，与其让骨架
@@ -1842,17 +2068,28 @@ export async function buildRigOutput(jobId: string): Promise<void> {
   await writeRigJob(job);
 
   try {
-    const placedParts: RigPlacedPart[] = ordered.map(([name, item]) => ({
-      name,
-      file: job.parts.find((part) => part.name === name)?.file ?? `parts/${name}.png`,
-      x: item.x,
-      y: item.y,
-      width: item.width,
-      height: item.height,
-      scale: item.scale,
-      rotation: item.rotation,
-      z: item.z
-    }));
+    // 语义是骨骼推导的输入；到这里还缺就补一次（例如用户全程没打开过语义页）。
+    const filled = ensurePartSemantics(job);
+    if (filled > 0) appendJobLog(job.log, "info", `构建骨骼前补齐了 ${filled} 个部件的语义`);
+
+    const placedParts: RigPlacedPart[] = ordered.map(([name, item]) => {
+      const node = job.parts.find((part) => part.name === name);
+      return {
+        name,
+        file: node?.file ?? `parts/${name}.png`,
+        x: item.x,
+        y: item.y,
+        width: item.width,
+        height: item.height,
+        scale: item.scale,
+        rotation: item.rotation,
+        z: item.z,
+        // 语义层的父级与锚点优先；没给时 `buildSkeleton` 会回落到按名字推断。
+        parent: node?.parent,
+        proximal: node?.proximal,
+        distal: node?.distal
+      };
+    });
 
     const { spine, bones, warnings } = buildSkeleton({
       name: job.name,
