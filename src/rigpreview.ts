@@ -351,11 +351,61 @@ export function buildPreviewHtml(options: PreviewOptions): string {
     return { a: a, b: b, c: c, d: d, e: d0.x - a * s0.x - c * s0.y, f: d0.y - b * s0.x - d * s0.y };
   }
 
+  /**
+   * 把附件的顶点解成「**部件中心坐标系**里该画在哪」（也就是 drawMesh 用的那套）。
+   *
+   * 两种格式要分开处理，而它们只能靠**长度**区分：
+   *  - 非加权：vertices 就是坐标对，直接可用（长度等于 uvs）；
+   *  - 加权（LBS）：Spine 的交错流 [骨骼数, (骨骼下标, x, y, 权重) × 骨骼数, …]，
+   *    x/y 是**骨骼局部**坐标，得先用各骨骼的**当前**世界变换做线性混合，
+   *    再逐级逆回部件坐标系。
+   *
+   * 不分开的后果不是报错，是**画出一团乱线**：骨骼下标会被当成坐标用。
+   */
+  function meshLocalVertices(att, bone) {
+    const raw = att.vertices || [];
+    const uvs = att.uvs || [];
+    if (raw.length === 0) return [];
+    if (raw.length === uvs.length) return raw;
+
+    const out = [];
+    const attRad = -((att.rotation || 0) * Math.PI) / 180;
+    const cosA = Math.cos(attRad);
+    const sinA = Math.sin(attRad);
+    const attX = att.x || 0;
+    const attY = att.y || 0;
+    let cursor = 0;
+    while (cursor < raw.length) {
+      const count = raw[cursor++];
+      let wx = 0;
+      let wy = 0;
+      for (let n = 0; n < count; n++) {
+        const index = raw[cursor++];
+        const x = raw[cursor++];
+        const y = raw[cursor++];
+        const weight = raw[cursor++];
+        const owner = bones[(SPINE.bones || [])[index]?.name];
+        if (!owner) continue;
+        wx += (Math.cos(owner.worldRot) * x - Math.sin(owner.worldRot) * y + owner.worldX) * weight;
+        wy += (Math.sin(owner.worldRot) * x + Math.cos(owner.worldRot) * y + owner.worldY) * weight;
+      }
+      // 世界 → 本骨骼局部 → 再逆挂点变换，回到"图片中心"坐标系。
+      const dx = wx - bone.worldX;
+      const dy = wy - bone.worldY;
+      const c = Math.cos(-bone.worldRot);
+      const s = Math.sin(-bone.worldRot);
+      const lx = dx * c - dy * s - attX;
+      const ly = dx * s + dy * c - attY;
+      out.push(lx * cosA - ly * sinA, lx * sinA + ly * cosA);
+    }
+    return out;
+  }
+
   function drawMesh(bone, att, img, name, t) {
-    var verts = att.vertices || [];
-    var uvs = att.uvs || [];
-    var tris = att.triangles || [];
-    if (verts.length === 0 || tris.length === 0) return;
+    const verts = meshLocalVertices(att, bone);
+    const uvs = att.uvs || [];
+    const tris = att.triangles || [];
+    if (verts.length === 0 || tris.length === 0) return;   // 加权流已在上一步解码成坐标
     var width = att.width || 1;
     var height = att.height || 1;
     var offsets = deformOffsetsOf(name, att, t);

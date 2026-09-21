@@ -1415,11 +1415,22 @@ console.log("=== 16. 蒙皮网格与 FFD 变形（M5）===");
     });
     const att = meshed.spine.skins[0].attachments.hip.hip;
     check("有网格的部件出 mesh 附件", att.type === "mesh", String(att.type));
-    check("mesh 顶点数 = (4+1)²", att.vertices.length / 2 === 25, String(att.vertices.length / 2));
+    check("mesh 顶点数 = (4+1)²", att.uvs.length / 2 === 25, String(att.uvs.length / 2));
     check("mesh 有 uvs / triangles / path", Array.isArray(att.uvs) && Array.isArray(att.triangles) && att.path === "hip");
-    check("顶点以部件中心为原点", (() => {
+    // 「顶点以部件中心为原点」只对**非加权**格式成立（加权顶点写的是骨骼局部坐标，
+    // 精度与正确性由下面 LBS 那节单独断言）。
+    check("非加权网格的顶点以部件中心为原点", (() => {
+      const plain = buildSkeleton({
+        canvasWidth: W, canvasHeight: H,
+        parts: [{ name: "head", file: "h.png", x: 100, y: 100, width: 200, height: 160, scale: 1, rotation: 0, z: 0 }],
+        animationIds: ["idle"],
+        meshes: { head: { cols: 4, rows: 4 } }
+      });
+      const plainAtt = plain.spine.skins[0].attachments.head.head;
+      // 骨架里只有 head 一根骨 → 没有别的骨骼可以影响它 → 走非加权分支
+      if (plainAtt.vertices.length !== plainAtt.uvs.length) return false;
       let minX = Infinity, maxX = -Infinity;
-      for (let i = 0; i < att.vertices.length; i += 2) { minX = Math.min(minX, att.vertices[i]); maxX = Math.max(maxX, att.vertices[i]); }
+      for (let i = 0; i < plainAtt.vertices.length; i += 2) { minX = Math.min(minX, plainAtt.vertices[i]); maxX = Math.max(maxX, plainAtt.vertices[i]); }
       return Math.abs(minX + 100) < 0.01 && Math.abs(maxX - 100) < 0.01;
     })());
     const deform = meshed.spine.animations.idle.deform?.hip?.default;
@@ -1442,11 +1453,75 @@ console.log("=== 16. 蒙皮网格与 FFD 变形（M5）===");
       name: "mesh", canvasWidth: W, canvasHeight: H, spine: meshed.spine, animations: meshed.animationsRaw
     });
     const display = db.armature[0].skin[0].slot.find((slot) => slot.name === "hip").display[0];
-    check("DragonBones 出 mesh display", display.type === "mesh" && display.vertices.length / 2 === 25, JSON.stringify(display.type));
+    // 这个骨架有权重，DragonBones 侧会**有意**退回 image：它的加权网格是另一套编码
+    // （weights + slotPose + bonePose），直接吃 Spine 的交错流只会画出一团乱线。
+    check("DragonBones 对加权网格退回 image（不是 mesh）", display.type === "image", JSON.stringify(display.type));
     const ffd = db.armature[0].animation.find((a) => a.name === "idle").ffd;
     check("DragonBones 出 ffd 时间轴", Array.isArray(ffd) && ffd.length === 1 && ffd[0].frame.length === 7, JSON.stringify(ffd?.length));
     check("ffd 首帧顶点数与 mesh 一致", ffd[0].frame[0].vertices.length / 2 === 25);
     check("ffd 中间帧 duration ≥ 1（末帧被忽略）", ffd[0].frame.slice(0, -1).every((f) => f.duration >= 1));
+  }
+
+  // ── LBS 加权顶点（Spine 的交错格式）──────────────────────────────────
+  {
+    // 一棵有拓扑关系的骨架：hip 连着两条腿，torso 在它上面。
+    const rigged = buildSkeleton({
+      canvasWidth: W,
+      canvasHeight: H,
+      parts: [
+        { name: "torso", file: "torso.png", x: 200, y: 240, width: 160, height: 200, scale: 1, rotation: 0, z: 0 },
+        { name: "hip", file: "hip.png", x: 120, y: 460, width: 260, height: 180, scale: 1, rotation: 0, z: 1 },
+        { name: "left-upper-leg", file: "lul.png", x: 280, y: 660, width: 60, height: 140, scale: 1, rotation: 0, z: 2 },
+        { name: "right-upper-leg", file: "rul.png", x: 190, y: 660, width: 60, height: 140, scale: 1, rotation: 0, z: 3 }
+      ],
+      animationIds: ["idle"],
+      meshes: { hip: { cols: 4, rows: 4 } }
+    });
+    const stream = rigged.spine.skins[0].attachments.hip.hip.vertices;
+    const boneCount = rigged.spine.bones.length;
+
+    // 解析交错流：每顶点 = [骨骼数, (骨骼下标, x, y, 权重) × 骨骼数]
+    let cursor = 0;
+    let vertices = 0;
+    let weightError = 0;
+    let maxBone = -1;
+    let minInfluences = Number.POSITIVE_INFINITY;
+    let maxInfluences = 0;
+    const usedBones = new Set();
+    let malformed = false;
+    while (cursor < stream.length) {
+      const count = stream[cursor++];
+      if (!Number.isInteger(count) || count < 1 || cursor + count * 4 > stream.length) {
+        malformed = true;
+        break;
+      }
+      minInfluences = Math.min(minInfluences, count);
+      maxInfluences = Math.max(maxInfluences, count);
+      let sum = 0;
+      for (let n = 0; n < count; n++) {
+        const index = stream[cursor++];
+        cursor += 2; // x, y
+        const weight = stream[cursor++];
+        sum += weight;
+        maxBone = Math.max(maxBone, index);
+        usedBones.add(rigged.spine.bones[index]?.name);
+      }
+      weightError = Math.max(weightError, Math.abs(sum - 1));
+      vertices++;
+    }
+
+    check("加权顶点流能被完整解析（交错格式正确）", !malformed && cursor === stream.length, `cursor=${cursor} / ${stream.length}`);
+    check("加权顶点数 = 网格顶点数（4×4 → 25）", vertices === 25, String(vertices));
+    check("权重归一化（每个顶点的权重和为 1）", weightError < 1e-4, weightError.toExponential(2));
+    check("骨骼下标都在骨架范围内", maxBone >= 0 && maxBone < boneCount, `${maxBone} / ${boneCount}`);
+    check("每个顶点 1~3 根影响骨骼", minInfluences >= 1 && maxInfluences <= 3, `${minInfluences}~${maxInfluences}`);
+    // **语义**：候选骨骼限制在「自己 + 父级链 + 直接子级」，不该把无关骨骼算进来。
+    // 纯几何距离会把裙子绑到垂下的手臂上（实测过一次），这条断言盯着它别回来。
+    check("影响骨骼都是语义相关的（torso / hip / 两条腿）",
+      [...usedBones].every((name) => ["torso", "hip", "left-upper-leg", "right-upper-leg"].includes(name)),
+      [...usedBones].join(","));
+    check("带加权 mesh 的骨架通过 validateSpineWire", validateSpineWire(rigged.spine).ok,
+      validateSpineWire(rigged.spine).errors.map((e) => `${e.where} ${e.message}`).join("；"));
   }
 }
 

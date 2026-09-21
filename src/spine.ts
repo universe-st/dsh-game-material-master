@@ -24,7 +24,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { buildRigMesh, buildWaveDeform } from "./rigmesh.js";
+import { buildRigMesh, buildWaveDeform, type RigMeshBone } from "./rigmesh.js";
 import { pathSegmentLengths, type RigPathSpec } from "./rigpath.js";
 
 // ── 拆件槽位定义 ────────────────────────────────────────────────────────
@@ -335,29 +335,122 @@ function meshGridOf(
   };
 }
 
-function meshAttachmentOf(  name: string,
+function meshAttachmentOf(
+  name: string,
   part: RigPlacedPart,
   attachment: { x: number; y: number; rotation: number; width: number; height: number },
-  spec: { cols: number; rows: number } | undefined
+  spec: { cols: number; rows: number },
+  context: {
+    imageBones: RigMeshBone[];
+    worldOf: (name: string) => { x: number; y: number; rotation: number } | undefined;
+    boneIndex: Map<string, number>;
+  }
 ): any {
-  if (spec === undefined) return attachment;
-  const grid = meshGridOf(spec, part);
+  // 这里**不能**复用 `meshGridOf`：那个是给 deform 采样用的，骨骼列表是空的
+  // （采样只需要顶点坐标），拿它来算权重会得到一张空权重表，然后静默退回非加权格式
+  // ——表现是「权重算了但导出里没有」，不报错。顶点本身两者一致（权重不改变顶点）。
+  const grid = buildRigMesh({
+    width: Math.max(1, part.width),
+    height: Math.max(1, part.height),
+    cols: spec.cols,
+    rows: spec.rows,
+    bones: context.imageBones,
+    x: part.x,
+    y: part.y
+  });
   if (grid === undefined) return attachment;
   const vertices: number[] = [];
-  for (let i = 0; i < grid.mesh.vertices.length; i += 2) {
-    vertices.push(round(grid.mesh.vertices[i] - part.width / 2, 3), round(grid.mesh.vertices[i + 1] - part.height / 2, 3));
+  for (let i = 0; i < grid.vertices.length; i += 2) {
+    vertices.push(round(grid.vertices[i] - part.width / 2, 3), round(grid.vertices[i + 1] - part.height / 2, 3));
   }
-  return {
+  const base = {
     ...attachment,
-    type: "mesh",
+    type: "mesh" as const,
     // `path` 指向图集里的区域名：mesh 与 region 取的是同一张图，只是画法不同。
     path: name,
-    uvs: grid.mesh.uvs,
-    triangles: grid.mesh.triangles,
-    vertices,
+    uvs: grid.uvs,
+    triangles: grid.triangles,
     // Spine 用它做编辑器里的凸包显示；给顶点数即可（规则网格的凸包就是外圈）。
-    hull: (grid.mesh.cols + 1) * 2 + (grid.mesh.rows - 1) * 2
+    hull: (grid.cols + 1) * 2 + (grid.rows - 1) * 2
   };
+  // LBS 加权顶点（有影响骨骼时）。退回非加权格式是**必须**的：两种格式在运行时是
+  // 两条解析分支，混着写会让解析器读到错位的字节流（表现是网格扭曲成乱线，不报错）。
+  const weighted = buildWeightedVertices(grid, part, attachment, context);
+  return weighted === undefined ? { ...base, vertices } : { ...base, vertices: weighted };
+}
+
+/**
+ * 把「顶点 → 影响骨骼」写成 Spine 的**加权顶点流**。
+ *
+ * Spine 的格式是交错数组：`[骨骼数, (骨骼下标, x, y, 权重) × 骨骼数, 骨骼数, …]`，
+ * 其中 x/y 是顶点**相对该骨骼**的局部坐标（绑定姿势下）。
+ *
+ * 两处坐标系必须同时对上，这是最容易错的地方：
+ *  - 自动权重是在**图像坐标**里算的（与部件同一套系，`buildRigMesh` 收的就是它）；
+ *  - 加权顶点要写到**骨骼局部**（Spine 世界坐标 + 骨骼旋转）。
+ * 中间的桥是附件变换：`顶点世界 = R(骨世界旋转)·(R(挂点旋转)·顶点 + 挂点偏移) + 骨原点`。
+ */
+function buildWeightedVertices(
+  mesh: { vertices: number[]; weights: Array<Array<{ bone: number; weight: number }>>; bones: string[] },
+  part: RigPlacedPart,
+  attachment: { x: number; y: number; rotation: number },
+  context: {
+    imageBones: RigMeshBone[];
+    worldOf: (name: string) => { x: number; y: number; rotation: number } | undefined;
+    boneIndex: Map<string, number>;
+  }
+): number[] | undefined {
+  const owned = context.worldOf(part.name);
+  if (owned === undefined) return undefined;
+  if (context.imageBones.length === 0) return undefined;
+  if (!mesh.weights.some((list) => list.length > 0)) return undefined;
+
+  const halfW = part.width / 2;
+  const halfH = part.height / 2;
+  const attRad = ((attachment.rotation ?? 0) * Math.PI) / 180;
+  const cosA = Math.cos(attRad);
+  const sinA = Math.sin(attRad);
+  const boneRad = (owned.rotation * Math.PI) / 180;
+  const cosB = Math.cos(boneRad);
+  const sinB = Math.sin(boneRad);
+  const out: number[] = [];
+
+  for (let i = 0; i < mesh.vertices.length / 2; i++) {
+    const localX = mesh.vertices[i * 2] - halfW;
+    const localY = mesh.vertices[i * 2 + 1] - halfH;
+    const attX = cosA * localX - sinA * localY + (attachment.x ?? 0);
+    const attY = sinA * localX + cosA * localY + (attachment.y ?? 0);
+    const worldX = cosB * attX - sinB * attY + owned.x;
+    const worldY = sinB * attX + cosB * attY + owned.y;
+
+    const usable = mesh.weights[i].filter((entry) => {
+      const boneName = mesh.bones[entry.bone];
+      return context.boneIndex.has(boneName) && context.worldOf(boneName) !== undefined;
+    });
+    if (usable.length === 0) return undefined;
+    // 权重必须归一化：Spine 直接按权重线性混合顶点，和不等于 1 会让整块网格缩放。
+    const total = usable.reduce((sum, entry) => sum + entry.weight, 0);
+    if (total <= 1e-6) return undefined;
+
+    out.push(usable.length);
+    for (const entry of usable) {
+      const boneName = mesh.bones[entry.bone];
+      const target = context.worldOf(boneName)!;
+      const rad = (target.rotation * Math.PI) / 180;
+      const dx = worldX - target.x;
+      const dy = worldY - target.y;
+      const c = Math.cos(-rad);
+      const s = Math.sin(-rad);
+      out.push(
+        context.boneIndex.get(boneName)!,
+        round(dx * c - dy * s, 3),
+        round(dx * s + dy * c, 3),
+        // 6 位小数：权重是乘出来的，4 位在小权重上会直接归零。
+        Number((entry.weight / total).toFixed(6))
+      );
+    }
+  }
+  return out;
 }
 
 /** 宽容取数：非数字/NaN 一律回落到 `fallback`（约束参数来自界面与对话，不能假设它干净）。 */
@@ -1200,14 +1293,14 @@ export function buildSkeleton(
     const cosB = Math.cos(-bRad);
     const sinB = Math.sin(-bRad);
     attachments[name] = {
-      [name]: meshAttachmentOf(name, part, {
+      [name]: {
         x: round(offX * cosB - offY * sinB, 4),
         y: round(offX * sinB + offY * cosB, 4),
         // 挂点自身旋转 = 抵消骨骼朝向（让初始姿态正立）+ 手动装配里拧的角度。
         rotation: normalizeAngle(-worldRot + (part.rotation ?? 0)),
         width: round(part.width, 4),
         height: round(part.height, 4)
-      }, options.meshes?.[name])
+      }
     };
     slots.push({ name, bone: name, attachment: name });
   }
@@ -1393,6 +1486,49 @@ export function buildSkeleton(
       translateMix: Math.max(0, Math.min(1, num(entry.translateMix, 1))),
       rotateMix: Math.max(0, Math.min(1, num(entry.rotateMix, 1)))
     });
+  }
+
+  // ── 蒙皮网格附件（L1 / LBS）──────────────────────────────────────────
+  //
+  // **必须排在 IK 与 Path 之后**：那两处都会往 `bones` 里插骨骼（IK 会补一根目标骨），
+  // 而加权顶点写的是**骨骼在最终骨骼表里的下标**。早于它们生成的话，插进来的骨骼会把
+  // 后面所有下标整体推后一位，运行时就会读到错的骨骼——实测 `skel.bones[idx]` 直接
+  // 越界成 undefined（表现是网格扭曲，而且不报错）。
+  const boneIndex = new Map<string, number>(bones.map((bone, index) => [bone.name, index]));
+  const fromWorld = (wx: number, wy: number): { x: number; y: number } => ({
+    x: wx + options.canvasWidth / 2,
+    y: options.canvasHeight - wy
+  });
+  for (const [meshName, spec] of Object.entries(options.meshes ?? {})) {
+    const part = byName.get(meshName);
+    const region = attachments[meshName]?.[meshName];
+    if (part === undefined || region === undefined) continue;
+    // 自动权重在**图像坐标**里算（与部件同一套系），所以骨骼位置也换算回去。
+    //
+    // 候选骨骼**限制在语义相关的那些**（自己 + 往上的父级链 + 直接子级），不能是全体。
+    // 纯几何距离会把裙子绑到手臂上——实测 hip 的网格选了 `right-lower-arm` /
+    // `right-hand` / `right-upper-arm`，因为裙子**上缘**到垂下的手臂比到腿还近
+    // （腰部到手臂 ~82px，到小腿 ~278px）。距离不懂拓扑，语义得由调用方给。
+    const related = new Set<string>([meshName]);
+    let cursor = resolvedParent.get(meshName);
+    for (let depth = 0; depth < 3 && cursor !== undefined; depth++) {
+      related.add(cursor);
+      cursor = resolvedParent.get(cursor);
+    }
+    for (const child of childrenOf.get(meshName) ?? []) related.add(child);
+    const imageBones = [...world.entries()]
+      .filter(([name]) => name !== meshName && related.has(name) && boneNames.has(name))
+      .map(([name, point]) => {
+        const image = fromWorld(point.x, point.y);
+        return { name, x: image.x, y: image.y };
+      });
+    attachments[meshName] = {
+      [meshName]: meshAttachmentOf(meshName, part, region, spec, {
+        imageBones,
+        worldOf: (name) => world.get(name),
+        boneIndex
+      })
+    };
   }
 
   const spine = {
