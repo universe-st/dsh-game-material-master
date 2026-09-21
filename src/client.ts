@@ -433,6 +433,9 @@
 .SPR_logList{margin:0;padding:0;list-style:none;max-height:180px;overflow:auto;font-family:ui-monospace,SFMono-Regular,Consolas,Menlo,monospace;font-size:11px;line-height:17px}
 .SPR_logList li{display:flex;gap:8px;white-space:pre-wrap;word-break:break-word}
 .SPR_logTime{color:var(--dsw-alias-label-tertiary);flex:none}
+.SPR_logHead{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px}
+.SPR_logFilters{display:flex;align-items:center;gap:6px;margin-left:auto}
+.SPR_logElapsed{color:var(--dsw-alias-label-tertiary);flex:none}
 .SPR_logList li[data-level=error]{color:var(--dsw-alias-state-error-primary)}
 .SPR_logList li[data-level=warn]{color:var(--dsw-alias-state-warning-primary, #a06a00)}
 .SPR_empty{color:var(--dsw-alias-label-tertiary);font-size:13px;padding:30px 0;text-align:center}
@@ -3006,7 +3009,7 @@
                           })
                         )
                   ),
-                  renderJobLog(job)
+                  h(JobLogPanel, { job })
                 )
           )
         ),
@@ -3511,7 +3514,7 @@
                       )
                     )
                   ),
-                  renderJobLog(job)
+                  h(JobLogPanel, { job })
                 )
           )
         ),
@@ -3646,26 +3649,89 @@
       );
     }
 
-    /** 任务日志（三个模块共用的样式）。 */
-    function renderJobLog(job) {
-      const entries = Array.isArray(job?.log) ? job.log.slice(-40).reverse() : [];
-      if (entries.length === 0) return null;
+    /**
+     * 任务日志面板。
+     *
+     * 从「一条平铺的日志」升级成结构化视图，加了两件真正省时间的事：
+     *
+     *  1. **把「开始 X」与它之后的「X 完成 / 失败」配成一条**，并附上耗时。
+     *     原样平铺时，一次生图会刷出两三条互不相邻的记录（中间夹着别的阶段），
+     *     「这一步到底跑了多久、成没成」要靠人自己拼时间戳——实测排查一次拆件失败时
+     *     就是这么来回翻的。
+     *  2. **级别筛选 + 关键字**。日志里绝大多数是 info，出问题时真正要看的是
+     *     那几条 warn/error；40 条一屏根本翻不到。
+     */
+    function JobLogPanel({ job }) {
+      const [level, setLevel] = React.useState("all");
+      const [query, setQuery] = React.useState("");
+      const raw = Array.isArray(job?.log) ? job.log : [];
+      if (raw.length === 0) return null;
+
+      const paired = [];
+      let open = null;
+      for (const entry of raw) {
+        if (typeof entry?.message !== "string") continue;
+        if (/^开始/.test(entry.message)) {
+          // 上一条还没闭合就再来一条「开始」：把它单独留下，不要吞掉。
+          if (open !== null) paired.push(open);
+          open = entry;
+          continue;
+        }
+        if (open !== null && /完成|失败/.test(entry.message)) {
+          paired.push({
+            at: entry.at,
+            level: entry.level,
+            message: `${open.message.replace(/^开始/, "")} → ${entry.message}`,
+            startedAt: open.at,
+            elapsed: Math.max(0, entry.at - open.at)
+          });
+          open = null;
+          continue;
+        }
+        paired.push(entry);
+      }
+      if (open !== null) paired.push(open);
+
+      const wanted = level === "all" ? null : level === "warn" ? (e) => e.level !== "info" : (e) => e.level === "error";
+      const filtered = paired.filter((entry) => (wanted === null || wanted(entry)) && (query === "" || String(entry.message).includes(query)));
+      const entries = filtered.slice(-40).reverse();
+      const counts = paired.reduce((acc, entry) => { acc[entry.level] = (acc[entry.level] ?? 0) + 1; return acc; }, {});
+      const formatElapsed = (ms) => (ms < 1000 ? `${ms}ms` : ms < 60000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.floor(ms / 60000)}m${Math.round((ms % 60000) / 1000)}s`);
+
       return h(
         "div",
-        { className: "SPR_log" },
-        h("span", { className: "SPR_fieldLabel" }, "运行日志"),
-        h(
-          "ul",
-          { className: "SPR_logList" },
-          entries.map((entry, index) =>
-            h(
-              "li",
-              { key: index, "data-level": entry.level },
-              h("span", { className: "SPR_logTime" }, new Date(entry.at).toLocaleTimeString("zh-CN", { hour12: false })),
-              h("span", null, entry.message)
-            )
+        { className: "SPR_log", "data-testid": "rig-log" },
+        h("div", { className: "SPR_logHead" },
+          h("span", { className: "SPR_fieldLabel" }, `运行日志（${paired.length} 条${counts.error ? ` · ${counts.error} 错误` : counts.warn ? ` · ${counts.warn} 警告` : ""}）`),
+          h("span", { className: "SPR_logFilters" },
+            h(Btn, { on: level === "all", "data-testid": "rig-log-all", onClick: () => setLevel("all") }, "全部"),
+            h(Btn, { on: level === "warn", "data-testid": "rig-log-warn", onClick: () => setLevel("warn") }, `警告+（${(counts.warn ?? 0) + (counts.error ?? 0)}）`),
+            h(Btn, { on: level === "error", "data-testid": "rig-log-error", onClick: () => setLevel("error") }, `错误（${counts.error ?? 0}）`),
+            h("input", {
+              className: "SPR_input",
+              style: { width: 130 },
+              placeholder: "搜关键字…",
+              "data-testid": "rig-log-query",
+              value: query,
+              onChange: (event) => setQuery(event.target.value)
+            })
           )
-        )
+        ),
+        entries.length === 0
+          ? h("p", { className: "SPR_hint" }, filtered.length === 0 && paired.length > 0 ? "当前筛选下没有日志。" : "")
+          : h(
+              "ul",
+              { className: "SPR_logList" },
+              entries.map((entry, index) =>
+                h(
+                  "li",
+                  { key: `${entry.at}-${index}`, "data-level": entry.level },
+                  h("span", { className: "SPR_logTime" }, new Date(entry.at).toLocaleTimeString("zh-CN", { hour12: false })),
+                  h("span", null, entry.message),
+                  entry.elapsed === undefined ? null : h("span", { className: "SPR_logElapsed" }, `（${formatElapsed(entry.elapsed)}）`)
+                )
+              )
+            )
       );
     }
 
@@ -6851,7 +6917,7 @@
                         )
                       : null,
 
-                    renderJobLog(job)
+                    h(JobLogPanel, { job })
                   )
             )
       );

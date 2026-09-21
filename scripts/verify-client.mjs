@@ -562,6 +562,16 @@ function checkRigContracts(text, label) {
     ["从 layout.items 取坐标", "job.layout?.items?.[name]"]
   ]) {
     check(`${label}：Path 面板有${feature}`, text.includes(token), token);
+  }
+  // 日志面板（M7）：级别筛选 + 关键字 + 把「开始 X」与「X 完成」配成一条并附耗时。
+  for (const [feature, token] of [
+    ["日志面板", 'data-testid": "rig-log"'],
+    ["级别筛选（全部/警告+/错误）", 'data-testid": "rig-log-warn"'],
+    ["关键字搜索", 'data-testid": "rig-log-query"'],
+    ["配对耗时展示", "SPR_logElapsed"],
+    ["按级别计数", "counts.error"]
+  ]) {
+    check(`${label}：日志面板有${feature}`, text.includes(token), token);
   }  // 撤销/重做的两处时序陷阱，都是实测撞出来的：  //  ① 把 setHistory([]) 挂在 [job.id, job.updatedAt] 上 —— commit 自己就会改
   //     updatedAt，于是每提交一次就清空撤销栈，撤销按钮永远是灰的；
   //  ② undo 把「改动前」的快照塞进重做栈 —— 重做还原的还是改动前那份，点了没反应。
