@@ -452,7 +452,9 @@ async function main() {
       "resetRigBoneOffsets",
       "setRigAnimationSettings",
       "resetRigAnimationSettings",
-      "setRigLayoutHints"
+      "setRigLayoutHints",
+      "tintRigParts",
+      "setRigTextureVersion"
     ];
     const missing = mustBeDocumented.filter((method) => !callDescription.includes(method));
     check(`骨骼动画的三层修改方法都写进了工具描述（共 ${callDescription.length} 字符）`, missing.length === 0, missing.join("、"));

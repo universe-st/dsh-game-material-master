@@ -23,6 +23,124 @@ export interface Rgba {
   height: number;
 }
 
+// ── 逐部件换色 ──────────────────────────────────────────────────────────
+
+/**
+ * 换色参数。滑杆集合抄自 reskin-app 的 `imaging.py:93-141`——它的取值域是
+ * 实践调出来的（色相 ±180、饱和度 0~3 倍、明度/亮度 ±1、对比 0~3、RGB 各 ±0.5）。
+ */
+export interface TintOptions {
+  /** 色相偏移（度，-180~180）。 */
+  hue?: number;
+  /** 饱和度倍率（0~3，1 = 不变）。 */
+  saturation?: number;
+  /** 明度偏移（-1~1）。 */
+  lightness?: number;
+  /** 亮度偏移（-1~1）。 */
+  brightness?: number;
+  /** 对比度倍率（0~3，1 = 不变）。 */
+  contrast?: number;
+  /** RGB 平衡，每个分量 -0.5~0.5。 */
+  rgb?: [number, number, number];
+}
+
+/** 这些参数是否等价于「什么都不做」——用来跳过整趟像素循环。 */
+export function isIdentityTint(options: TintOptions): boolean {
+  const close = (value: number | undefined, target: number): boolean => Math.abs((value ?? target) - target) < 1e-6;
+  const [r, g, b] = options.rgb ?? [0, 0, 0];
+  return (
+    close(options.hue, 0) &&
+    close(options.saturation, 1) &&
+    close(options.lightness, 0) &&
+    close(options.brightness, 0) &&
+    close(options.contrast, 1) &&
+    Math.abs(r) < 1e-6 &&
+    Math.abs(g) < 1e-6 &&
+    Math.abs(b) < 1e-6
+  );
+}
+
+function clamp255(value: number): number {
+  return value < 0 ? 0 : value > 255 ? 255 : Math.round(value);
+}
+
+/** RGB(0~1) → HSL(0~1)。 */
+function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  if (max === min) return [0, 0, l];
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h: number;
+  if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+  else if (max === g) h = ((b - r) / d + 2) / 6;
+  else h = ((r - g) / d + 4) / 6;
+  return [h, s, l];
+}
+
+function hue2rgb(p: number, q: number, t: number): number {
+  let value = t;
+  if (value < 0) value += 1;
+  if (value > 1) value -= 1;
+  if (value < 1 / 6) return p + (q - p) * 6 * value;
+  if (value < 1 / 2) return q;
+  if (value < 2 / 3) return p + (q - p) * (2 / 3 - value) * 6;
+  return p;
+}
+
+/** HSL(0~1) → RGB(0~1)。 */
+function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+  if (s === 0) return [l, l, l];
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+  return [hue2rgb(p, q, h + 1 / 3), hue2rgb(p, q, h), hue2rgb(p, q, h - 1 / 3)];
+}
+
+/**
+ * 对一个部件贴图换色，返回**新图**（不改原图）。
+ *
+ * 全透明的像素直接跳过：换色不该把「没有像素」变成「有一点像素」，
+ * 而且边缘像素的 RGB 在透明处往往是无意义的残留值，动它反而会污染抗锯齿。
+ *
+ * 顺序与参考项目一致：先 HSL（色相/饱和/明度），再 RGB 域的对比度/亮度/RGB 平衡。
+ * 注意这是**逐像素循环**——部件尺寸在几百像素量级（几十万像素），
+ * 单张几十毫秒；这也是为什么换色走「生成一个新版本」而不是每次渲染时实时算。
+ */
+export function tintRgba(src: Rgba, options: TintOptions): Rgba {
+  const out = Buffer.from(src.data);
+  if (isIdentityTint(options)) return { data: out, width: src.width, height: src.height };
+
+  const hueShift = (options.hue ?? 0) / 360;
+  const satMul = options.saturation ?? 1;
+  const lightAdd = options.lightness ?? 0;
+  const brightness = options.brightness ?? 0;
+  const contrast = options.contrast ?? 1;
+  const [balanceR, balanceG, balanceB] = options.rgb ?? [0, 0, 0];
+
+  for (let i = 0; i < src.width * src.height; i++) {
+    const at = i * 4;
+    if (src.data[at + 3] === 0) continue;
+
+    let [h, s, l] = rgbToHsl(src.data[at] / 255, src.data[at + 1] / 255, src.data[at + 2] / 255);
+    h = (h + hueShift + 1) % 1;
+    s = Math.min(1, Math.max(0, s * satMul));
+    l = Math.min(1, Math.max(0, l + lightAdd));
+    let [r, g, b] = hslToRgb(h, s, l);
+
+    // 对比度绕 0.5 缩放，再叠亮度与 RGB 平衡。
+    r = (r - 0.5) * contrast + 0.5 + brightness + balanceR;
+    g = (g - 0.5) * contrast + 0.5 + brightness + balanceG;
+    b = (b - 0.5) * contrast + 0.5 + brightness + balanceB;
+
+    out[at] = clamp255(r * 255);
+    out[at + 1] = clamp255(g * 255);
+    out[at + 2] = clamp255(b * 255);
+    // alpha 原样保留：换色不改变轮廓。
+  }
+  return { data: out, width: src.width, height: src.height };
+}
+
 // ── 基础像素操作 ────────────────────────────────────────────────────────
 
 export function createRgba(width: number, height: number, fill: [number, number, number, number] = [0, 0, 0, 0]): Rgba {

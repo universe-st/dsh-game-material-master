@@ -20,6 +20,7 @@ const { encodePng } = await import("../lib/png.js");
 const { createRgba, resizeRgba, alphaBounds } = await import("../lib/rigpose.js");
 const { DEFAULT_DRAW_ORDER, RIG_SLOTS } = await import("../lib/spine.js");
 const riggen = await import("../lib/riggen.js");
+const versionsOf = riggen.versionsOf;
 
 let failures = 0;
 function check(name, ok, detail = "") {
@@ -257,6 +258,101 @@ console.log("=== 1d. 动画参数（M3）===");
   await riggen.resetRigAnimationSettings(job.id);
   s = await riggen.readRigJob(job.id);
   check("重置后没有残留", s.animationSettings === undefined);
+}
+
+console.log("=== 1e. 贴图版本（M6）===");
+{
+  let s = await riggen.readRigJob(job.id);
+  const first = s.parts.find((part) => part.name === "head");
+  check("上传的部件自带 v1", versionsOf(first).length === 1 && versionsOf(first)[0].v === 1, JSON.stringify(versionsOf(first)));
+  check("v1 沿用小写文件名（老任务不用搬家）", versionsOf(first)[0].file === "parts/head.png", versionsOf(first)[0].file);
+  check("file 是当前生效版本的镜像", first.file === versionsOf(first)[0].file);
+
+  // 换色 → 新增一版，绝不覆盖原图。
+  const tinted = await riggen.tintRigParts(job.id, { names: ["head"] }, { hue: 140, saturation: 1.2 }, { note: "色相+140°" });
+  check("换色返回新版本号", tinted.versions.head === 2, JSON.stringify(tinted.versions));
+  s = await riggen.readRigJob(job.id);
+  let head = s.parts.find((part) => part.name === "head");
+  check("版本表里有两版", versionsOf(head).length === 2);
+  check("v2 是新文件（没有覆盖 v1）", versionsOf(head)[1].file === "parts/head.v2.png", versionsOf(head)[1].file);
+  check("v2 记了来源与说明", versionsOf(head)[1].source === "tint" && versionsOf(head)[1].note === "色相+140°");
+  check("当前生效切到 v2", head.activeTexture === 2 && head.file === "parts/head.v2.png");
+  check("v1 的文件还在", await exists(riggen.rigAssetPath(job.id, "parts/head.png")));
+  check("换色真的改了像素", (await readFile(riggen.rigAssetPath(job.id, "parts/head.v2.png"))).length !==
+    (await readFile(riggen.rigAssetPath(job.id, "parts/head.png"))).length);
+
+  // 逐部件回退：改一个字段的事。
+  await riggen.setRigTextureVersion(job.id, "head", 1);
+  s = await riggen.readRigJob(job.id);
+  head = s.parts.find((part) => part.name === "head");
+  check("切回 v1 后 file 跟着回来", head.activeTexture === 1 && head.file === "parts/head.png");
+  check("切版本会作废骨骼与图集", s.rig.status === "empty" && s.atlas.status === "empty");
+
+  let threw = false;
+  try {
+    await riggen.setRigTextureVersion(job.id, "head", 99);
+  } catch {
+    threw = true;
+  }
+  check("切到不存在的版本会报错", threw);
+
+  // 不能删当前生效的版本，也不能删最后一版。
+  threw = false;
+  try {
+    await riggen.removeRigTextureVersion(job.id, "head", 1);
+  } catch {
+    threw = true;
+  }
+  check("不能删当前生效的版本", threw);
+
+  await riggen.setRigTextureVersion(job.id, "head", 2);
+  const removed = await riggen.removeRigTextureVersion(job.id, "head", 1);
+  s = await riggen.readRigJob(job.id);
+  head = s.parts.find((part) => part.name === "head");
+  check("删掉旧版本", removed.removed === 1 && versionsOf(head).length === 1 && head.activeTexture === 2);
+  check("删掉的版本文件也清了", !(await exists(riggen.rigAssetPath(job.id, "parts/head.png"))));
+
+  threw = false;
+  try {
+    await riggen.removeRigTextureVersion(job.id, "head", 2);
+  } catch {
+    threw = true;
+  }
+  check("不能删最后一个版本", threw);
+
+  // 同名再上传 = 新增一版（“手工上传替换”不该毁掉原图）。
+  const png = encodePng((() => {
+    const canvas = createRgba(50, 60);
+    texturedRect(canvas, 0, 0, 50, 60, [90, 160, 90], 2.2);
+    return canvas.data;
+  })(), 50, 60);
+  await riggen.uploadRigPart(job.id, "head.png", png.toString("base64"));
+  s = await riggen.readRigJob(job.id);
+  head = s.parts.find((part) => part.name === "head");
+  check("同名上传新增一版而不是替换", versionsOf(head).length === 2 && head.activeTexture === 3, JSON.stringify(versionsOf(head).map((v) => v.v)));
+  check("上传那一版记来源为 upload", versionsOf(head).at(-1).source === "upload");
+
+  // 改名要把**所有**版本文件一起搬，否则回退会指到不存在的文件。
+  await riggen.renameRigPart(job.id, "head", "head2");
+  s = await riggen.readRigJob(job.id);
+  const renamed = s.parts.find((part) => part.name === "head2");
+  check("改名后版本表路径都跟着改", versionsOf(renamed).every((v) => v.file.includes("head2")), JSON.stringify(versionsOf(renamed).map((v) => v.file)));
+  check("改名后每个版本的文件都在", (await Promise.all(versionsOf(renamed).map((v) => exists(riggen.rigAssetPath(job.id, v.file))))).every(Boolean));
+  await riggen.renameRigPart(job.id, "head2", "head");
+
+  // 视图要把版本列表给界面（否则「切回原版」无从点起）。
+  const viewWithTextures = riggen.rigSnapshot(await riggen.readRigJob(job.id));
+  const viewHead = viewWithTextures.parts.find((part) => part.name === "head");
+  check("视图里带版本列表", Array.isArray(viewHead.versions) && viewHead.versions.length === 2, JSON.stringify(viewHead.versions?.map((v) => v.v)));
+  check("视图里带当前生效版本", viewHead.activeTexture === 3);
+  check("视图里每一版都有可打开的 URL", viewHead.versions.every((v) => typeof v.url === "string" && v.url.endsWith(".png")));
+
+  // 删部件要把它的所有版本文件一起清掉。
+  await riggen.removeRigPart(job.id, "head");
+  check("删部件后所有版本文件都没了",
+    (await Promise.all(versionsOf(renamed).map((v) => exists(riggen.rigAssetPath(job.id, v.file))))).every((ok) => !ok));
+  // 复原：后面的阶段断言需要 6 个部件。
+  await riggen.uploadRigPart(job.id, "head.png", partPngs.head.toString("base64"));
 }
 
 console.log("=== 2. 装配定位 ===");

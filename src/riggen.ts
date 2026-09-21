@@ -47,7 +47,9 @@ import {
   segmentWithLabels,
   sideBySide,
   solveLayout,
-  type Rgba
+  tintRgba,
+  type Rgba,
+  type TintOptions
 } from "./rigpose.js";
 import {
   DEFAULT_DRAW_ORDER,
@@ -98,7 +100,7 @@ export interface RigPartNode {
   name: string;
   label: string;
   status: NodeStatus;
-  /** 相对任务目录的路径。 */
+  /** 相对任务目录的路径。**始终等于当前生效版本**（见 `versions` / `activeTexture`）。 */
   file?: string;
   width?: number;
   height?: number;
@@ -130,6 +132,32 @@ export interface RigPartNode {
   tags?: string[];
   /** 语义来源：`default` 表兜底 / `ai` 模型提案 / `human` 人改过。 */
   semanticsSource?: "default" | "ai" | "human";
+
+  // ── 贴图版本（阶段⑦）──────────────────────────────────────────────
+  /**
+   * 这张部件的**历史版本**，从 v1 起。
+   *
+   * 参考项目 reskin-app 的「回退原图」是特例（一个小 JSON + 重打包时查表）；
+   * 这里做成通用机制：每一次换色 / 重绘 / 手工替换都**新增一个版本**，
+   * 永不覆盖原图。于是「这张 AI 头发不行，换回原版」就是改一个字段，成本为零，
+   * 而且每一步都可复现、可审计（`source` + `note` 记着它是怎么来的）。
+   */
+  versions?: RigTextureVersion[];
+  /** 当前生效的版本号；缺省 = 最后一版。 */
+  activeTexture?: number;
+}
+
+export interface RigTextureVersion {
+  /** 递增版本号，从 1 开始。 */
+  v: number;
+  /** 相对任务目录的路径。v1 沿用 `parts/<name>.png`，v2 起是 `parts/<name>.v2.png`。 */
+  file: string;
+  width: number;
+  height: number;
+  source: "generated" | "upload" | "tint" | "redraw";
+  /** 展示用说明（例如「色相 +20°」或 AI 的 prompt 摘要）。 */
+  note?: string;
+  createdAt: number;
 }
 
 export interface RigSheetState {
@@ -510,8 +538,31 @@ function normalizeRigJob(raw: any): RigJob {
           proximal: Array.isArray(part.proximal) && part.proximal.length === 2 ? [num(part.proximal[0], 0.5), num(part.proximal[1], 0)] : undefined,
           distal: Array.isArray(part.distal) && part.distal.length === 2 ? [num(part.distal[0], 0.5), num(part.distal[1], 1)] : undefined,
           tags: Array.isArray(part.tags) ? part.tags.filter((tag: unknown) => typeof tag === "string") : undefined,
-          semanticsSource: part.semanticsSource === "ai" || part.semanticsSource === "human" ? part.semanticsSource : part.semanticsSource === "default" ? "default" : undefined
+          semanticsSource: part.semanticsSource === "ai" || part.semanticsSource === "human" ? part.semanticsSource : part.semanticsSource === "default" ? "default" : undefined,
+          versions: Array.isArray(part.versions)
+            ? part.versions
+                .filter((item: any) => typeof item?.file === "string" && Number.isFinite(item?.v))
+                .map((item: any) => ({
+                  v: num(item.v, 1),
+                  file: String(item.file),
+                  width: num(item.width, 0),
+                  height: num(item.height, 0),
+                  source:
+                    item.source === "upload" || item.source === "tint" || item.source === "redraw"
+                      ? item.source
+                      : "generated",
+                  note: typeof item.note === "string" ? item.note : undefined,
+                  createdAt: num(item.createdAt, Date.now())
+                }))
+            : undefined,
+          activeTexture: Number.isFinite(part.activeTexture) ? part.activeTexture : undefined
         }))
+        // 建完立刻对齐一次：`file/width/height` 永远是当前生效版本的镜像，
+        // 于是既有代码（装配/骨骼/图集/预览/资源路由）都不需要知道版本的存在。
+        .map((part: RigPartNode) => {
+          syncActiveTexture(part);
+          return part;
+        })
     : [];
 
   const items: Record<string, RigLayoutItem> = {};
@@ -717,7 +768,19 @@ export function rigSnapshot(job: RigJob, origin = "") {
       proximal: part.proximal ?? null,
       distal: part.distal ?? null,
       tags: part.tags ?? [],
-      semanticsSource: part.semanticsSource ?? null
+      semanticsSource: part.semanticsSource ?? null,
+      // 贴图版本：界面要能在版本间切换（「这张 AI 头发不行，换回原版」）。
+      activeTexture: activeVersionOf(part)?.v ?? null,
+      versions: versionsOf(part).map((version) => ({
+        v: version.v,
+        file: version.file,
+        url: url(version.file),
+        width: version.width,
+        height: version.height,
+        source: version.source,
+        note: version.note ?? null,
+        createdAt: version.createdAt
+      }))
     };
   });
 
@@ -943,33 +1006,66 @@ export async function uploadRigPart(jobId: string, name: string, base64: string)
   // 骨骼层级完全依赖它。
   const rawName = safeName(name).replace(/\.[^.]+$/, "");
   const partName = (rawName === "" ? `part-${job.parts.length + 1}` : rawName).slice(0, 48);
-  const relative = `parts/${partName}.png`;
   await mkdir(join(rigJobDir(jobId), "parts"), { recursive: true });
-  await writeFile(rigAssetPath(jobId, relative), bytes);
 
-  const decoded = await decodeToRgba(rigAssetPath(jobId, relative), 2048);
-  const existing = job.parts.findIndex((part) => part.name === partName);
+  // 统一落到临时文件再解码：上传的可能是 JPEG（部件目录要保持只有 PNG），
+  // 而且「新增一版」需要先拿到 RGBA 再编码。
+  const tempFile = join(rigJobDir(jobId), "parts", `.incoming-${Date.now()}.${sniffed.ext}`);
+  await writeFile(tempFile, bytes);
+  let decoded;
+  try {
+    decoded = await decodeToRgba(tempFile, 2048);
+  } finally {
+    await rm(tempFile, { force: true }).catch(() => undefined);
+  }
+  const rgba: Rgba = { data: decoded.rgba, width: decoded.width, height: decoded.height };
+
+  const existing = job.parts.find((part) => part.name === partName);
+  if (existing !== undefined) {
+    // **同名上传 = 顶掉当前贴图**，但是新增一个版本，不覆盖原图——
+    // 这正是方案里「手工上传替换」应有的手感：换错了随时切回来。
+    const created = await addTextureVersion(jobId, existing, { source: "upload", note: "手工上传", rgba });
+    invalidateFrom(job, "parts");
+    ensurePartSemantics(job);
+    appendJobLog(job.log, "info", `已上传「${partName}」的新贴图 v${created.v}（${created.width}×${created.height}）`);
+    await writeRigJob(job);
+    return { name: partName, width: created.width, height: created.height };
+  }
+
+  const relative = textureFileName(partName, 1);
+  await writeFile(rigAssetPath(jobId, relative), encodePng(rgba.data, rgba.width, rgba.height));
   const node: RigPartNode = {
     name: partName,
     label: partLabel(partName),
     status: "ready",
     file: relative,
-    width: decoded.width,
-    height: decoded.height,
+    width: rgba.width,
+    height: rgba.height,
     source: "uploaded",
     approved: false,
+    versions: [
+      {
+        v: 1,
+        file: relative,
+        width: rgba.width,
+        height: rgba.height,
+        source: "upload",
+        note: "手工上传",
+        createdAt: Date.now()
+      }
+    ],
+    activeTexture: 1,
     updatedAt: Date.now()
   };
-  if (existing >= 0) job.parts[existing] = node;
-  else job.parts.push(node);
+  job.parts.push(node);
   // 部件变了，后面的阶段全部作废。
   invalidateFrom(job, "parts");
   // 新上传的部件补一次语义——文件名就是它唯一的语义线索（`head.png` → 头部），
   // 其余字段按角色默认填上；用户之后可以只改不对的那几条。
   ensurePartSemantics(job);
-  appendJobLog(job.log, "info", `已上传部件「${partName}」（${decoded.width}×${decoded.height}）`);
+  appendJobLog(job.log, "info", `已上传部件「${partName}」（${rgba.width}×${rgba.height}）`);
   await writeRigJob(job);
-  return { name: partName, width: decoded.width, height: decoded.height };
+  return { name: partName, width: rgba.width, height: rgba.height };
 }
 
 export async function removeRigPart(jobId: string, name: string): Promise<void> {
@@ -979,7 +1075,10 @@ export async function removeRigPart(jobId: string, name: string): Promise<void> 
   if (node === undefined) throw new Error(`没有这个部件：${name}`);
   job.parts = job.parts.filter((part) => part.name !== name);
   delete job.layout.items[name];
-  if (node.file !== undefined) await rm(rigAssetPath(jobId, node.file), { force: true }).catch(() => undefined);
+  // 它的**所有**贴图版本都要删掉，否则会在 parts/ 下留一堆孤儿文件。
+  for (const version of versionsOf(node)) {
+    await rm(rigAssetPath(jobId, version.file), { force: true }).catch(() => undefined);
+  }
   // 别的部件的父级可能指向它；先摘掉再修复，避免留下悬空父级。
   for (const other of job.parts) if (other.parent === name) other.parent = undefined;
   // 它自己的手工偏移也一并清掉，否则会留下一条永远用不上的孤儿记录。
@@ -1008,9 +1107,17 @@ export async function renameRigPart(jobId: string, from: string, to: string): Pr
   if (job.parts.some((part) => part.name === name && part.name !== from)) throw new Error(`已经有叫「${name}」的部件了`);
 
   if (node.file !== undefined) {
-    const target = `parts/${name}.png`;
-    await rename(rigAssetPath(jobId, node.file), rigAssetPath(jobId, target)).catch(() => undefined);
-    node.file = target;
+    // 改名要连**所有贴图版本**一起搬：只搬当前那一版的话，之后回退会指到
+    // 一个已经不存在的文件（而文件其实还在，只是名字对不上）。
+    const versions = versionsOf(node);
+    for (const version of versions) {
+      const target = textureFileName(name, version.v);
+      if (version.file === target) continue;
+      await rename(rigAssetPath(jobId, version.file), rigAssetPath(jobId, target)).catch(() => undefined);
+      version.file = target;
+    }
+    node.versions = versions;
+    node.file = textureFileName(name, node.activeTexture ?? versions[versions.length - 1]?.v ?? 1);
   }
   if (job.layout.items[from] !== undefined) {
     job.layout.items[name] = job.layout.items[from];
@@ -1201,6 +1308,226 @@ export function stopRigPoller(jobId: string): void {
   const timer = pollers.get(jobId);
   if (timer !== undefined) clearInterval(timer);
   pollers.delete(jobId);
+}
+
+// ── 贴图版本（阶段⑦）────────────────────────────────────────────────────
+
+/** 某个部件的版本列表；老任务没有这个字段时按「当前文件就是 v1」合成一份。 */
+export function versionsOf(part: RigPartNode): RigTextureVersion[] {
+  if (Array.isArray(part.versions) && part.versions.length > 0) return part.versions;
+  if (part.file === undefined) return [];
+  return [
+    {
+      v: 1,
+      file: part.file,
+      width: part.width ?? 0,
+      height: part.height ?? 0,
+      source: part.source === "uploaded" ? "upload" : "generated",
+      createdAt: part.updatedAt ?? Date.now()
+    }
+  ];
+}
+
+export function activeVersionOf(part: RigPartNode): RigTextureVersion | undefined {
+  const versions = versionsOf(part);
+  if (versions.length === 0) return undefined;
+  const wanted = part.activeTexture;
+  return versions.find((item) => item.v === wanted) ?? versions[versions.length - 1];
+}
+
+/**
+ * 把当前生效版本镜像到 `part.file` / `width` / `height`。
+ *
+ * **这是整套版本机制能向后兼容的关键**：所有既有代码（装配、骨骼、图集、
+ * 预览、资源路由）读的仍然是 `part.file`，它们完全不需要知道版本的存在。
+ */
+function syncActiveTexture(part: RigPartNode): void {
+  const active = activeVersionOf(part);
+  if (active === undefined) return;
+  part.versions = versionsOf(part);
+  part.activeTexture = active.v;
+  part.file = active.file;
+  part.width = active.width;
+  part.height = active.height;
+}
+
+function textureFileName(name: string, version: number): string {
+  // v1 沿用旧命名，这样已存在的任务与文件不用搬家。
+  return version <= 1 ? `parts/${name}.png` : `parts/${name}.v${version}.png`;
+}
+
+/**
+ * 追加一个版本并把它设为当前生效。
+ *
+ * 三种来源共用这一条路径（换色 / 重绘 / 手工上传），所以「回退」的实现只有一份，
+ * 而且任何一版都**不会被覆盖**——这是「这张不行换回原版」能零成本做到的前提。
+ */
+async function addTextureVersion(
+  jobId: string,
+  part: RigPartNode,
+  input: { source: RigTextureVersion["source"]; note?: string; rgba: Rgba }
+): Promise<RigTextureVersion> {
+  const versions = versionsOf(part);
+  const nextVersion = versions.reduce((max, item) => Math.max(max, item.v), 0) + 1;
+  const relative = textureFileName(part.name, nextVersion);
+  await mkdir(join(rigJobDir(jobId), "parts"), { recursive: true });
+  await writeFile(rigAssetPath(jobId, relative), encodePng(input.rgba.data, input.rgba.width, input.rgba.height));
+
+  const version: RigTextureVersion = {
+    v: nextVersion,
+    file: relative,
+    width: input.rgba.width,
+    height: input.rgba.height,
+    source: input.source,
+    note: input.note,
+    createdAt: Date.now()
+  };
+  part.versions = [...versions, version];
+  part.activeTexture = version.v;
+  syncActiveTexture(part);
+  return version;
+}
+
+/** 把一批部件标成「贴图变了」：预览内联图片、图集要重打包，但装配位置不受影响。 */
+function invalidateTextures(job: RigJob): void {
+  invalidateFrom(job, "rig");
+}
+
+export interface RigTextureTarget {
+  /** 点名几个部件。 */
+  names?: string[];
+  /** 或者按语义标签批量（`tags` 来自语义层）。 */
+  tag?: string;
+}
+
+/** 解析「改哪些部件」：名字优先，其次按标签；两者都没给就是全部。 */
+function resolveTextureTargets(job: RigJob, target: RigTextureTarget): RigPartNode[] {
+  const ready = job.parts.filter((part) => part.status === "ready");
+  if (target.names !== undefined && target.names.length > 0) {
+    const missing = target.names.filter((name) => !ready.some((part) => part.name === name));
+    if (missing.length > 0) throw new Error(`没有这些部件：${missing.join("、")}`);
+    return ready.filter((part) => target.names!.includes(part.name));
+  }
+  if (target.tag !== undefined && target.tag !== "") {
+    const matched = ready.filter((part) => (part.tags ?? []).includes(target.tag!));
+    if (matched.length === 0) throw new Error(`没有带「${target.tag}」标签的部件`);
+    return matched;
+  }
+  return ready;
+}
+
+/**
+ * 换色（本地计算，免费）。
+ *
+ * 之所以**烤成一个新版本**而不是每次渲染时实时算：渲染发生在浏览器（预览）
+ * 与宿主（合成图/图集）两处，各自实现一遍着色只会让两边漂移；而且版本机制
+ * 天然给了「换个色不满意 → 回退」，不需要额外的撤销栈。
+ */
+export async function tintRigParts(
+  jobId: string,
+  target: RigTextureTarget,
+  tint: TintOptions,
+  options: { by?: "ai" | "human"; note?: string } = {}
+): Promise<{ touched: number; versions: Record<string, number> }> {
+  const job = await readRigJob(jobId);
+  if (job === undefined) throw new Error(`任务不存在：${jobId}`);
+  const parts = resolveTextureTargets(job, target);
+  if (parts.length === 0) throw new Error("没有可换色的部件");
+
+  const versions: Record<string, number> = {};
+  for (const part of parts) {
+    const active = activeVersionOf(part);
+    if (active === undefined) continue;
+    const decoded = await decodeToRgba(rigAssetPath(jobId, active.file), 2048);
+    const tinted = tintRgba({ data: decoded.rgba, width: decoded.width, height: decoded.height }, tint);
+    const created = await addTextureVersion(jobId, part, { source: "tint", note: options.note, rgba: tinted });
+    versions[part.name] = created.v;
+  }
+  invalidateTextures(job);
+  appendJobLog(
+    job.log,
+    "info",
+    `${options.by === "ai" ? "AI" : "手工"}换色：${parts.map((part) => part.name).join("、")}` +
+      (options.note === undefined ? "" : `（${options.note}）`)
+  );
+  await writeRigJob(job);
+  return { touched: parts.length, versions };
+}
+
+/** 手工上传一张贴图顶掉当前版本（同样是**新增一版**，不覆盖）。 */
+export async function uploadRigTexture(
+  jobId: string,
+  name: string,
+  base64: string,
+  options: { note?: string } = {}
+): Promise<{ name: string; version: number; width: number; height: number }> {
+  const job = await readRigJob(jobId);
+  if (job === undefined) throw new Error(`任务不存在：${jobId}`);
+  const part = job.parts.find((entry) => entry.name === name);
+  if (part === undefined) throw new Error(`没有这个部件：${name}`);
+  const bytes = Buffer.from(base64, "base64");
+  const sniffed = sniffImage(base64);
+  if (sniffed === undefined) throw new Error("不认识的图片格式（支持 PNG / JPEG / WebP）");
+  if (bytes.length > 30 * 1024 * 1024) throw new Error("贴图超过 30 MB");
+
+  const tempFile = join(rigJobDir(jobId), "parts", `.incoming-${Date.now()}.${sniffed.ext}`);
+  await mkdir(join(rigJobDir(jobId), "parts"), { recursive: true });
+  await writeFile(tempFile, bytes);
+  try {
+    const decoded = await decodeToRgba(tempFile, 2048);
+    const created = await addTextureVersion(jobId, part, {
+      source: "upload",
+      note: options.note,
+      rgba: { data: decoded.rgba, width: decoded.width, height: decoded.height }
+    });
+    invalidateTextures(job);
+    appendJobLog(job.log, "info", `已上传「${name}」的新贴图（v${created.v}，${decoded.width}×${decoded.height}）`);
+    await writeRigJob(job);
+    return { name, version: created.v, width: created.width, height: created.height };
+  } finally {
+    await rm(tempFile, { force: true }).catch(() => undefined);
+  }
+}
+
+/** 切到某一版（「这张 AI 头发不行，换回原版」）。 */
+export async function setRigTextureVersion(jobId: string, name: string, version: number): Promise<{ version: number }> {
+  const job = await readRigJob(jobId);
+  if (job === undefined) throw new Error(`任务不存在：${jobId}`);
+  const part = job.parts.find((entry) => entry.name === name);
+  if (part === undefined) throw new Error(`没有这个部件：${name}`);
+  const versions = versionsOf(part);
+  const target = versions.find((item) => item.v === version);
+  if (target === undefined) throw new Error(`「${name}」没有 v${version}（现有：${versions.map((item) => `v${item.v}`).join("、")}）`);
+  if (part.activeTexture === version) return { version };
+
+  part.versions = versions;
+  part.activeTexture = version;
+  syncActiveTexture(part);
+  invalidateTextures(job);
+  appendJobLog(job.log, "info", `「${name}」已切到贴图 v${version}${target.note === undefined ? "" : `（${target.note}）`}`);
+  await writeRigJob(job);
+  return { version };
+}
+
+/** 删掉某一版（当前生效的那版不允许删；最后一版也不允许删）。 */
+export async function removeRigTextureVersion(jobId: string, name: string, version: number): Promise<{ removed: number }> {
+  const job = await readRigJob(jobId);
+  if (job === undefined) throw new Error(`任务不存在：${jobId}`);
+  const part = job.parts.find((entry) => entry.name === name);
+  if (part === undefined) throw new Error(`没有这个部件：${name}`);
+  const versions = versionsOf(part);
+  const target = versions.find((item) => item.v === version);
+  if (target === undefined) throw new Error(`「${name}」没有 v${version}`);
+  if (versions.length <= 1) throw new Error("这是最后一个版本，删掉部件就没有贴图了");
+  if ((part.activeTexture ?? versions[versions.length - 1].v) === version) throw new Error("不能删除当前生效的版本，先切到别的版本");
+
+  part.versions = versions.filter((item) => item.v !== version);
+  await rm(rigAssetPath(jobId, target.file), { force: true }).catch(() => undefined);
+  syncActiveTexture(part);
+  invalidateTextures(job);
+  appendJobLog(job.log, "info", `已删除「${name}」的贴图 v${version}`);
+  await writeRigJob(job);
+  return { removed: 1 };
 }
 
 // ── 动画参数（M3：让动画从代码常量变成数据）─────────────────────────────

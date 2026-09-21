@@ -22,7 +22,8 @@ import {
   compositeParts,
   sideBySide,
   toGrayMask,
-  resizeRgba
+  resizeRgba,
+  tintRgba
 } from "../lib/rigpose.js";
 import { buildSkeleton, buildAtlasText, packAtlas, defaultPartNames, RIG_SLOTS, DEFAULT_DRAW_ORDER } from "../lib/spine.js";
 import { validateAnimationLoops, validateAtlas, validateSkeletonAtlasMatch, validateSpineWire } from "../lib/rigvalidate.js";
@@ -654,6 +655,40 @@ console.log("=== 8d. 动画参数与循环接缝 ===");
   check("控制点仍在所属区间内",
     scaledCurve[0] >= scaledFrames[0].time - 1e-3 && scaledCurve[2] <= scaledFrames[1].time + 1e-3,
     `${scaledCurve[0]},${scaledCurve[2]} vs [${scaledFrames[0].time}, ${scaledFrames[1].time}]`);
+}
+
+console.log("=== 8e. 换色（贴图变体的基础） ===");
+{
+  const src = createRgba(4, 1);
+  // 三个不透明像素（红/绿/蓝）+ 一个全透明。
+  const colors = [[255, 0, 0, 255], [0, 255, 0, 255], [0, 0, 255, 255], [123, 45, 67, 0]];
+  colors.forEach((color, index) => {
+    for (let c = 0; c < 4; c++) src.data[index * 4 + c] = color[c];
+  });
+
+  const identity = tintRgba(src, {});
+  check("空参数 = 原样返回", Buffer.compare(identity.data, src.data) === 0);
+
+  const hue = tintRgba(src, { hue: 120 });
+  check("色相 +120° 把红变绿", hue.data[0] < 60 && hue.data[1] > 200, `rgb(${hue.data[0]},${hue.data[1]},${hue.data[2]})`);
+  check("色相旋转不动 alpha", hue.data[3] === 255 && hue.data[11] === 255 && hue.data[15] === 0);
+  check("全透明像素保持不变（换色不该把「没有像素」变成「有一点像素」）",
+    hue.data[12] === 123 && hue.data[13] === 45 && hue.data[14] === 67 && hue.data[15] === 0);
+
+  const gray = tintRgba(src, { saturation: 0 });
+  check("饱和度 0 → 灰（R=G=B）", gray.data[0] === gray.data[1] && gray.data[1] === gray.data[2], `${gray.data[0]},${gray.data[1]},${gray.data[2]}`);
+
+  const brighter = tintRgba(src, { brightness: 0.2 });
+  check("亮度 +0.2 让红更亮或已饱和", brighter.data[0] >= src.data[0] && brighter.data[1] > src.data[1], `rgb(${brighter.data[0]},${brighter.data[1]},${brighter.data[2]})`);
+
+  const clamped = tintRgba(src, { brightness: 5 });
+  check("超范围亮度被夹到 0..255", clamped.data[0] === 255 && clamped.data[1] === 255 && clamped.data[2] === 255);
+
+  const darker = tintRgba(src, { contrast: 0.2, brightness: -0.4 });
+  check("低对比 + 负亮度不会溢出", darker.data.every((value) => value >= 0 && value <= 255));
+
+  check("换色不改尺寸", hue.width === src.width && hue.height === src.height);
+  check("原图不被就地修改", src.data[0] === 255 && src.data[4] === 0);
 }
 
 console.log("=== 9. 预览 HTML ===");

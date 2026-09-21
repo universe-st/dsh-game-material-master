@@ -1097,6 +1097,56 @@ export class GameStudioGateway extends TypertRemoteService {
   }
 
   /**
+   * 换色（本地计算，免费）。
+   *
+   * 目标二选一：点名 `names`，或按语义 `tag` 批量。落成一个**新版本**，
+   * 所以不满意随时用 `setRigTextureVersion` 切回去。
+   */
+  async tintRigParts(payload) {
+    const input = asRecord(payload);
+    const names = Array.isArray(input.names) ? input.names.filter((name: unknown) => typeof name === "string") : undefined;
+    const raw = asRecord(input.tint);
+    const tint: Record<string, unknown> = {};
+    for (const key of ["hue", "saturation", "lightness", "brightness", "contrast"]) {
+      if (typeof raw[key] === "number") tint[key] = raw[key];
+    }
+    if (Array.isArray(raw.rgb) && raw.rgb.length === 3) {
+      tint.rgb = raw.rgb.map((value: unknown) => Number(value));
+    }
+    return {
+      ok: true,
+      ...(await riggen.tintRigParts(
+        asString(input.jobId),
+        { names, tag: typeof input.tag === "string" ? input.tag : undefined },
+        tint,
+        { by: input.by === "ai" ? "ai" : "human", note: typeof input.note === "string" ? input.note : undefined }
+      ))
+    };
+  }
+
+  /** 手工上传一张贴图顶掉当前版本（同样是新增一版，不覆盖）。 */
+  async uploadRigTexture(payload) {
+    const input = asRecord(payload);
+    return {
+      ok: true,
+      ...(await riggen.uploadRigTexture(asString(input.jobId), asString(input.name), asString(input.data), {
+        note: typeof input.note === "string" ? input.note : undefined
+      }))
+    };
+  }
+
+  /** 切到某一版贴图（「这张 AI 头发不行，换回原版」）。 */
+  async setRigTextureVersion(payload) {
+    const input = asRecord(payload);
+    return { ok: true, ...(await riggen.setRigTextureVersion(asString(input.jobId), asString(input.name), Number(input.version))) };
+  }
+
+  async removeRigTextureVersion(payload) {
+    const input = asRecord(payload);
+    return { ok: true, ...(await riggen.removeRigTextureVersion(asString(input.jobId), asString(input.name), Number(input.version))) };
+  }
+
+  /**
    * 语义层（阶段③）：AI 或人改「这块是什么、挂在谁身上、骨骼从哪伸到哪」。
    *
    * 校验不通过时**不抛异常**，而是把 errors/warnings 原样回给调用方——
