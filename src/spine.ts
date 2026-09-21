@@ -1028,6 +1028,43 @@ export function buildSkeleton(
 
   const sorted = [...visible].sort((a, b) => a.z - b.z);
 
+  /**
+   * 每个部件的近端锚点世界坐标（骨骼原点）。
+   *
+   * 预先算一遍，是因为**骨骼方向要指向子部件的近端**——那需要父骨骼在处理时就能
+   * 拿到子部件的近端坐标，而拓扑序里子部件排在后面。
+   */
+  const proxWorldOf = new Map<string, { x: number; y: number }>();
+  for (const name of ordered) {
+    if (name === "root") continue;
+    const part = byName.get(name);
+    if (part === undefined) continue;
+    const anchors = anchorsOf(name);
+    const proximal = part.proximal ?? anchors.proximal;
+    proxWorldOf.set(
+      name,
+      toWorld(part.x + proximal[0] * part.width, part.y + proximal[1] * part.height, options.canvasWidth, options.canvasHeight)
+    );
+  }
+
+  /**
+   * 父 → 子。
+   *
+   * 用来把骨骼**末端指到子骨骼的起点**上。这是「骨骼首尾相接」的来源：
+   * 早先每根骨的方向都取「自己部件的近端 → 远端」（固定的上中 → 下中），于是
+   * 斜着摆的部件（举起的手臂）会解出两条**互相错开**的骨骼——实测上臂到前臂的
+   * 骨骼原点只差 41.5px，而上臂骨骼长 85px。视觉上拼图是对的，但动画时部件
+   * 绕的旋转中心不在关节上。
+   */
+  const childrenOf = new Map<string, string[]>();
+  for (const [child, parent] of resolvedParent) {
+    if (parent === undefined || child === "root") continue;
+    const list = childrenOf.get(parent) ?? [];
+    list.push(child);
+    childrenOf.set(parent, list);
+  }
+  for (const list of childrenOf.values()) list.sort();
+
   for (const name of ordered) {
     if (name === "root") continue;
     const part = byName.get(name);
@@ -1046,8 +1083,16 @@ export function buildSkeleton(
     const centerPy = part.y + part.height / 2;
 
     const prox = toWorld(proxPx, proxPy, options.canvasWidth, options.canvasHeight);
-    const dist = toWorld(distPx, distPy, options.canvasWidth, options.canvasHeight);
+    const ownDist = toWorld(distPx, distPy, options.canvasWidth, options.canvasHeight);
     const center = toWorld(centerPx, centerPy, options.canvasWidth, options.canvasHeight);
+
+    // 骨骼末端优先指到**子部件的近端**——「首尾相接」就是这么来的。
+    // 没有子部件（叶子骨，例如头、手、脚）才退回自己部件的远端。
+    //
+    // 只影响朝向与长度：位置（`prox`）与挂点都照旧，所以初始姿态一格不动。
+    const childName = (childrenOf.get(name) ?? [])[0];
+    const childProx = childName === undefined ? undefined : proxWorldOf.get(childName);
+    const dist = childProx !== undefined && Math.hypot(childProx.x - prox.x, childProx.y - prox.y) >= 1 ? childProx : ownDist;
 
     const dirX = dist.x - prox.x;
     const dirY = dist.y - prox.y;

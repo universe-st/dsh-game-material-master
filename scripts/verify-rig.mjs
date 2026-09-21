@@ -410,6 +410,46 @@ check("slots 数量 = 部件数", spine.slots.length === layoutParts.length);
 check("生成了 6 个动画", Object.keys(spine.animations).length === 6, Object.keys(spine.animations).join(","));
 check("没有告警", warnings.length === 0, warnings.join(" | "));
 
+// 骨骼必须**首尾相接**：有唯一子骨的骨，末端应该正好落在子骨的原点上。
+//
+// 早先每根骨的方向都取「自己部件的上中 → 下中」，于是斜着摆的部件会解出两条互相
+// 错开的骨骼——实测上臂到前臂的骨骼原点只差 41.5px、而上臂骨骼长 85px。拼图看着
+// 是对的，但动画时部件绕的旋转中心不在关节上。现在方向改为指向**子部件的近端**。
+// （一个骨有多个子级时只可能指向其中一个，所以只断言「唯一子骨」的那些。）
+{
+  const localWorldOf = (name) => {
+    const bone = spine.bones.find((entry) => entry.name === name);
+    if (bone === undefined) return undefined;
+    if (bone.parent === undefined) return { x: bone.x, y: bone.y, rot: (bone.rotation * Math.PI) / 180 };
+    const parent = localWorldOf(bone.parent);
+    if (parent === undefined) return undefined;
+    return {
+      x: parent.x + bone.x * Math.cos(parent.rot) - bone.y * Math.sin(parent.rot),
+      y: parent.y + bone.x * Math.sin(parent.rot) + bone.y * Math.cos(parent.rot),
+      rot: parent.rot + (bone.rotation * Math.PI) / 180
+    };
+  };
+  const childCount = new Map();
+  for (const bone of spine.bones) {
+    if (bone.parent === undefined) continue;
+    childCount.set(bone.parent, (childCount.get(bone.parent) ?? 0) + 1);
+  }
+  let worst = 0;
+  let checked = 0;
+  for (const bone of spine.bones) {
+    if (childCount.get(bone.name) !== 1) continue;
+    const child = spine.bones.find((entry) => entry.parent === bone.name);
+    const world = localWorldOf(bone.name);
+    const childWorld = localWorldOf(child.name);
+    if (world === undefined || childWorld === undefined) continue;
+    const tipX = world.x - Math.sin(world.rot) * bone.length;
+    const tipY = world.y + Math.cos(world.rot) * bone.length;
+    worst = Math.max(worst, Math.hypot(tipX - childWorld.x, tipY - childWorld.y));
+    checked++;
+  }
+  check(`骨骼首尾相接（${checked} 根单子骨骼的末端都落在子骨原点上）`, checked > 0 && worst < 0.02, `最差 ${worst.toFixed(3)}px`);
+}
+
 // 关键：初始姿态必须逐像素还原装配结果。
 // 用骨架自己的变换把挂点中心算回世界坐标，和 layout 里的中心比对。
 const boneByName = new Map(spine.bones.map((b) => [b.name, b]));
