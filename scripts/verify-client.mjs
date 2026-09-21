@@ -29,7 +29,8 @@ const failures = [];
 let checks = 0;
 function check(name, ok, detail) {
   checks++;
-  console.log(`  ${ok ? "✓" : "✗"} ${name}${detail === undefined ? "" : ` — ${detail}`}`);
+  // 说明文字只在**失败**时打印：通过时还挂一句「缺少 rig-bones-db 区块」会让人以为出事了。
+  console.log(`  ${ok ? "✓" : "✗"} ${name}${!ok && detail !== undefined ? ` — ${detail}` : ""}`);
   if (!ok) failures.push(name);
 }
 
@@ -483,8 +484,19 @@ function checkRigContracts(text, label) {
     /\.SPR_asmStage\{[^}]*height:70vh/.test(text) && !/\.SPR_asmStage\{[^}]*max-height:70vh/.test(text),
     /\.SPR_asmStage\{([^}]*)\}/.exec(text)?.[1]?.slice(0, 90) ?? ""
   );
-  // 撤销/重做的两处时序陷阱，都是实测撞出来的：
-  //  ① 把 setHistory([]) 挂在 [job.id, job.updatedAt] 上 —— commit 自己就会改
+  // 两条导出路径都必须能在界面上拿到：Spine 的 skeleton.json / .atlas 是主路径，
+  // DragonBones 的 _ske.json / _tex.json 是给 Cocos / Egret / Laya 用的第二条。
+  // 宿主已经返回了这两组字段，界面不渲染就等于「产物生成了但用户不知道去哪拿」。
+  check(
+    `${label}：③ 阶段给出 DragonBones 骨架链接`,
+    text.includes('data-testid": "rig-bones-db"') && text.includes("job.rig?.dragonBones?.skeleton"),
+    "缺少 rig-bones-db 区块"
+  );
+  check(
+    `${label}：④ 阶段逐页给出 DragonBones 贴图描述`,
+    text.includes('data-testid": "rig-atlas-db"') && text.includes("job.atlas.dragonBones.map"),
+    "缺少 rig-atlas-db 区块"
+  );  // 撤销/重做的两处时序陷阱，都是实测撞出来的：  //  ① 把 setHistory([]) 挂在 [job.id, job.updatedAt] 上 —— commit 自己就会改
   //     updatedAt，于是每提交一次就清空撤销栈，撤销按钮永远是灰的；
   //  ② undo 把「改动前」的快照塞进重做栈 —— 重做还原的还是改动前那份，点了没反应。
   check(

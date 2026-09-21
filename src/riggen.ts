@@ -75,9 +75,12 @@ import {
   type RigPlacedPart
 } from "./spine.js";
 import { buildPreviewHtml } from "./rigpreview.js";
+import { buildDragonBonesSkeleton, buildDragonBonesTexture } from "./rigexport.js";
 import {
   validateAnimationLoops,
   validateAtlas,
+  validateDragonBones,
+  validateDragonBonesTexture,
   validateSkeletonAtlasMatch,
   validateSpineWire,
   type ValidationIssue
@@ -243,6 +246,14 @@ export interface RigRigState {
    * 否则要展示骨骼就得每次快照都重算一遍 `buildSkeleton`，而快照是轮询调用的。
    */
   boneList?: Array<{ name: string; parent?: string; x: number; y: number; rotation: number; length: number; offset?: RigBoneOffset }>;
+  /**
+   * 第二条导出路径：同一个 `RigDocument` 的 DragonBones 5.5 写法。
+   *
+   * 与 `skeleton`（Spine 4.2）同源同一次推导，只是字段名与 curve 编码不同。
+   * 存下来是为了让验收包能同时给出两份产物，也让「引擎里打不开」时能一眼看出
+   * 是哪一条路径的事。
+   */
+  dragonBones?: { skeleton: string };
   updatedAt?: number;
 }
 
@@ -262,6 +273,8 @@ export interface RigAtlasState {
   pages?: Array<{ file: string; width: number; height: number; regions: number }>;
   /** 校验给出的提示（不是错误——错误会让这一阶段直接失败）。 */
   warnings?: string[];
+  /** DragonBones 侧的孪生产物：与 `.atlas` 同一次装箱出来的 `_tex.json`（逐页一份）。 */
+  dragonBones?: { textures: string[] };
   updatedAt?: number;
 }
 
@@ -673,6 +686,8 @@ function normalizeRigJob(raw: any): RigJob {
             offset: pruneBoneOffset(bone.offset)
           }))
       : undefined,
+      // 同源的第二条导出路径（DragonBones 5.5）。
+      dragonBones: typeof raw?.rig?.dragonBones?.skeleton === "string" ? { skeleton: raw.rig.dragonBones.skeleton } : undefined,
     updatedAt: Number.isFinite(raw?.rig?.updatedAt) ? raw.rig.updatedAt : undefined
     },
     atlas: {
@@ -695,6 +710,10 @@ function normalizeRigJob(raw: any): RigJob {
             }))
         : undefined,
       warnings: Array.isArray(raw?.atlas?.warnings) ? raw.atlas.warnings.map(String) : undefined,
+      // DragonBones 贴图描述（逐页一份），与 `.atlas` 同一次装箱出来。
+      dragonBones: Array.isArray(raw?.atlas?.dragonBones?.textures)
+        ? { textures: raw.atlas.dragonBones.textures.filter((file: unknown) => typeof file === "string").map(String) }
+        : undefined,
       updatedAt: Number.isFinite(raw?.atlas?.updatedAt) ? raw.atlas.updatedAt : undefined
     },
     reviewMode: raw?.reviewMode === "manual" ? "manual" : raw?.reviewMode === "auto" ? "auto" : undefined,
@@ -922,6 +941,8 @@ export function rigSnapshot(job: RigJob, origin = "") {
        * 两个形状各拼一份的话字段名迟早会漂移（这个坑本项目以前踩过）。
        */
       boneList: job.rig.boneList ?? [],
+      /** DragonBones 5.5（`_ske.json`）：与 `skeleton` 同源的第二条导出路径。 */
+      dragonBones: { skeleton: url(job.rig.dragonBones?.skeleton) },
       /** 手工偏移的**当前真源**：骨骼还没重跑时，界面上也要能看到自己调过什么。 */
       boneOffsets: job.boneOffsets ?? {},
       /**
@@ -954,6 +975,8 @@ export function rigSnapshot(job: RigJob, origin = "") {
       regions: job.atlas.regions,
       /** 多页图集（单页时只有一项）。界面要能逐页预览。 */
       pages: job.atlas.pages ?? [],
+      /** DragonBones 贴图描述（`_tex.json`，逐页一份）：与 `.atlas` 同一次装箱的孪生兄弟。 */
+      dragonBones: (job.atlas.dragonBones?.textures ?? []).map((file) => ({ file, url: url(file) })),
       /** 校验给出的提示（错误会让图集阶段直接失败，不会走到这里）。 */
       warnings: job.atlas.warnings ?? []
     },
@@ -2871,7 +2894,7 @@ export async function buildRigOutput(jobId: string): Promise<void> {
       };
     });
 
-    const { spine, bones, warnings } = buildSkeleton({
+    const { spine, bones, warnings, animationsRaw } = buildSkeleton({
       name: job.name,
       canvasWidth: job.source.width,
       canvasHeight: job.source.height,
@@ -2895,6 +2918,29 @@ export async function buildRigOutput(jobId: string): Promise<void> {
 
     await mkdir(join(rigJobDir(jobId), "rig"), { recursive: true });
     await writeFile(rigAssetPath(jobId, "rig/skeleton.json"), `${JSON.stringify(spine, null, 2)}\n`, "utf8");
+
+    // 同一份骨架再出一份 DragonBones 5.5（`_ske.json`）。
+    //
+    // 两条导出路径共用**布局与简写动画**，只在字段名与编码器上分岔——尤其是
+    // curve：Spine 是绝对量、DragonBones 是 0~1 归一化，不能复用同一份已转换
+    // 的结果（见 `rigexport.ts` 的文件头注释）。
+    const dragonBones = buildDragonBonesSkeleton({
+      name: job.name,
+      canvasWidth: job.source.width,
+      canvasHeight: job.source.height,
+      spine,
+      animations: animationsRaw
+    });
+    const dragonBonesReport = validateDragonBones(dragonBones);
+    if (!dragonBonesReport.ok) {
+      throw new Error(
+        `DragonBones 骨架未通过导出前校验（${dragonBonesReport.errors.length} 处）：` +
+          dragonBonesReport.errors.slice(0, 3).map((issue) => `${issue.where} ${issue.message}`).join("；")
+      );
+    }
+    await mkdir(join(rigJobDir(jobId), "export/dragonbones"), { recursive: true });
+    const dragonBonesFile = "export/dragonbones/skeleton_ske.json";
+    await writeFile(rigAssetPath(jobId, dragonBonesFile), `${JSON.stringify(dragonBones, null, 2)}\n`, "utf8");
 
     // 预览把部件图内联成 data URI：离线打开也能看，不依赖 CDN。
     const images = [];
@@ -2926,8 +2972,11 @@ export async function buildRigOutput(jobId: string): Promise<void> {
       warnings: [
         ...warnings,
         ...wireReport.warnings.map((issue) => `${issue.where} ${issue.message}`),
-        ...loopReport.warnings.map((issue) => `${issue.where} ${issue.message}`)
+        ...loopReport.warnings.map((issue) => `${issue.where} ${issue.message}`),
+        ...dragonBonesReport.warnings.map((issue) => `${issue.where} ${issue.message}`)
       ],
+      // 第二条导出路径（同一个 RigDocument 的另一种写法）。
+      dragonBones: { skeleton: dragonBonesFile },
       // 派生数据：给界面展示「这根骨头现在是什么样、我挪了多少」。
       boneList: bones.map((bone) => ({
         name: bone.name,
@@ -3061,6 +3110,25 @@ export async function buildAtlas(jobId: string): Promise<void> {
 
     await writeFile(rigAssetPath(jobId, "atlas/skeleton.atlas"), buildAtlasText(packed.pages), "utf8");
 
+    // 同一份图集再出一份 DragonBones 的贴图描述（`_tex.json`，逐页一份）。
+    // 两边必须同源：分开各装一次箱，坐标迟早对不上，而运行时的表现只是「画错位」。
+    const textureFiles: string[] = [];
+    for (const page of packed.pages) {
+      const base = page.name.replace(/\.png$/i, "");
+      const texture = buildDragonBonesTexture(page, { imagePath: page.name, name: base });
+      const textureReport = validateDragonBonesTexture(texture);
+      if (!textureReport.ok) {
+        throw new Error(
+          `DragonBones 贴图描述未通过校验：${textureReport.errors.map((issue) => `${issue.where} ${issue.message}`).join("；")}`
+        );
+      }
+      for (const issue of textureReport.warnings) {
+        appendJobLog(job.log, "warn", `DragonBones 贴图提示：${issue.where} ${issue.message}`);
+      }
+      await writeFile(rigAssetPath(jobId, `atlas/${base}_tex.json`), `${JSON.stringify(texture, null, 2)}\n`, "utf8");
+      textureFiles.push(`atlas/${base}_tex.json`);
+    }
+
     const fresh = await readRigJob(jobId);
     if (fresh === undefined) return;
     const first = packed.pages[0];
@@ -3080,6 +3148,8 @@ export async function buildAtlas(jobId: string): Promise<void> {
         regions: page.placements.length
       })),
       warnings: atlasReport.warnings.map((issue) => `${issue.where} ${issue.message}`),
+      // DragonBones 侧的派生物：`.atlas` 的孪生兄弟，同一次装箱出来的。
+      dragonBones: { textures: textureFiles },
       updatedAt: Date.now()
     };
     for (const warning of atlasReport.warnings) {

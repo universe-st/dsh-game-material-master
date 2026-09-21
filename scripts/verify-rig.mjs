@@ -30,7 +30,15 @@ import {
   imageStats
 } from "../lib/rigpose.js";
 import { buildSkeleton, buildAtlasText, packAtlas, defaultPartNames, RIG_SLOTS, DEFAULT_DRAW_ORDER } from "../lib/spine.js";
-import { validateAnimationLoops, validateAtlas, validateSkeletonAtlasMatch, validateSpineWire } from "../lib/rigvalidate.js";
+import { buildDragonBonesSkeleton, buildDragonBonesTexture, DRAGONBONES_FRAME_RATE } from "../lib/rigexport.js";
+import {
+  validateAnimationLoops,
+  validateAtlas,
+  validateDragonBones,
+  validateDragonBonesTexture,
+  validateSkeletonAtlasMatch,
+  validateSpineWire
+} from "../lib/rigvalidate.js";
 import { buildPreviewHtml } from "../lib/rigpreview.js";
 import { readFile } from "node:fs/promises";
 
@@ -795,6 +803,286 @@ check("默认拆件名包含 16 个标准部件", defaultPartNames().length === 
   });
   check("完整 16 部件下 6 个动画都有内容", Object.values(all.spine.animations).every((a) => Object.keys(a.bones).length > 0));
   check("没有告警", all.warnings.length === 0, all.warnings.join(" | "));
+}
+
+console.log("=== 11. DragonBones 5.5 导出 ===");
+{
+  const { spine: dbSpineSource, animationsRaw } = buildSkeleton({
+    name: "verify",
+    canvasWidth: W,
+    canvasHeight: H,
+    parts: layoutParts,
+    animationIds: ["idle", "walk", "wave", "jump", "run", "attack"]
+  });
+  const db = buildDragonBonesSkeleton({
+    name: "verify",
+    canvasWidth: W,
+    canvasHeight: H,
+    spine: dbSpineSource,
+    animations: animationsRaw
+  });
+
+  check("版本写 5.5（解析器白名单内）", db.version === "5.5" && db.compatibleVersion === "5.5");
+  check("顶层带 frameRate", db.frameRate === DRAGONBONES_FRAME_RATE);
+  const armature = db.armature[0];
+  check("骨骼数与 Spine 一致", armature.bone.length === dbSpineSource.bones.length);
+  check("槽位数与 Spine 一致", armature.slot.length === dbSpineSource.slots.length);
+  check("槽位顺序即 zOrder（与 Spine 的绘制序一致）",
+    armature.slot.map((s) => s.name).join(",") === dbSpineSource.slots.map((s) => s.name).join(","));
+  check("骨骼用 transform.skX/skY 而不是 rotation",
+    armature.bone.every((b) => b.transform !== undefined && b.rotation === undefined && b.transform.skX === b.transform.skY));
+  check("骨骼父级都在子级之前（拓扑序）", (() => {
+    const seen = new Set();
+    for (const bone of armature.bone) {
+      if (bone.parent !== undefined && !seen.has(bone.parent)) return false;
+      seen.add(bone.name);
+    }
+    return true;
+  })());
+  check("inherit* 四项显式写全", armature.bone.every((b) =>
+    b.inheritTranslation === true && b.inheritRotation === true && b.inheritScale === true && b.inheritReflection === true));
+  check("每个槽位的父骨骼都存在", armature.slot.every((s) => armature.bone.some((b) => b.name === s.parent)));
+  check("皮肤只有一套 default", armature.skin.length === 1 && armature.skin[0].name === "default");
+  check("图片挂点用 pivot 0.5/0.5 + transform 落点", armature.skin[0].slot.every((s) => {
+    const d = s.display[0];
+    return d.type === "image" && d.pivot.x === 0.5 && d.pivot.y === 0.5 && typeof d.transform.x === "number";
+  }));
+  check("挂点 path == 图集区域名", armature.skin[0].slot.every((s) => s.display[0].path === s.display[0].name));
+
+  // 挂点位置：DragonBones 的渲染是「图片左上角画在 -pivot 处」，pivot 由
+  // `pivot.x * frameWidth + frameX` 算出。模拟一遍，图片中心必须回到挂点上。
+  {
+    let worst = 0;
+    for (const slot of armature.skin[0].slot) {
+      const d = slot.display[0];
+      const att = dbSpineSource.skins[0].attachments[slot.name][slot.name];
+      // 未裁剪时 frame 为 null，rect = region = 原尺寸。
+      const frameWidth = att.width;
+      const frameHeight = att.height;
+      const pivotX = d.pivot.x * frameWidth;
+      const pivotY = d.pivot.y * frameHeight;
+      // 图片中心（display 局部）→ 经 transform 旋转 → 骨骼局部。
+      const rad = (d.transform.skY * Math.PI) / 180;
+      const cx = (frameWidth / 2 - pivotX);
+      const cy = (frameHeight / 2 - pivotY);
+      const wx = d.transform.x + cx * Math.cos(rad) - cy * Math.sin(rad);
+      const wy = d.transform.y + cx * Math.sin(rad) + cy * Math.cos(rad);
+      worst = Math.max(worst, Math.hypot(wx - att.x, wy - att.y));
+    }
+    check("图片中心与 Spine 挂点重合（偏差 < 0.01px）", worst < 0.01, `最差 ${worst.toFixed(5)}px`);
+  }
+
+  // 动画：时长是帧数、补间帧必须显式声明缓动、curve 是 0~1 归一化。
+  check("6 个动画都在", armature.animation.length === 6, armature.animation.map((a) => a.name).join(","));
+  check("duration 是正整数帧数", armature.animation.every((a) => Number.isInteger(a.duration) && a.duration > 0),
+    armature.animation.map((a) => `${a.name}:${a.duration}`).join(" "));
+  {
+    const idle = armature.animation.find((a) => a.name === "idle");
+    check("idle 时长 = 1.6s × 30fps = 48 帧", idle.duration === 48, String(idle.duration));
+    const walk = armature.animation.find((a) => a.name === "walk");
+    check("walk 时长 = 0.8s × 30fps = 24 帧", walk.duration === 24, String(walk.duration));
+    check("循环动画 playTimes = 0（无限）", armature.animation.every((a) => a.playTimes === 0));
+  }
+  {
+    let tweenFrames = 0;
+    let explicit = 0;
+    let badCurve = 0;
+    for (const animation of armature.animation) {
+      for (const timeline of animation.bone) {
+        for (const key of ["rotateFrame", "translateFrame", "scaleFrame"]) {
+          const frames = timeline[key];
+          if (frames === undefined) continue;
+          for (let i = 0; i < frames.length - 1; i++) {
+            tweenFrames++;
+            const frame = frames[i];
+            if (frame.tweenEasing !== undefined || frame.curve !== undefined) explicit++;
+            if (frame.curve !== undefined && frame.curve.length % 3 !== 1 && frame.curve.length % 3 !== 2) badCurve++;
+            if (frame.duration <= 0) badCurve++;
+          }
+        }
+      }
+    }
+    check(`补间帧全部显式声明缓动（${tweenFrames} 帧）`, explicit === tweenFrames, `${explicit}/${tweenFrames}`);
+    check("curve 长度合法且中间帧 duration ≥ 1", badCurve === 0, `${badCurve} 处`);
+  }
+  {
+    // curve 必须是**归一化**的：同一条曲线在 Spine 那边被绝对化过，
+    // 反推回去应该正好等于 DragonBones 写的 0~1 值。
+    const boneName = Object.keys(animationsRaw.walk.bones).find((name) => animationsRaw.walk.bones[name].rotate !== undefined);
+    const rawFrames = animationsRaw.walk.bones[boneName].rotate;
+    const dbTimeline = armature.animation.find((a) => a.name === "walk").bone.find((t) => t.name === boneName);
+    const spineFrames = dbSpineSource.animations.walk.bones[boneName].rotate;
+    let worst = 0;
+    let compared = 0;
+    for (let i = 0; i + 1 < rawFrames.length; i++) {
+      const authored = rawFrames[i + 1].curve;
+      if (!Array.isArray(authored)) continue;
+      const spineCurve = spineFrames[i].curve;
+      if (!Array.isArray(spineCurve)) continue;
+      const time1 = rawFrames[i].time;
+      const time2 = rawFrames[i + 1].time;
+      const span = time2 - time1;
+      const value1 = rawFrames[i].angle ?? 0;
+      const value2 = rawFrames[i + 1].angle ?? 0;
+      const delta = value2 - value1;
+      // Spine 侧是绝对量 → 归一化回去。
+      const back = [(spineCurve[0] - time1) / span, delta === 0 ? 0 : (spineCurve[1] - value1) / delta,
+        (spineCurve[2] - time1) / span, delta === 0 ? 0 : (spineCurve[3] - value1) / delta];
+      const dbCurve = dbTimeline.rotateFrame[i].curve;
+      for (let k = 0; k < 4; k++) worst = Math.max(worst, Math.abs(back[k] - dbCurve[k]));
+      compared++;
+    }
+    check(`curve 是 0~1 归一化（与 Spine 绝对量互逆，比了 ${compared} 段）`, compared > 0 && worst < 1e-3, `最差 ${worst.toExponential(2)}`);
+    if (compared === 0) check("walk 至少有一段带 bezier 的补间", false, "没比到任何一段");
+  }
+
+  // 正例：完整导出物必须过校验器。
+  const dbReport = validateDragonBones(db);
+  check("导出的骨架通过 validateDragonBones", dbReport.ok, dbReport.errors.map((e) => `${e.where} ${e.message}`).join("；"));
+
+  // 反例：每一条地雷都要被抓住——否则校验器就是摆设。
+  const mutate = (fn) => {
+    const copy = JSON.parse(JSON.stringify(db));
+    fn(copy);
+    return validateDragonBones(copy);
+  };
+  check("抓住 version 不在白名单", !mutate((d) => { d.version = "6.0"; d.compatibleVersion = "6.0"; }).ok);
+  check("抓住补间帧漏写缓动", !mutate((d) => {
+    const frames = d.armature[0].animation[0].bone[0].rotateFrame;
+    delete frames[0].tweenEasing;
+    delete frames[0].curve;
+  }).ok);
+  check("抓住 curve 长度非法", !mutate((d) => {
+    const frames = d.armature[0].animation[0].bone[0].rotateFrame;
+    frames[0].curve = [0.1, 0.2, 0.3];
+    delete frames[0].tweenEasing;
+  }).ok);
+  check("抓住中间帧 duration = 0", !mutate((d) => {
+    d.armature[0].animation[0].bone[0].rotateFrame[0].duration = 0;
+  }).ok);
+  check("抓住父级骨骼缺失", !mutate((d) => { d.armature[0].bone[1].parent = "不存在的骨头"; }).ok);
+  check("抓住槽位挂在缺失骨骼上", !mutate((d) => { d.armature[0].slot[0].parent = "不存在的骨头"; }).ok);
+  check("抓住动画引用缺失骨骼", !mutate((d) => { d.armature[0].animation[0].bone[0].name = "不存在的骨头"; }).ok);
+  check("抓住 duration 非帧数（写成秒）", !mutate((d) => { d.armature[0].animation[0].duration = 1.6; }).ok);
+
+  // 贴图描述：裁剪过的部件必须给全 frame*。
+  //
+  // 符号约定（照着 runtime 反推，不是猜的）：`Slot._updateFrame` 里
+  // `_pivotX = pivot.x * frameWidth + frameX`，图片左上角画在 `-pivot` 处；
+  // 要让**原图**中心落在挂点上，就需要 `pivotX = 原图宽/2 - 裁剪左边距`，
+  // 即 `frameX = -裁剪左边距 = offsetX`（我们图集里 offsetX 恒 ≤ 0）。
+  const page = {
+    name: "skeleton.png",
+    width: 256,
+    height: 256,
+    placements: [
+      { name: "head", x: 2, y: 2, width: 60, height: 80 },
+      { name: "torso", x: 70, y: 2, width: 40, height: 50, origWidth: 56, origHeight: 66, offsetX: -5, offsetY: -7 }
+    ]
+  };
+  const tex = buildDragonBonesTexture(page, { imagePath: "skeleton.png", name: "skeleton" });
+  check("_tex.json 顶层字段齐全",
+    tex.name === "skeleton" && tex.imagePath === "skeleton.png" && tex.width === 256 && tex.height === 256 && tex.scale === 1);
+  check("未裁剪的部件不写 frame*", tex.SubTexture[0].frameX === undefined && tex.SubTexture[0].frameWidth === undefined);
+  check("裁剪过的部件写全 frame*（frameX = 裁剪偏移，负值）",
+    tex.SubTexture[1].frameX === -5 && tex.SubTexture[1].frameY === -7 &&
+    tex.SubTexture[1].frameWidth === 56 && tex.SubTexture[1].frameHeight === 66);
+  check("_tex.json 通过校验", validateDragonBonesTexture(tex).ok);
+  check("抓住区域越界", !validateDragonBonesTexture({
+    ...tex,
+    SubTexture: [{ ...tex.SubTexture[0], x: 250, width: 60 }]
+  }).ok);
+  check("抓住 frame* 只给一半", !validateDragonBonesTexture({
+    ...tex,
+    SubTexture: [{ ...tex.SubTexture[1], frameHeight: undefined }]
+  }).ok);
+
+  // 裁剪后的挂点落点：照 runtime 的算法算一遍，确认 frameX 的符号没写反。
+  {
+    const att = { x: 10, y: -4, rotation: 0, width: 56, height: 66 };
+    const trimX = 5; // 从左边裁掉 5px
+    const trimY = 7;
+    const item = tex.SubTexture[1];
+    const pivotX = 0.5 * item.frameWidth + item.frameX;
+    const pivotY = 0.5 * item.frameHeight + item.frameY;
+    // display 局部里，原图左上角 = 裁剪区左上角(-pivot) 再往回退裁剪量。
+    const centerX = -pivotX - trimX + att.width / 2;
+    const centerY = -pivotY - trimY + att.height / 2;
+    check("裁剪件的原图中心落在挂点上", Math.abs(centerX) < 1e-9 && Math.abs(centerY) < 1e-9, `(${centerX}, ${centerY})`);
+    check("pivot 折算正确（0.5*56-5）", pivotX === 23 && pivotY === 26, `${pivotX}, ${pivotY}`);
+  }
+}
+
+console.log("=== 12. 语义成环时骨架必须仍然无环 ===");
+{
+  // 实测撞出来的场景：语义表被手工/AI 改成 `hip.parent = torso`，
+  // 而 `torso.parent = hip`（躯干的默认父级本来就是胯部）。
+  // 旧的父级解析函数「断环之后又兜底挂回 torso」，于是产物里
+  // `hip ← torso` 与 `torso ← hip` 同时存在——Spine 那边一路绿灯，
+  // 是 DragonBones 的拓扑序校验才把它揪出来的。
+  const cyclic = buildSkeleton({
+    canvasWidth: W,
+    canvasHeight: H,
+    parts: [
+      { name: "hip", file: "hip.png", x: 180, y: 300, width: 90, height: 70, scale: 1, rotation: 0, z: 0, parent: "torso" },
+      { name: "torso", file: "torso.png", x: 170, y: 200, width: 100, height: 140, scale: 1, rotation: 0, z: 1, parent: "hip" },
+      { name: "head", file: "head.png", x: 185, y: 120, width: 70, height: 80, scale: 1, rotation: 0, z: 2 }
+    ],
+    animationIds: ["idle"]
+  });
+  const indexOf = (name) => cyclic.spine.bones.findIndex((b) => b.name === name);
+  check("成环语义下仍然产出骨骼", cyclic.spine.bones.length === 4, cyclic.spine.bones.map((b) => `${b.name}<-${b.parent}`).join(" "));
+  check("没有自环", cyclic.spine.bones.every((b) => b.parent !== b.name));
+  check("没有互环（hip 与 torso 不再互相指认）", (() => {
+    const hip = cyclic.spine.bones.find((b) => b.name === "hip");
+    const torso = cyclic.spine.bones.find((b) => b.name === "torso");
+    return !(hip.parent === "torso" && torso.parent === "hip");
+  })(), `hip<-${cyclic.spine.bones.find((b) => b.name === "hip").parent} torso<-${cyclic.spine.bones.find((b) => b.name === "torso").parent}`);
+  check("骨骼表是拓扑序", cyclic.spine.bones.every((bone) => bone.parent === undefined || indexOf(bone.parent) < indexOf(bone.name)));
+  check("断环这件事被写进了告警", cyclic.warnings.some((w) => w.includes("环")), cyclic.warnings.join(" | "));
+  check("Spine 校验器认可这份骨架", validateSpineWire(cyclic.spine).ok,
+    validateSpineWire(cyclic.spine).errors.map((e) => `${e.where} ${e.message}`).join("；"));
+  check("DragonBones 校验器也认可", (() => {
+    const db = buildDragonBonesSkeleton({
+      name: "cyclic", canvasWidth: W, canvasHeight: H, spine: cyclic.spine, animations: cyclic.animationsRaw
+    });
+    const report = validateDragonBones(db);
+    return report.ok;
+  })());
+  // 反例：手写一份成环的骨骼表，新加的拓扑序校验必须抓住。
+  check("Spine 校验器抓得住成环的骨骼表", !validateSpineWire({
+    bones: [{ name: "hip", parent: "torso" }, { name: "torso", parent: "hip" }],
+    animations: {}
+  }).ok);
+}
+
+console.log("=== 13. 默认网格的骨架不该有互环 ===");
+{
+  // `hip` 是身体根（`RIG_SLOTS` 里它的 parent 就是 undefined）。
+  // 兜底逻辑无权把它挂到躯干上——那会立刻和「躯干的父级是胯部」互环。
+  const grid = buildSkeleton({
+    canvasWidth: W,
+    canvasHeight: H,
+    parts: defaultPartNames().map((name, index) => ({
+      name,
+      file: `${name}.png`,
+      x: 10 + (index % 4) * 90,
+      y: 10 + Math.floor(index / 4) * 130,
+      width: 80,
+      height: 120,
+      scale: 1,
+      rotation: 0,
+      z: index
+    })),
+    animationIds: ["idle"]
+  });
+  const hip = grid.spine.bones.find((b) => b.name === "hip");
+  const torso = grid.spine.bones.find((b) => b.name === "torso");
+  check("hip 是根骨骼", hip.parent === undefined, `hip<-${hip.parent}`);
+  check("torso 挂在 hip 上", torso.parent === "hip", `torso<-${torso.parent}`);
+  check("默认网格不产生任何告警", grid.warnings.length === 0, grid.warnings.join(" | "));
+  check("默认网格的骨骼表是拓扑序", grid.spine.bones.every((bone) =>
+    bone.parent === undefined || grid.spine.bones.findIndex((b) => b.name === bone.parent) < grid.spine.bones.findIndex((b) => b.name === bone.name)));
 }
 
 console.log("");

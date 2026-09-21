@@ -1279,7 +1279,9 @@ const SERVABLE_DIRS = new Set(["source", "images", "videos", "frames", "keyed", 
 const SERVABLE_IMAGE_DIRS = new Set(["refs", "out", "keyed"]);
 const SERVABLE_SEQUENCE_DIRS = new Set(["refs", "video-refs", "videos", "frames", "keyed", "out"]);
 /** 骨骼动画：源图、拆件摊平图、部件、装配结果、骨骼与图集。 */
-const SERVABLE_RIG_DIRS = new Set(["source", "sheet", "parts", "layout", "rig", "atlas"]);
+// `export/` 是后加的第二条导出路径（DragonBones 5.5 的 `_ske.json`）。
+// 白名单只比对**第一段**路径，所以 `export/dragonbones/xxx.json` 加一条 `export` 就够。
+const SERVABLE_RIG_DIRS = new Set(["source", "sheet", "parts", "layout", "rig", "atlas", "export"]);
 
 type AssetScope = "assets" | "image-assets" | "sequence-assets" | "rig-assets";
 

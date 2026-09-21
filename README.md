@@ -280,8 +280,8 @@ Key 只写入本机 `<DSH_HOME>/game-material-master/config.json`，回传界面
 |---|---|---|---|
 | ① 拆件 | 生图模型把角色拆成 16 个部件（4×4 网格），再自动分割成逐件透明 PNG | **一次 Seedream 生图**（约 0.2 元） | 整张重生成 / 用现有图重新分割（免费）/ 逐件上传替换 |
 | ② 装配定位 | 把部件摆回参考姿态，出「参考图 \| 合成图」对比图 | 免费（本地算） | 整体、或只重跑指定部件 |
-| ③ 骨骼与动画 | 按部件语义推骨骼层级 + 六个动画预设，出 `skeleton.json` 与可播放预览 | 免费 | 整体 |
-| ④ 图集 | 打包 Spine 纹理图集，可直接导入引擎 | 免费 | 整体 |
+| ③ 骨骼与动画 | 按部件语义推骨骼层级 + 六个动画预设，出 `skeleton.json`（Spine 4.2）与 `skeleton_ske.json`（DragonBones 5.5），并给可播放预览 | 免费 | 整体 |
+| ④ 图集 | 打包纹理图集，同时出 `.atlas`（Spine）与 `_tex.json`（DragonBones） | 免费 | 整体 |
 
 ### 语义层：角色 / 父级 / 锚点
 
@@ -522,6 +522,44 @@ row 4: left-lower-leg| right-lower-leg| left-foot        | right-foot
   bezier 控制点是**绝对量**、且**每个被动画属性一份**（`rotate` 4 个数、`translate` 8 个）。
   这三点写错的表现分别是「骨骼不动」「骨架渲染一帧后整体消失」「运动突跳而不是缓动」。
 
+**父级只解析一次**。语义层给了父级就用它，没给才按名字关键词往上找。解析结果存进一张
+`resolvedParent` 表，**拓扑排序与写进产物的父子关系共用同一份**——这两处一旦各算一次，
+「排序用的父级」和「产物里的父级」就可能分叉。
+
+> 这里踩过一个**自 v1 起一直存在、却一条告警都没有**的坑：旧代码把「按名字找父级」和
+> 「按祖先栈断环」揉在一个函数里，然后调用两次（排序传祖先栈、写骨骼传空集）；
+> 更糟的是断环之后的兜底「挂到 torso」把刚断开的边**又接了回来**且不再复检。
+> 默认网格里 `hip` 的语义父级是 `undefined`（身体根），而 `torso` 的父级正是 `hip`——
+> 于是**每一份导出都带着 `hip ← torso` + `torso ← hip` 的互环**。
+> 这个 bug 是被 DragonBones 的拓扑序校验揪出来的（Spine 那边一路绿灯），
+> 所以现在两条导出路径都做拓扑序断言。回归测试在 `verify-rig.mjs` 第 12/13 节。
+
+### 导出两套格式：Spine 4.2 与 DragonBones 5.5
+
+同一个骨架同时落两份产物，给不同的引擎用：
+
+| 文件 | 给谁 |
+|---|---|
+| `rig/skeleton.json` | Spine 运行时 / Spine 编辑器 |
+| `export/dragonbones/skeleton_ske.json` | DragonBones（Cocos / Egret / Laya 自带） |
+| `atlas/skeleton.atlas` | Spine 的图集描述 |
+| `atlas/skeleton_tex.json` | DragonBones 的图集描述（逐页一份） |
+
+两份是同**一次**推导、同**一次**装箱出来的——分开各算一次，坐标迟早对不上，而运行时的
+表现只是「画错位」，不会有任何报错。
+
+三处必须分开编码的差异（都对着 DragonBonesJS 的解析器逐行核过）：
+
+1. **`tweenEasing` 缺省是 `-2`（阶跃）**，不是线性。所以每个补间帧都要显式写 `tweenEasing: 0`
+   或真实缓动，否则动画一跳一跳。
+2. **`curve` 是 0~1 归一化**的（紧凑式要求长度 `% 3 == 1`），而 Spine 4.2 是**绝对量**。
+   所以简写动画被拆成 `buildAnimationShorthands`，两条路径各自编码一次。
+3. **`duration` 是帧数**（`seconds × frameRate`，固定 30），Spine 那边是秒。
+
+另外两处决定「画出来对不对」：图片落点靠 `pivot` + `frame*`（`_pivotX = pivot.x * frameWidth
++ frameX`），裁剪过的部件少给 `frame*` 会整体偏掉；坐标是 **y 向下**（`DragonBones.yDown`
+默认 `true`），与我们的图像坐标一致，旋转角不取反。
+
 ### 预览为什么不用官方 Spine Web Player
 
 官方播放器要从 CDN 拉 `spine-player.js`，而验收页可能在没有外网的环境里打开。所以
@@ -533,8 +571,10 @@ row 4: left-lower-leg| right-lower-leg| left-foot        | right-foot
 - **① 拆件**：部件卡片逐件「通过 / 改名 / 隐藏 / 删除 / 重新定位」；
 - **② 装配**：整页是手动装配台（拖入 / 拖动 / 缩放 / 对齐吸附 / 撤销 / 图层 / 精确数值，
   见上一节）；自动没匹配上的部件会明确标出来，同时给出「只重试未命中的 N 个」按钮；
-- **③ 骨骼**：六个动画按钮直接切换播放，可开骨骼叠加与网格；
-- **④ 图集**：图集整图预览 + `.atlas` 文本，区域尺寸与 `skeleton.json` 里的挂点尺寸一致。
+- **③ 骨骼**：六个动画按钮直接切换播放，可开骨骼叠加与网格；页面上同时给
+  `skeleton.json` 与 DragonBones `skeleton_ske.json` 两个入口；
+- **④ 图集**：图集整图预览 + `.atlas` 文本 + DragonBones `_tex.json`，区域尺寸与
+  `skeleton.json` 里的挂点尺寸一致。
 
 对话里也能全程驱动：`game_material_call({method:'runRigLayout', payload:{jobId, names:['head']}})`
 只重跑一个部件，不花钱。
@@ -662,12 +702,12 @@ node scripts/dsh-web-cookie.mjs 127.0.0.1:43121 --json
 | 脚本 | 覆盖 |
 |---|---|
 | `node scripts/verify-rigsemantics.mjs` | 模块四语义层：角色推断（含中文名与关键词优先级）、默认语义与 v1 的 `RIG_SLOTS` **逐条一致**、父级沿角色链回退、成环/悬空父级/锚点退化的校验与自动修复、确定性 |
-| `node scripts/verify-rig.mjs` | 模块四算法层：拆件分割、装配定位精度、遮挡排序、骨骼初始姿态逐像素还原、Spine 4.2 wire format、图集装箱、预览 HTML（合成图像素级断言） |
+| `node scripts/verify-rig.mjs` | 模块四算法层：拆件分割、装配定位精度、遮挡排序、骨骼初始姿态逐像素还原、Spine 4.2 wire format、**DragonBones 5.5 双格式导出（每个地雷都配了反例）**、语义成环时的无环保证、图集装箱、预览 HTML（合成图像素级断言） |
 | `node scripts/verify-rig-module.mjs` | 模块四端到端：建任务 → 上传 → **语义** → 装配 → **手工骨骼偏移（含「重跑骨骼后仍在」）** → 骨骼 → 图集 → 打标 → 删除级联（走真实模块代码，数据落在临时 DSH_HOME） |
 | `node scripts/make-rig-fixtures.mjs <目录>` | 生成**免费**的合成部件 PNG（`--full` 出完整 16 件），让除拆件以外的整条链可以零成本测试 |
 | `node scripts/probe-redraw.mjs <部件PNG> "<提示词>"` | **花钱**：直接调生图模型重绘一个部件并打印统计（与插件共用提示词构造器）。用于排查「是模型不行还是管线不行」 |
 | `node scripts/e2e-rig-live.mjs <角色整图>` | 模块四真实链路：**真的调一次生图模型**拆件，再跑完装配/骨骼/图集（约 0.2 元） |
-| `node scripts/verify-host.mjs` | 宿主半区全链路（**233 项**）：四个模块的本地链路、资源路由、预览页的 `text/html`、目录穿越与 id 前缀校验 |
+| `node scripts/verify-host.mjs` | 宿主半区全链路（**237 项**）：四个模块的本地链路、资源路由、预览页的 `text/html`、目录穿越与 id 前缀校验 |
 | `node scripts/verify-tools.mjs` / `verify-client.mjs` / `verify-pipeline.mjs` | 对话调用面（含四个模块 status/review 的文字渲染）、浏览器半区契约（含「每个远程方法都有 api 实现」与手动装配的四条回归）、抠像回归 |
 
 
@@ -678,8 +718,8 @@ npm run build          # tsc → lib/，并剥掉浏览器束结尾的 export {}
 # 纯本地测试（不联网、不花钱）
 node scripts/verify-minimax.mjs    # MiniMax 协议层（85 项，含请求体逐字段断言）
 node scripts/verify-pipeline.mjs   # 抽帧/抠像/合成链路（30 项，含回归用例）
-node scripts/verify-host.mjs       # 宿主冒烟（233 项，真实 cordis + 真实 HTTP）
-node scripts/verify-client.mjs     # 浏览器半区契约（171 项：阶段 ctx 键必须被转发、每个生成类调用点都带 loading 反馈、手动装配的四个坑）
+node scripts/verify-host.mjs       # 宿主冒烟（237 项，真实 cordis + 真实 HTTP）
+node scripts/verify-client.mjs     # 浏览器半区契约（175 项：阶段 ctx 键必须被转发、每个生成类调用点都带 loading 反馈、手动装配的四个坑）
 node scripts/verify-feedback.mjs   # 浏览器半区渲染（87 项：真加载 lib/client.js，断言遮罩真的出现 / 空闲时真的不出现 / 深链接点击真的切面板）
 node scripts/verify-tools.mjs      # 对话调用面（93 项：工具 schema、方法覆盖、固定流程、审核模式、深链接契约、骨骼动画 status/review 渲染）
 node scripts/verify-live-bundle.mjs # 运行中的宿主是否已在提供新束（走 /plugins/events 拿真实 graph，再按图里的 URL 取回）

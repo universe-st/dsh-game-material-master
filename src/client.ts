@@ -5752,6 +5752,16 @@
                             : h("p", { className: "SPR_hint", style: { marginTop: 10 } }, job.layout?.status === "ready" ? "点「生成骨骼与动画」得到 skeleton.json 与可播放预览。" : "先完成第②步装配定位。"),
                           h(RigAnimationPanel, { job, api, run, busy, activeKey: K_RIG_BONES }),
                           h(RigBoneEditor, { job, api, run, busy, activeKey: K_RIG_BONES }),
+                          // 两条导出路径同源：Spine 的 skeleton.json 与 DragonBones 的 _ske.json。
+                          job.rig?.dragonBones?.skeleton !== null && job.rig?.dragonBones?.skeleton !== undefined
+                            ? h(
+                                "div",
+                                { className: "SPR_rigEditorRow", "data-testid": "rig-bones-db" },
+                                h("span", { className: "SPR_refRow" }, "DragonBones 骨架"),
+                                h("a", { className: "SPR_link", href: job.rig.dragonBones.skeleton, target: "_blank", rel: "noreferrer" }, "skeleton_ske.json"),
+                                h("span", { className: "SPR_hint" }, "同一份骨架的 DragonBones 5.5 写法（Cocos / Egret / Laya 可直接加载）")
+                              )
+                            : null,
                           h(
                             "div",
                             { className: "SPR_toolbar", style: { marginTop: 12 } },
@@ -5792,6 +5802,20 @@
                             job.atlas?.image !== null && job.atlas?.image !== undefined ? h("a", { className: "SPR_link", href: job.atlas.image, download: "skeleton.png" }, "下载 skeleton.png") : null,
                             job.atlas?.width !== undefined ? h(Chip, { kind: "ready", text: `${job.atlas.width}×${job.atlas.height} · ${job.atlas.regions} 区域${(job.atlas.pages ?? []).length > 1 ? ` · ${job.atlas.pages.length} 页` : ""}` }) : null
                           ),
+                          // 同一份图集的**两种描述**：Spine 的 .atlas 与 DragonBones 的 _tex.json。
+                          // 两者必须是同一次装箱出来的——分开各装一次，坐标迟早对不上，
+                          // 而运行时的表现只是「画错位」，不会有任何报错。
+                          (job.atlas?.dragonBones ?? []).length > 0
+                            ? h(
+                                "div",
+                                { className: "SPR_rigEditorRow", "data-testid": "rig-atlas-db" },
+                                h("span", { className: "SPR_refRow" }, "DragonBones 贴图"),
+                                job.atlas.dragonBones.map((entry) =>
+                                  h("a", { key: entry.file, className: "SPR_link", href: entry.url, target: "_blank", rel: "noreferrer" },
+                                    entry.file.split("/").pop())
+                                )
+                              )
+                            : null,
                           (job.atlas?.warnings ?? []).length > 0
                             ? h("p", { className: "SPR_hint", style: { color: "var(--dsw-alias-state-warning-primary, #b45309)" } },
                                 `图集提示：${job.atlas.warnings.join("；")}`)
@@ -5817,7 +5841,8 @@
                             h(Btn, { onClick: () => void run(() => api.saveRigJob({ jobId: job.id, approved: true, stage: "atlas" }), "第④步已通过"), on: rigStageOf(job, "atlas").approved === true, disabled: job.atlas?.status !== "ready" }, rigStageOf(job, "atlas").approved === true ? "第④步：已通过" : "第④步：通过"),
                             h(Btn, { onClick: () => void run(() => api.saveRigJob({ jobId: job.id, approved: false, stage: "atlas" })) }, "取消通过")
                           ),
-                          h("p", { className: "SPR_hint", style: { marginTop: 10 } }, "导入 Spine：把 skeleton.json、skeleton.atlas、skeleton.png 三个文件放在同一目录，打开 Spine 时选 skeleton.json 即可。")
+                          h("p", { className: "SPR_hint", style: { marginTop: 10 } }, "导入 Spine：把 skeleton.json、skeleton.atlas、skeleton.png 三个文件放在同一目录，打开 Spine 时选 skeleton.json 即可。"),
+                          h("p", { className: "SPR_hint", style: { marginTop: 4 } }, "导入 DragonBones：把 export/dragonbones/skeleton_ske.json 与 atlas/skeleton_tex.json、atlas/skeleton.png 放同一目录后加载 .json 数据与纹理。")
                         )
                       : null,
 

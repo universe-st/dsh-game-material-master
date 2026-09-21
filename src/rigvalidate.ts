@@ -63,6 +63,30 @@ export function validateSpineWire(spine: any): ValidationReport {
   const errors: ValidationIssue[] = [];
   const warnings: ValidationIssue[] = [];
 
+  // ⓪ 骨骼必须拓扑序（父级排在自己前面），且不能成环。
+  //
+  // 这一条是**真的漏过**：语义层被手工改成 `hip.parent = torso` 而 `torso.parent = hip`
+  // 时，旧的父级解析函数在「断环」之后又兜底挂回 torso，于是产物里 `hip ← torso`
+  // 与 `torso ← hip` 同时存在。Spine 那边一路绿灯，是在 DragonBones 的拓扑序校验
+  // 里才暴露出来的——同一个 `RigDocument` 的两种写法，校验器不能只拦一边。
+  {
+    const bones: any[] = Array.isArray(spine?.bones) ? spine.bones : [];
+    const seen = new Set<string>();
+    for (const bone of bones) {
+      const name = bone?.name;
+      if (typeof name !== "string" || name === "") continue;
+      if (bone.parent !== undefined && !seen.has(bone.parent)) {
+        errors.push({
+          level: "error",
+          code: "bone-not-topological",
+          where: `bones/${name}`,
+          message: `父级「${bone.parent}」不存在或排在自己之后（骨骼表必须拓扑序，否则成环的骨架谁先谁后都不对）`
+        });
+      }
+      seen.add(name);
+    }
+  }
+
   const animations = spine?.animations;
   if (animations === null || typeof animations !== "object") {
     return report(errors, warnings);
@@ -408,6 +432,329 @@ export function validateSkeletonAtlasMatch(spine: any, pages: AtlasPageLike[]): 
         where: `${slotName}/${attachmentName}`,
         message: `挂点在图集里找不到同名区域「${attachmentName}」，运行时会整个部件不显示`
       });
+    }
+  }
+
+  return report(errors, warnings);
+}
+
+/** DragonBones 解析器认识的数据版本（`ObjectDataParser.parseDragonBonesData` 的白名单）。 */
+const DRAGONBONES_VERSIONS = new Set(["2.3", "3.0", "4.0", "4.5", "5.0", "5.5", "5.6"]);
+
+/**
+ * DragonBones 5.5 导出物的校验。
+ *
+ * 与 Spine 那边同样的理由：下面每一条都对应一个**静默坏掉**的结果，
+ * 在插件里看不出来，到了引擎里才发现——
+ *
+ *   1. `version` 不在白名单 → `parseDragonBonesData` 直接 `return null`，
+ *      整个骨架加载不出来（而且只打一句 console.assert）；
+ *   2. 补间帧既没有 `tweenEasing` 也没有 `curve` → 按**阶跃**解释，
+ *      动画一跳一跳（`tweenEasing` 缺省是 `-2` 而不是 `0`）；
+ *   3. `curve` 长度不是 `3n+1`（紧凑）或 `3n+2`（显式）→ 解析器越界读
+ *      `undefined`，NaN 顺着采样扩散；
+ *   4. 中间帧 `duration` 为 0 → `_parseTimeline` 里 `frameCount === 0`
+ *      同样走阶跃分支（末帧的 `duration` 本来就被忽略，不在此列）；
+ *   5. 骨骼父级缺失 / 出现在子级之后 → 骨骼取不到父级矩阵；
+ *   6. 槽位或动画引用了不存在的骨骼 → 该槽位被静默丢弃。
+ */
+export function validateDragonBones(skeleton: any): ValidationReport {
+  const errors: ValidationIssue[] = [];
+  const warnings: ValidationIssue[] = [];
+
+  if (skeleton === null || typeof skeleton !== "object") {
+    errors.push({ level: "error", code: "db-empty", where: "skeleton", message: "DragonBones 骨架为空" });
+    return report(errors, warnings);
+  }
+
+  const version = skeleton.version;
+  if (typeof version !== "string" || !DRAGONBONES_VERSIONS.has(version)) {
+    errors.push({
+      level: "error",
+      code: "db-version",
+      where: "version",
+      message: `version=${JSON.stringify(version)} 不在 DragonBones 白名单里，运行时会把整份数据判为不支持并返回 null`
+    });
+  }
+
+  const frameRate = skeleton.frameRate;
+  if (typeof frameRate !== "number" || !(frameRate > 0)) {
+    errors.push({ level: "error", code: "db-frame-rate", where: "frameRate", message: `frameRate 必须是正数，当前 ${JSON.stringify(frameRate)}` });
+  }
+
+  const armatures = Array.isArray(skeleton.armature) ? skeleton.armature : [];
+  if (armatures.length === 0) {
+    errors.push({ level: "error", code: "db-no-armature", where: "armature", message: "没有任何 armature" });
+    return report(errors, warnings);
+  }
+
+  for (const armature of armatures) {
+    const where0 = `armature/${armature?.name ?? "?"}`;
+    const bones: any[] = Array.isArray(armature?.bone) ? armature.bone : [];
+    const slots: any[] = Array.isArray(armature?.slot) ? armature.slot : [];
+    const boneNames = new Set<string>();
+    const slotNames = new Set<string>();
+
+    // 骨骼：拓扑序（父级必须先出现）。解析器其实允许后补，但依赖它会让
+    // 「父级拼错名字」变成静默失败，索性在这里要求严格。
+    for (const bone of bones) {
+      const name = bone?.name;
+      if (typeof name !== "string" || name === "") {
+        errors.push({ level: "error", code: "db-bone-name", where: where0, message: "存在没有名字的骨骼" });
+        continue;
+      }
+      if (boneNames.has(name)) {
+        errors.push({ level: "error", code: "db-bone-dup", where: `${where0}/${name}`, message: `骨骼名重复：${name}` });
+      }
+      if (bone.parent !== undefined) {
+        if (!boneNames.has(bone.parent)) {
+          errors.push({
+            level: "error",
+            code: "db-bone-parent",
+            where: `${where0}/${name}`,
+            message: `父级「${bone.parent}」不存在或出现在子级之后，骨骼取不到父级矩阵`
+          });
+        }
+      }
+      const transform = bone.transform;
+      if (transform === null || typeof transform !== "object") {
+        errors.push({ level: "error", code: "db-bone-transform", where: `${where0}/${name}`, message: "骨骼缺少 transform" });
+      } else if (Math.abs(numOr(transform.skX, 0) - numOr(transform.skY, 0)) > 1e-6) {
+        // 允许（解析器支持双角度），但我们自己从不生成——出现即说明有人手改了。
+        warnings.push({
+          level: "warning",
+          code: "db-bone-skew",
+          where: `${where0}/${name}`,
+          message: `skX(${transform.skX}) 与 skY(${transform.skY}) 不等，会引入斜切`
+        });
+      }
+      boneNames.add(name);
+    }
+
+    // 槽位：数组序即 zOrder。
+    for (const slot of slots) {
+      const name = slot?.name;
+      if (typeof name !== "string" || name === "") {
+        errors.push({ level: "error", code: "db-slot-name", where: where0, message: "存在没有名字的槽位" });
+        continue;
+      }
+      if (!boneNames.has(slot.parent)) {
+        errors.push({
+          level: "error",
+          code: "db-slot-parent",
+          where: `${where0}/${name}`,
+          message: `槽位挂在骨骼「${slot.parent}」上，但这根骨骼不存在（运行时该槽位会被丢掉）`
+        });
+      }
+      slotNames.add(name);
+    }
+
+    // 皮肤：槽位名要在 armature 里存在，图片挂点要有名字。
+    for (const skin of Array.isArray(armature?.skin) ? armature.skin : []) {
+      for (const skinSlot of Array.isArray(skin?.slot) ? skin.slot : []) {
+        const name = skinSlot?.name;
+        if (!slotNames.has(name)) {
+          errors.push({
+            level: "error",
+            code: "db-skin-slot",
+            where: `${where0}/${skin?.name ?? "default"}/${name}`,
+            message: `皮肤引用了不存在的槽位「${name}」`
+          });
+        }
+        const displays = Array.isArray(skinSlot?.display) ? skinSlot.display : [];
+        if (displays.length === 0) {
+          warnings.push({ level: "warning", code: "db-skin-empty", where: `${where0}/${name}`, message: "槽位没有任何 display，运行时会不显示" });
+        }
+        for (const display of displays) {
+          if (display?.type !== undefined && display.type !== "image") continue;
+          if (typeof display?.path !== "string" || display.path === "") {
+            errors.push({
+              level: "error",
+              code: "db-display-path",
+              where: `${where0}/${name}`,
+              message: "图片挂点缺少 path，运行时按名字去图集里取不到贴图"
+            });
+          }
+          const pivot = display?.pivot;
+          if (pivot === undefined || typeof pivot?.x !== "number" || typeof pivot?.y !== "number") {
+            errors.push({
+              level: "error",
+              code: "db-display-pivot",
+              where: `${where0}/${name}`,
+              message: "图片挂点缺少 pivot（缺省 0.5/0.5 虽然能跑，但裁剪过的部件会偏）"
+            });
+          }
+        }
+      }
+    }
+
+    // 动画：时长是**帧数**；补间帧必须显式声明缓动；持续 0 的中间帧会变阶跃。
+    for (const animation of Array.isArray(armature?.animation) ? armature.animation : []) {
+      const animWhere = `${where0}/animation/${animation?.name ?? "?"}`;
+      const duration = animation?.duration;
+      if (typeof duration !== "number" || !Number.isInteger(duration) || duration <= 0) {
+        errors.push({
+          level: "error",
+          code: "db-duration",
+          where: animWhere,
+          message: `duration 必须是正整数帧数（Spine 那边是秒，这里是帧），当前 ${JSON.stringify(duration)}`
+        });
+      }
+      for (const timeline of Array.isArray(animation?.bone) ? animation.bone : []) {
+        const boneName = timeline?.name;
+        if (!boneNames.has(boneName)) {
+          errors.push({
+            level: "error",
+            code: "db-anim-bone",
+            where: `${animWhere}/${boneName}`,
+            message: `动画引用了不存在的骨骼「${boneName}」`
+          });
+        }
+        for (const [key, kind] of [
+          ["rotateFrame", "rotate"],
+          ["translateFrame", "translate"],
+          ["scaleFrame", "scale"]
+        ] as Array<[string, string]>) {
+          const frames = timeline?.[key];
+          if (frames === undefined) continue;
+          if (!Array.isArray(frames) || frames.length === 0) {
+            errors.push({ level: "error", code: "db-frames-empty", where: `${animWhere}/${boneName}/${kind}`, message: "帧数组为空" });
+            continue;
+          }
+          for (let i = 0; i < frames.length; i++) {
+            const frame = frames[i];
+            const frameWhere = `${animWhere}/${boneName}/${kind}[${i}]`;
+            const isLast = i === frames.length - 1;
+            const frameDuration = numOr(frame?.duration, -1);
+            if (!Number.isInteger(frameDuration) || frameDuration < 0) {
+              errors.push({ level: "error", code: "db-frame-duration", where: frameWhere, message: `duration 必须是非负整数帧数，当前 ${JSON.stringify(frame?.duration)}` });
+            } else if (!isLast && frameDuration === 0) {
+              errors.push({
+                level: "error",
+                code: "db-frame-step",
+                where: frameWhere,
+                message: "中间帧的 duration 为 0 会被解析成阶跃（末帧的 duration 本来就被忽略，只有中间帧要求 ≥ 1）"
+              });
+            }
+            if (isLast) continue;
+            if (frame?.curve === undefined && frame?.tweenEasing === undefined) {
+              errors.push({
+                level: "error",
+                code: "db-frame-easing",
+                where: frameWhere,
+                message: "补间帧既没有 tweenEasing 也没有 curve；缺省是 -2（阶跃），动画会一跳一跳"
+              });
+              continue;
+            }
+            if (frame.curve !== undefined) {
+              const length = Array.isArray(frame.curve) ? frame.curve.length : -1;
+              if (length < 0 || (length % 3 !== 1 && length % 3 !== 2)) {
+                errors.push({
+                  level: "error",
+                  code: "db-curve-length",
+                  where: frameWhere,
+                  message: `curve 长度 ${length} 非法：紧凑式要 3n+1、显式锚点式要 3n+2，否则解析器越界读到 undefined`
+                });
+              }
+            }
+          }
+          // 帧位置要严格递增（前 n-1 帧的 duration 之和 == animation.duration）。
+          let total = 0;
+          for (let i = 0; i < frames.length - 1; i++) total += numOr(frames[i]?.duration, 0);
+          if (typeof duration === "number" && total !== duration) {
+            warnings.push({
+              level: "warning",
+              code: "db-frame-span",
+              where: `${animWhere}/${boneName}/${kind}`,
+              message: `关键帧总长 ${total} 帧与动画时长 ${duration} 帧不一致`
+            });
+          }
+        }
+      }
+    }
+  }
+
+  return report(errors, warnings);
+}
+
+function numOr(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+/**
+ * `_tex.json` 的校验：区域必须落在图集内，`frame*` 要么一起给、要么都不给。
+ *
+ * `frameX/frameY/frameWidth/frameHeight` 是「原图（未裁剪）尺寸 + 裁剪偏移」，
+ * 运行时用 `pivot.x * frameWidth + frameX` 算挂点位置（`Slot.ts:427-433`）。
+ * 只给一半的话，挂点会按「没裁过」算，裁掉透明边的部件整体偏掉。
+ */
+export function validateDragonBonesTexture(texture: any): ValidationReport {
+  const errors: ValidationIssue[] = [];
+  const warnings: ValidationIssue[] = [];
+
+  const width = numOr(texture?.width, 0);
+  const height = numOr(texture?.height, 0);
+  if (!(width > 0) || !(height > 0)) {
+    errors.push({ level: "error", code: "db-tex-size", where: "texture", message: `图集尺寸非法：${width}×${height}` });
+    return report(errors, warnings);
+  }
+  if (typeof texture?.imagePath !== "string" || texture.imagePath === "") {
+    errors.push({ level: "error", code: "db-tex-image", where: "texture", message: "缺少 imagePath，运行时找不到 png" });
+  }
+
+  const subTextures = texture?.SubTexture;
+  if (!Array.isArray(subTextures) || subTextures.length === 0) {
+    errors.push({ level: "error", code: "db-tex-empty", where: "SubTexture", message: "SubTexture 为空" });
+    return report(errors, warnings);
+  }
+
+  const seen = new Set<string>();
+  for (const item of subTextures) {
+    const where = String(item?.name ?? "?");
+    if (typeof item?.name !== "string" || item.name === "") {
+      errors.push({ level: "error", code: "db-tex-name", where: "SubTexture", message: "存在没有名字的区域" });
+      continue;
+    }
+    if (seen.has(item.name)) {
+      errors.push({ level: "error", code: "db-tex-dup", where, message: "区域名重复" });
+    }
+    seen.add(item.name);
+
+    const x = numOr(item.x, 0);
+    const y = numOr(item.y, 0);
+    const w = numOr(item.width, 0);
+    const h = numOr(item.height, 0);
+    if (!(w > 0) || !(h > 0)) {
+      errors.push({ level: "error", code: "db-tex-region", where, message: `区域尺寸非法：${w}×${h}` });
+    } else if (x < 0 || y < 0 || x + w > width || y + h > height) {
+      errors.push({
+        level: "error",
+        code: "db-tex-outside",
+        where,
+        message: `区域 ${x},${y} ${w}×${h} 超出图集 ${width}×${height}`
+      });
+    }
+
+    const frameKeys = ["frameX", "frameY", "frameWidth", "frameHeight"];
+    const given = frameKeys.filter((key) => item[key] !== undefined);
+    if (given.length !== 0 && given.length !== 4) {
+      errors.push({
+        level: "error",
+        code: "db-tex-frame",
+        where,
+        message: `裁剪信息要给全（${frameKeys.join("/")}），当前只给了 ${given.join("、")}——挂点会按「没裁过」算，部件整体偏掉`
+      });
+    } else if (given.length === 4) {
+      const frameWidth = numOr(item.frameWidth, 0);
+      const frameHeight = numOr(item.frameHeight, 0);
+      if (frameWidth < w || frameHeight < h) {
+        errors.push({
+          level: "error",
+          code: "db-tex-frame-size",
+          where,
+          message: `frameWidth/frameHeight（${frameWidth}×${frameHeight}）不能小于区域尺寸（${w}×${h}）`
+        });
+      }
     }
   }
 

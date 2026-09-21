@@ -1133,6 +1133,20 @@ async function main() {
         check("骨架 JSON 可取得且是 JSON 类型", skeleton !== null && skeleton.status === 200 && String(skeleton.headers.get("content-type")).includes("json"), skeleton === null ? "请求失败" : String(skeleton.status));
         const atlasText = await fetch(`${base}/atlas/skeleton.atlas`).catch(() => null);
         check("图集文本可取得", atlasText !== null && atlasText.status === 200, atlasText === null ? "请求失败" : String(atlasText.status));
+        // `export/` 是第二条导出路径（DragonBones 5.5）。白名单只比对第一段路径，
+        // 漏加它就表现为「产物在磁盘上、界面上点开是 403」——实测就是这么撞上的。
+        const dbSkeleton = await fetch(`${base}/export/dragonbones/skeleton_ske.json`).catch(() => null);
+        check("DragonBones 骨架可经资源路由取得", dbSkeleton !== null && dbSkeleton.status === 200,
+          dbSkeleton === null ? "请求失败" : String(dbSkeleton.status));
+        check("DragonBones 骨架的 Content-Type 是 JSON",
+          dbSkeleton !== null && String(dbSkeleton.headers.get("content-type")).includes("json"),
+          dbSkeleton === null ? "无响应" : String(dbSkeleton.headers.get("content-type")));
+        const dbTexture = await fetch(`${base}/atlas/skeleton_tex.json`).catch(() => null);
+        check("DragonBones 贴图描述可取得", dbTexture !== null && dbTexture.status === 200,
+          dbTexture === null ? "请求失败" : String(dbTexture.status));
+        const unlisted = await fetch(`${base}/secret/x.json`).catch(() => null);
+        check("未列入白名单的子目录仍然被拒绝", unlisted !== null && unlisted.status === 403,
+          unlisted === null ? "请求失败" : String(unlisted.status));
         const escape = await fetch(`${base}/parts/../../../project.json`).catch(() => null);
         check("骨骼动画模块同样挡住目录穿越", escape !== null && [400, 403, 404].includes(escape.status), escape === null ? "请求失败" : String(escape.status));
         const badPrefix = await fetch(`http://127.0.0.1:${port3}/dsh-game-material-master/rig-assets/p000000000000/rig/preview.html`).catch(() => null);

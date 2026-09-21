@@ -331,7 +331,8 @@ const CALL_DESCRIPTION = [
   "  runRigRedraw({jobId,name,prompt,erode?})【★花钱：一次 Seedream 调用，用生图模型重绘单个部件】/",
   "  runRigSheet({jobId})【花钱：一次 Seedream 调用，把角色拆成部件摊平图】/ runRigSegment({jobId})【本地分割，免费】/",
   "  runRigLayout({jobId,names?})【本地装配定位，免费；只给 names 就只重跑那几个部件】/",
-  "  runRigBones({jobId})【本地生成骨架与动画】/ runRigAtlas({jobId})【本地打包图集】",
+  "  runRigBones({jobId})【本地生成骨架与动画，同时产出 Spine 4.2 skeleton.json 与 DragonBones 5.5 skeleton_ske.json】/",
+  "  runRigAtlas({jobId})【本地打包图集，同时产出 Spine .atlas 与 DragonBones _tex.json】",
   "  ★ 自动摆位不准时用 setRigLayoutHints：先 read_image 看 getRigJob 返回的 partsMontagePath（部件按 partsOrder 顺序排列）",
   "说明：key 是方向英文字面量（front/back/downLeft/downRight/upLeft/upRight/left/right）；data 是原始文件字节的 base64（不带 data: 前缀）；",
   "生成类方法立刻返回 {started:true}，接着用 game_material_wait 等它跑完，再用 game_material_review 拿验收包。",
@@ -793,8 +794,12 @@ const PROMPT_SECTION = [
   "     `parts[].activeTexture` 是当前生效的版本号。换色是**本地计算、免费**，随时可以试。",
   "     `tag` 参数可以按语义标签批量（例如所有 `cloth` 一起换色），适合「这套衣服整体换个色调」。",
   "  ★ 判断依据：先 `getRigJob` 看 `rig.warnings`（几何推导的告警）、`semantics.errors/warnings`（结构问题）、",
-  "  `atlas.warnings`。**构建失败时先读 `stage.error`**——导出前校验（Spine 4.2 四条地雷、循环接缝、",
-  "  图集越界/缺区域）不通过会直接让那一步失败，并把具体原因写在 error 里。",
+  "  `atlas.warnings`。**构建失败时先读 `stage.error`**——导出前校验（Spine 4.2 四条地雷、DragonBones 的",
+  "  `tweenEasing` 缺省即阶跃与 `curve` 编码规则、循环接缝、图集越界/缺区域）不通过会直接让那一步失败，",
+  "  并把具体原因写在 error 里。",
+  "  ★ ④ 图集现在同时产出**两种描述**：Spine 的 `skeleton.atlas` 与 DragonBones 的 `_tex.json`（`atlas.dragonBones[]`），",
+  "  两者是同一次装箱出来的，不要只导一个就以为齐了。③ 也同时产出 `rig.skeleton`（Spine 4.2）与",
+  "  `rig.dragonBones.skeleton`（DragonBones 5.5）——同一个骨架的两种写法，给不同的引擎用。",
   "第 2 步 · 每步都要审：`game_material_review` 拿验收包，逐项看 status / error / 绝对 URL。",
   "第 3 步 · 按审核模式分岔：`auto` → 自己判断没问题就 `game_material_approve` 打通过并进入下一步；",
   "`manual` → 贴出 openUrl 并**停下等用户回复**，只有用户明确说「通过 / 可以」才 `game_material_approve` 并继续。",
@@ -1133,13 +1138,15 @@ function renderRigStageDetail(stage: any): string[] {
       lines.push(`      没匹配上（要手工摆或给先验）：${stage.unmatched.join("、")}`);
     }
   } else if (stage.stage === "rig") {
-    push("骨架 JSON", stage.skeleton);
+    push("骨架 JSON（Spine 4.2）", stage.skeleton);
+    push("骨架 JSON（DragonBones 5.5）", stage.dragonBones?.skeleton);
     push("预览页（双击可播动画）", stage.preview);
     if (Array.isArray(stage.animations) && stage.animations.length > 0) lines.push(`      动画：${stage.animations.join("、")}`);
     for (const warning of stage.warnings ?? []) lines.push(`      ⚠ ${warning}`);
   } else if (stage.stage === "atlas") {
     push("图集 PNG", stage.image);
-    push("图集文本", stage.text);
+    push("图集文本（Spine）", stage.text);
+    for (const entry of stage.dragonBones ?? []) push("贴图描述（DragonBones）", entry.url);
     if (typeof stage.width === "number" && typeof stage.height === "number") lines.push(`      尺寸：${stage.width}×${stage.height}`);
   }
   return lines;
@@ -1340,7 +1347,7 @@ function rigNextActions(snapshot: any, stage: string | undefined): string[] {
     // 导出前校验不通过会让那一步直接失败，原因写在 error 里。
     const broken = [pick("rig"), pick("atlas")].filter((entry: any) => entry !== undefined && entry.status === "error");
     if (broken.length > 0) {
-      actions.push("构建失败多半是**导出前校验**拦下的（Spine 4.2 wire format / 循环接缝 / 图集越界与缺区域）。先读 error 里的具体位置再改，不要盲目重跑");
+      actions.push("构建失败多半是**导出前校验**拦下的（Spine 4.2 wire format / DragonBones 的 tweenEasing 与 curve 编码 / 循环接缝 / 图集越界与缺区域）。先读 error 里的具体位置再改，不要盲目重跑");
     }
   }
   const atlas = pick("atlas");

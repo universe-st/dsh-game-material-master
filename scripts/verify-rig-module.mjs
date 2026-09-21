@@ -19,6 +19,7 @@ process.env.DSH_HOME = sandbox;
 const { encodePng } = await import("../lib/png.js");
 const { createRgba, resizeRgba, alphaBounds } = await import("../lib/rigpose.js");
 const { DEFAULT_DRAW_ORDER, RIG_SLOTS } = await import("../lib/spine.js");
+const { validateDragonBones, validateDragonBonesTexture } = await import("../lib/rigvalidate.js");
 const riggen = await import("../lib/riggen.js");
 const versionsOf = riggen.versionsOf;
 
@@ -493,6 +494,35 @@ check("预览 HTML 无外部依赖", !/<script[^>]+src=/.test(html) && !/<link[^
 check("预览 HTML 内联了部件图", html.includes("data:image/png;base64,"));
 check("预览 HTML 内联了骨架", html.includes('"spine\\":\\"4.2.0') || html.includes('"spine":"4.2.0"'));
 
+// ── 第二条导出路径：DragonBones 5.5 ────────────────────────────────────
+// 真的落盘、真的能被解析、并且与 Spine 那份**同源**（骨骼层级逐根一致）。
+{
+  const dbFile = "export/dragonbones/skeleton_ske.json";
+  check("DragonBones 骨架已生成", await exists(riggen.rigAssetPath(job.id, dbFile)));
+  const db = JSON.parse(await readFile(riggen.rigAssetPath(job.id, dbFile), "utf8"));
+  check("DragonBones 版本为 5.5", db.version === "5.5" && db.compatibleVersion === "5.5");
+  check("DragonBones 骨骼数与 Spine 一致", db.armature[0].bone.length === skeleton.bones.length,
+    `${db.armature[0].bone.length} vs ${skeleton.bones.length}`);
+  check("DragonBones 骨骼层级逐根一致", db.armature[0].bone.every((bone) => {
+    const spineBone = skeleton.bones.find((b) => b.name === bone.name);
+    return spineBone !== undefined && (spineBone.parent ?? undefined) === bone.parent &&
+      Math.abs(spineBone.x - bone.transform.x) < 1e-6 &&
+      Math.abs(spineBone.y - bone.transform.y) < 1e-6 &&
+      Math.abs(spineBone.rotation - bone.transform.skX) < 1e-6 &&
+      Math.abs(bone.transform.skX - bone.transform.skY) < 1e-9;
+  }));
+  check("DragonBones 动画是帧数而不是秒（idle = 1.6s × 30）",
+    db.armature[0].animation.find((a) => a.name === "idle").duration === 48);
+  check("DragonBones 补间帧都显式声明了缓动", db.armature[0].animation.every((animation) =>
+    animation.bone.every((timeline) => ["rotateFrame", "translateFrame", "scaleFrame"].every((key) => {
+      const frames = timeline[key];
+      return frames === undefined || frames.slice(0, -1).every((f) => f.tweenEasing !== undefined || f.curve !== undefined);
+    }))));
+  check("DragonBones 校验通过", validateDragonBones(db).ok,
+    validateDragonBones(db).errors.map((e) => `${e.where} ${e.message}`).join("；"));
+  check("任务状态里带上了 DragonBones 路径", state.rig.dragonBones?.skeleton === dbFile);
+}
+
 // ── 三通道的核心保证：手工偏移不被「重新推骨骼」覆盖 ──────────────────
 {
   const baseline = skeleton.bones.find((bone) => bone.name === "head");
@@ -588,6 +618,26 @@ check("图集区域数 = 部件数", state.atlas.regions === state.parts.length,
     // 这一批部件是全不透明的矩形，不该被裁——裁剪只在真有透明边时发生。
     const zeroOffsets = atlasBody.match(/^ {2}offset: 0, 0$/gm) ?? [];
     check("全不透明的部件不会被误裁（offset 全为 0,0）", zeroOffsets.length === regions.length, `${zeroOffsets.length} vs ${regions.length}`);
+  }
+
+  // ── DragonBones 贴图描述：与 .atlas 同一次装箱的孪生兄弟 ──────────────
+  {
+    const texFile = "atlas/skeleton_tex.json";
+    check("DragonBones 贴图描述已生成", await exists(riggen.rigAssetPath(job.id, texFile)));
+    check("任务状态里列了贴图描述", (state.atlas.dragonBones?.textures ?? []).includes(texFile),
+      JSON.stringify(state.atlas.dragonBones));
+    const tex = JSON.parse(await readFile(riggen.rigAssetPath(job.id, texFile), "utf8"));
+    check("_tex.json 尺寸与图集一致", tex.width === state.atlas.width && tex.height === state.atlas.height);
+    check("_tex.json 的 imagePath 指向同目录 png", tex.imagePath === "skeleton.png", tex.imagePath);
+    check("_tex.json 区域数 = 部件数", tex.SubTexture.length === regions.length, `${tex.SubTexture.length} vs ${regions.length}`);
+    const atlasNames = (await readFile(riggen.rigAssetPath(job.id, "atlas/skeleton.atlas"), "utf8"))
+      .split("\n")
+      .filter((line) => line !== "" && !line.startsWith(" ") && !line.includes(":") && !line.endsWith(".png"));
+    check("_tex.json 区域名与 .atlas 一一对应",
+      atlasNames.slice().sort().join(",") === tex.SubTexture.map((s) => s.name).slice().sort().join(","));
+    check("_tex.json 通过校验", validateDragonBonesTexture(tex).ok,
+      validateDragonBonesTexture(tex).errors.map((e) => `${e.where} ${e.message}`).join("；"));
+    check("未见裁剪时 _tex.json 不写 frame*", tex.SubTexture.every((s) => s.frameX === undefined));
   }
 }
 
