@@ -1073,6 +1073,29 @@ export class GameStudioGateway extends TypertRemoteService {
     return { ok: true, ...(await riggen.resetRigBoneOffsets(asString(input.jobId), names)) };
   }
 
+  /** 动画参数：`amplitude`（统一缩放幅度）与 `duration`（循环时长）。 */
+  async setRigAnimationSettings(payload) {
+    const input = asRecord(payload);
+    const raw = Array.isArray(input.animations) ? input.animations : [];
+    const patches = raw.map((item: any) => {
+      const record = asRecord(item);
+      const patch: { id: string; duration?: number; amplitude?: number } = { id: asString(record.id) };
+      if (typeof record.duration === "number") patch.duration = record.duration;
+      if (typeof record.amplitude === "number") patch.amplitude = record.amplitude;
+      return patch;
+    });
+    const result = await riggen.setRigAnimationSettings(asString(input.jobId), patches, {
+      by: input.by === "ai" ? "ai" : "human"
+    });
+    return { ok: true, ...result };
+  }
+
+  async resetRigAnimationSettings(payload) {
+    const input = asRecord(payload);
+    const ids = Array.isArray(input.ids) ? input.ids.filter((id: unknown) => typeof id === "string") : undefined;
+    return { ok: true, ...(await riggen.resetRigAnimationSettings(asString(input.jobId), ids)) };
+  }
+
   /**
    * 语义层（阶段③）：AI 或人改「这块是什么、挂在谁身上、骨骼从哪伸到哪」。
    *

@@ -158,18 +158,31 @@ export interface RigAnimationPreset {
   duration: number;
   /** 一句话说明这个动作在做什么，界面与验收包都用它。 */
   summary: string;
+  /**
+   * 是否首尾闭合。
+   *
+   * v1 的六个预设**都是**闭合的（每条轨道首末值相等），但这一点以前只写在
+   * 注释里、没有任何东西校验它；一旦有人加了个不闭合的动作，表现是「循环时
+   * 突然跳一下」，而且很难归因。现在它是数据，并且被 `validateAnimationLoops` 盯着。
+   */
+  loop: boolean;
 }
 
 export const RIG_ANIMATIONS: RigAnimationPreset[] = [
-  { id: "idle", label: "待机", duration: 1.6, summary: "呼吸起伏 + 躯干/头部反向轻摆，首尾闭合可循环" },
-  { id: "walk", label: "行走", duration: 0.8, summary: "手臂与腿反向摆动，胯部上下颠簸" },
-  { id: "run", label: "奔跑", duration: 0.5, summary: "行走的夸张版 + 前倾 + 更大的弹跳" },
-  { id: "wave", label: "挥手", duration: 1.2, summary: "抬起右臂，小臂来回摆动" },
-  { id: "jump", label: "跳跃", duration: 1.0, summary: "下蹲蓄力 → 起跳 → 滞空 → 落地缓冲" },
-  { id: "attack", label: "攻击", duration: 0.6, summary: "抬手蓄力 → 挥砍 → 收势跟随" }
+  { id: "idle", label: "待机", duration: 1.6, loop: true, summary: "呼吸起伏 + 躯干/头部反向轻摆，首尾闭合可循环" },
+  { id: "walk", label: "行走", duration: 0.8, loop: true, summary: "手臂与腿反向摆动，胯部上下颠簸" },
+  { id: "run", label: "奔跑", duration: 0.5, loop: true, summary: "行走的夸张版 + 前倾 + 更大的弹跳" },
+  { id: "wave", label: "挥手", duration: 1.2, loop: true, summary: "抬起右臂，小臂来回摆动" },
+  { id: "jump", label: "跳跃", duration: 1.0, loop: true, summary: "下蹲蓄力 → 起跳 → 滞空 → 落地缓冲" },
+  { id: "attack", label: "攻击", duration: 0.6, loop: true, summary: "抬手蓄力 → 挥砍 → 收势跟随" }
 ];
 
 const ANIMATION_IDS = new Set(RIG_ANIMATIONS.map((item) => item.id));
+const ANIMATION_BY_ID = new Map(RIG_ANIMATIONS.map((item) => [item.id, item]));
+
+export function animationPresetOf(id: string): RigAnimationPreset | undefined {
+  return ANIMATION_BY_ID.get(id);
+}
 
 export function isAnimationId(value: unknown): value is string {
   return typeof value === "string" && ANIMATION_IDS.has(value);
@@ -177,6 +190,77 @@ export function isAnimationId(value: unknown): value is string {
 
 export function defaultAnimationIds(): string[] {
   return ["idle", "walk", "run", "wave", "jump", "attack"];
+}
+
+/**
+ * 单个动画的**可调参数**。
+ *
+ * 这是「动画从代码常量变成数据」的第一步：v1 的六个预设把每一帧的角度写死在
+ * `spine.ts` 里，用户想把走路幅度调小一点只能改源码。现在只要两个旋钮就能覆盖
+ * 绝大多数真实诉求，而不需要一套完整的 K 帧编辑器：
+ *
+ *   - `amplitude` 统一缩放所有旋转与位移（「动作太大了」「再夸张一点」）；
+ *   - `duration`  改一个循环的时长（「这个是慢节奏的 NPC」）。
+ *
+ * 两者都作用在**简写**上（归一化 curve 的阶段），所以时间与数值一起缩放之后，
+ * 由 `convertTimeline` 绝对化出来的控制点依然落在正确的区间里——
+ * 如果反过来在绝对化之后缩放，控制点就会跑到段外，运动变突跳。
+ */
+export interface RigAnimationSetting {
+  duration?: number;
+  amplitude?: number;
+}
+
+export type RigAnimationSettings = Record<string, RigAnimationSetting>;
+
+/** 参数范围：挡住「amplitude 填 1000」这类会让插件生成一坨垃圾的输入。 */
+export const ANIMATION_AMPLITUDE_RANGE: [number, number] = [0.1, 4];
+export const ANIMATION_DURATION_RANGE: [number, number] = [0.1, 10];
+
+/** 归一化一份动画参数：非法值丢弃、超范围夹紧、全默认的条目删掉。 */
+export function normalizeAnimationSetting(value: unknown): RigAnimationSetting | undefined {
+  const record = value !== null && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const out: RigAnimationSetting = {};
+  const duration = Number(record.duration);
+  if (Number.isFinite(duration) && duration > 0) {
+    out.duration = Number(Math.min(ANIMATION_DURATION_RANGE[1], Math.max(ANIMATION_DURATION_RANGE[0], duration)).toFixed(3));
+  }
+  const amplitude = Number(record.amplitude);
+  if (Number.isFinite(amplitude) && amplitude > 0) {
+    out.amplitude = Number(Math.min(ANIMATION_AMPLITUDE_RANGE[1], Math.max(ANIMATION_AMPLITUDE_RANGE[0], amplitude)).toFixed(3));
+  }
+  return Object.keys(out).length === 0 ? undefined : out;
+}
+
+/**
+ * 归一化**并按预设默认值剪枝**。
+ *
+ * 与骨骼偏移不同，动画参数的默认值不是 0：幅度默认 1、时长默认是该预设自己的
+ * `duration`。所以「改回默认」不能靠「值为零」判断，必须拿预设的原始值比。
+ * 剪掉之后，「这条参数有没有被人动过」就是一个存在性判断，而不是数值比较——
+ * 界面上的「—」与 JSON diff 都干净。
+ */
+export function pruneAnimationSetting(id: string, value: unknown): RigAnimationSetting | undefined {
+  const normalized = normalizeAnimationSetting(value);
+  if (normalized === undefined) return undefined;
+  const preset = ANIMATION_BY_ID.get(id);
+  const out: RigAnimationSetting = {};
+  if (normalized.amplitude !== undefined && Math.abs(normalized.amplitude - 1) > 1e-6) out.amplitude = normalized.amplitude;
+  if (normalized.duration !== undefined && preset !== undefined && Math.abs(normalized.duration - preset.duration) > 1e-3) {
+    out.duration = normalized.duration;
+  }
+  return Object.keys(out).length === 0 ? undefined : out;
+}
+
+export function normalizeAnimationSettings(value: unknown): RigAnimationSettings | undefined {
+  if (value === null || typeof value !== "object") return undefined;
+  const out: RigAnimationSettings = {};
+  for (const [id, setting] of Object.entries<any>(value)) {
+    if (!ANIMATION_IDS.has(id)) continue;
+    const normalized = pruneAnimationSetting(id, setting);
+    if (normalized !== undefined) out[id] = normalized;
+  }
+  return Object.keys(out).length === 0 ? undefined : out;
 }
 
 // 缓动曲线（归一化控制点，与参考项目一致）。
@@ -550,18 +634,65 @@ function toSpine42(animations: Record<string, any>): void {
   }
 }
 
+/**
+ * 把参数作用在**简写**上（`toSpine42` 之前）。
+ *
+ * 顺序很关键：简写的 curve 是归一化控制点，时间与数值一起缩放之后，由
+ * `convertTimeline` 绝对化出来的控制点仍落在正确的段内。若反过来先绝对化再缩放，
+ * 控制点会跑到所属区间之外，运动就变成突跳。
+ */
+function applyAnimationSetting(bones: BoneTimelines, preset: RigAnimationPreset, setting: RigAnimationSetting | undefined): void {
+  if (setting === undefined) return;
+  const amplitude = setting.amplitude ?? 1;
+  const scale = setting.duration !== undefined && preset.duration > 0 ? setting.duration / preset.duration : 1;
+  if (amplitude === 1 && scale === 1) return;
+
+  for (const timelines of Object.values(bones)) {
+    for (const [kind, frames] of Object.entries<any>(timelines)) {
+      if (!Array.isArray(frames)) continue;
+      for (const frame of frames) {
+        if (typeof frame.time === "number") frame.time = round(frame.time * scale, 4);
+        if (kind === "rotate" && typeof frame.angle === "number") frame.angle = round(frame.angle * amplitude, 2);
+        if (kind === "translate") {
+          if (typeof frame.x === "number") frame.x = round(frame.x * amplitude, 2);
+          if (typeof frame.y === "number") frame.y = round(frame.y * amplitude, 2);
+        }
+        if (kind === "scale") {
+          // 缩放是**相对 1** 的量：0.9 的挤压在 amplitude=2 时应该变成 0.8。
+          if (typeof frame.x === "number") frame.x = round(1 + (frame.x - 1) * amplitude, 4);
+          if (typeof frame.y === "number") frame.y = round(1 + (frame.y - 1) * amplitude, 4);
+        }
+      }
+    }
+  }
+}
+
 /** 生成全部预设动画。传入的 `boneNames` 决定哪些骨骼会被写到。 */
-export function buildAnimations(boneNames: string[], ids: string[]): Record<string, any> {
+export function buildAnimations(
+  boneNames: string[],
+  ids: string[],
+  settings: RigAnimationSettings = {}
+): Record<string, any> {
   const set = new Set(boneNames);
   const animations: Record<string, any> = {};
   for (const id of ids) {
     const generator = PRESETS[id];
-    if (generator === undefined) continue;
+    const preset = ANIMATION_BY_ID.get(id);
+    if (generator === undefined || preset === undefined) continue;
+    const setting = settings[id];
     const bones = generator(set);
-    if (Object.keys(bones).length > 0) animations[id] = { bones };
+    if (Object.keys(bones).length === 0) continue;
+    applyAnimationSetting(bones, preset, setting);
+    animations[id] = { bones };
   }
   toSpine42(animations);
   return animations;
+}
+
+/** 实际生效的时长（预设时长被参数覆盖时以参数为准）。 */
+export function animationDurationOf(id: string, settings: RigAnimationSettings = {}): number {
+  const preset = ANIMATION_BY_ID.get(id);
+  return settings[id]?.duration ?? preset?.duration ?? 0;
 }
 
 // ── 从装配结果构建骨架 ──────────────────────────────────────────────────
@@ -619,6 +750,8 @@ export interface BuildSkeletonOptions {
   canvasHeight: number;
   parts: RigPlacedPart[];
   animationIds: string[];
+  /** 逐动画的可调参数（时长 / 幅度 / 是否生成）。 */
+  animationSettings?: RigAnimationSettings;
   customAnimations?: Record<string, any>;
 }
 
@@ -824,7 +957,8 @@ export function buildSkeleton(options: BuildSkeletonOptions): { spine: any; bone
 
   const animations = buildAnimations(
     bones.map((bone) => bone.name),
-    options.animationIds
+    options.animationIds,
+    options.animationSettings ?? {}
   );
   if (options.customAnimations !== undefined) {
     for (const [key, value] of Object.entries(options.customAnimations)) animations[key] = value;

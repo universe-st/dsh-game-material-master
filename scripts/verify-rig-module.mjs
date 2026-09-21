@@ -221,6 +221,44 @@ console.log("=== 1c. 三通道：手工骨骼偏移 ===");
   check("清除后没有残留", s.boneOffsets === undefined);
 }
 
+console.log("=== 1d. 动画参数（M3）===");
+{
+  const set = await riggen.setRigAnimationSettings(job.id, [{ id: "walk", amplitude: 1.5, duration: 1.2 }], { by: "human" });
+  check("写入动画参数成功", set.touched === 1);
+  let s = await riggen.readRigJob(job.id);
+  check("参数已落盘", s.animationSettings?.walk?.amplitude === 1.5 && s.animationSettings?.walk?.duration === 1.2, JSON.stringify(s.animationSettings));
+
+  // 只改一个字段时不能把另一个抹掉。
+  await riggen.setRigAnimationSettings(job.id, [{ id: "walk", amplitude: 2 }]);
+  s = await riggen.readRigJob(job.id);
+  check("局部补丁保留其它字段", s.animationSettings.walk.amplitude === 2 && s.animationSettings.walk.duration === 1.2, JSON.stringify(s.animationSettings.walk));
+
+  // 超范围要被夹紧，而不是原样写进去（amplitude 填 1000 会生成一坨垃圾）。
+  await riggen.setRigAnimationSettings(job.id, [{ id: "idle", amplitude: 1000, duration: 999 }]);
+  s = await riggen.readRigJob(job.id);
+  check("超范围参数被夹紧", s.animationSettings.idle.amplitude <= 4 && s.animationSettings.idle.duration <= 10,
+    JSON.stringify(s.animationSettings.idle));
+
+  // 回到默认值 = 删掉条目（与骨骼偏移同一套语义）。
+  await riggen.setRigAnimationSettings(job.id, [{ id: "idle", amplitude: 1, duration: 1.6 }]);
+  s = await riggen.readRigJob(job.id);
+  check("回到默认值后条目被删除", s.animationSettings.idle === undefined, JSON.stringify(s.animationSettings));
+
+  let threw = false;
+  try {
+    await riggen.setRigAnimationSettings(job.id, [{ id: "not-an-animation" }]);
+  } catch {
+    threw = true;
+  }
+  check("不存在的动画会报错", threw);
+
+  check("改动画参数作废骨骼与图集", s.rig.status === "empty" && s.atlas.status === "empty");
+
+  await riggen.resetRigAnimationSettings(job.id);
+  s = await riggen.readRigJob(job.id);
+  check("重置后没有残留", s.animationSettings === undefined);
+}
+
 console.log("=== 2. 装配定位 ===");
 const t0 = Date.now();
 await riggen.solveRigLayout(job.id);
@@ -356,6 +394,35 @@ check("预览 HTML 内联了骨架", html.includes('"spine\\":\\"4.2.0') || html
 
   await riggen.resetRigBoneOffsets(job.id);
   await riggen.buildRigOutput(job.id);
+
+  // ── 动画参数真的写进了产物 ────────────────────────────────────────────
+  {
+    const before = JSON.parse(await readFile(riggen.rigAssetPath(job.id, "rig/skeleton.json"), "utf8"));
+    const beforeAmp = Math.max(...before.animations.walk.bones.torso.rotate.map((f) => Math.abs(f.value)));
+    const beforeEnd = before.animations.walk.bones.torso.rotate.at(-1).time;
+
+    await riggen.setRigAnimationSettings(job.id, [{ id: "walk", amplitude: 2, duration: 1.6 }], { by: "human" });
+    await riggen.buildRigOutput(job.id);
+    const after = JSON.parse(await readFile(riggen.rigAssetPath(job.id, "rig/skeleton.json"), "utf8"));
+    const afterAmp = Math.max(...after.animations.walk.bones.torso.rotate.map((f) => Math.abs(f.value)));
+    const afterEnd = after.animations.walk.bones.torso.rotate.at(-1).time;
+
+    check("幅度参数写进 skeleton.json", Math.abs(afterAmp - beforeAmp * 2) < 0.01, `${beforeAmp} → ${afterAmp}`);
+    check("时长参数写进 skeleton.json", Math.abs(afterEnd - 1.6) < 1e-6, `${beforeEnd} → ${afterEnd}`);
+    check("参数化后仍然通过导出前校验", after?.animations?.walk !== undefined);
+
+    // 视图要把「预设原值 vs 我改的值」都给出来，界面才能显示差别。
+    const viewWithAnim = riggen.rigSnapshot(await riggen.readRigJob(job.id));
+    const walkPreset = viewWithAnim.rig.animationPresets.find((item) => item.id === "walk");
+    check("视图里带预设原值与生效值", walkPreset.defaultDuration === 0.8 && walkPreset.duration === 1.6 && walkPreset.amplitude === 2,
+      JSON.stringify(walkPreset));
+
+    await riggen.resetRigAnimationSettings(job.id);
+    await riggen.buildRigOutput(job.id);
+    const restored = JSON.parse(await readFile(riggen.rigAssetPath(job.id, "rig/skeleton.json"), "utf8"));
+    check("重置后回到预设数值",
+      Math.abs(Math.max(...restored.animations.walk.bones.torso.rotate.map((f) => Math.abs(f.value))) - beforeAmp) < 0.01);
+  }
   const restored = JSON.parse(await readFile(riggen.rigAssetPath(job.id, "rig/skeleton.json"), "utf8"));
   const headBack = restored.bones.find((bone) => bone.name === "head");
   check("清除偏移后回到绑定姿势", Math.abs(headBack.rotation - baseline.rotation) < 0.01 && Math.abs(headBack.y - baseline.y) < 0.01,

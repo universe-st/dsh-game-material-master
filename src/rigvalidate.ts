@@ -14,7 +14,7 @@
  *   - **warning**：能跑但可疑（多余区域、页尺寸不是 2 的幂）→ 照常导出，但要说出来。
  */
 
-import { timelinePropertyCount } from "./spine.js";
+import { RIG_ANIMATIONS, timelinePropertyCount } from "./spine.js";
 
 export interface ValidationIssue {
   level: "error" | "warning";
@@ -182,8 +182,70 @@ export function validateSpineWire(spine: any): ValidationReport {
   return report(errors, warnings);
 }
 
-// ── 图集 ────────────────────────────────────────────────────────────────
+// ── 循环接缝 ────────────────────────────────────────────────────────────
 
+/** 数值比较的容差：预设的数值都按 2 位小数 round 过，这里留一点余量。 */
+const VALUE_TOLERANCE = 0.05;
+
+/**
+ * 循环接缝校验：**首尾闭合的动作，每条轨道的第一帧与最后一帧必须相等**。
+ *
+ * 参考项目只在 prose 里写了「All loops must return to starting values」
+ * （`SKILL.md:1944`），脚本**完全不校验**——于是一个不闭合的循环在引擎里的表现是
+ * 「每次循环突然跳一下」，而排查的时候没人会想到去看首末帧。
+ *
+ * 这是纯本地、免费、可断言的检查，正好适合放在导出前。
+ */
+export function validateAnimationLoops(spine: any): ValidationReport {
+  const errors: ValidationIssue[] = [];
+  const warnings: ValidationIssue[] = [];
+
+  const loopIds = new Set(RIG_ANIMATIONS.filter((item) => item.loop).map((item) => item.id));
+  const animations = spine?.animations;
+  if (animations === null || typeof animations !== "object") return report(errors, warnings);
+
+  for (const [animationName, animation] of Object.entries<any>(animations)) {
+    if (!loopIds.has(animationName)) continue;
+    const boneTracks = animation?.bones;
+    if (boneTracks === null || typeof boneTracks !== "object") continue;
+
+    for (const [boneName, timelines] of Object.entries<any>(boneTracks)) {
+      if (timelines === null || typeof timelines !== "object") continue;
+      for (const [kind, frames] of Object.entries<any>(timelines)) {
+        if (!Array.isArray(frames) || frames.length < 2) continue;
+        const where = `${animationName}/${boneName}/${kind}`;
+        const first = frames[0];
+        const last = frames[frames.length - 1];
+        for (const property of TIMELINE_VALUE_KEYS[kind] ?? []) {
+          const a = first?.[property];
+          const b = last?.[property];
+          if (typeof a !== "number" || typeof b !== "number") continue;
+          if (Math.abs(a - b) > VALUE_TOLERANCE) {
+            errors.push({
+              level: "error",
+              code: "loop-not-closed",
+              where,
+              message: `循环首尾不闭合：${property} 从 ${a} 开始、到 ${b} 结束（差 ${(b - a).toFixed(3)}）——` +
+                "每次循环会在接缝处跳一下"
+            });
+          }
+        }
+      }
+    }
+  }
+
+  return report(errors, warnings);
+}
+
+/** 每种时间轴在帧上驱动哪些数值字段。 */
+const TIMELINE_VALUE_KEYS: Record<string, string[]> = {
+  rotate: ["value"],
+  translate: ["x", "y"],
+  scale: ["x", "y"],
+  shear: ["x", "y"]
+};
+
+// ── 图集 ────────────────────────────────────────────────────────────────
 export interface AtlasPageLike {
   name: string;
   width: number;

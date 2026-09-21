@@ -104,6 +104,8 @@
     ["setRigSemantics", true],
     ["setRigBoneOffsets", true],
     ["resetRigBoneOffsets", true],
+    ["setRigAnimationSettings", true],
+    ["resetRigAnimationSettings", true],
       ["runRigSheet", true],
       ["runRigSegment", true],
       ["runRigLayout", true],
@@ -4005,6 +4007,118 @@
       );
     }
 
+    /**
+     * 动画参数面板（阶段③）。
+     *
+     * v1 的六个预设把每一帧的角度写死在宿主源码里，「走路幅度小一点」只能改代码。
+     * 这里给出两个旋钮——**幅度**（统一缩放旋转与位移）与**时长**（一个循环多久）——
+     * 它们覆盖了绝大多数真实诉求，而且比一整套 K 帧编辑器便宜得多。
+     *
+     * 参数作用在**简写**上（归一化 curve 的阶段），时间与数值一起缩放之后再绝对化，
+     * 所以控制点仍然落在正确的区间里；这个顺序在宿主侧有注释与测试盯着。
+     */
+    function RigAnimationPanel({ job, api, run, busy, activeKey }) {
+      const presets = job.rig?.animationPresets ?? [];
+      const settings = job.rig?.animationSettings ?? {};
+      if (presets.length === 0) return null;
+      const changed = Object.keys(settings).length;
+
+      const patch = (id, fields) =>
+        void run(
+          () => api.setRigAnimationSettings({ jobId: job.id, animations: [{ id, ...fields }], by: "human" }),
+          `已调整「${id}」的动画参数`,
+          activeKey
+        );
+
+      return h(
+        "div",
+        { "data-testid": "rig-animation-panel", style: { marginTop: 12 } },
+        h("h3", { style: { fontSize: 13, margin: "0 0 4px" } },
+          `动画参数（${changed > 0 ? `已调 ${changed} 个` : "全部为预设默认值"}）`),
+        h("p", { className: "SPR_hint", style: { marginTop: 0 } },
+          "幅度统一缩放旋转与位移（1 = 预设原样）；时长是一个循环的秒数。改完点上面的「生成骨骼与动画」重算。"),
+        h(
+          "table",
+          { className: "SPR_table", style: { width: "100%", fontSize: 12, borderCollapse: "collapse", marginTop: 8 } },
+          h("thead", null,
+            h("tr", null,
+              h("th", { style: { textAlign: "left" } }, "动作"),
+              h("th", { style: { textAlign: "left" } }, "时长（秒）"),
+              h("th", { style: { textAlign: "left" } }, "幅度"),
+              h("th", { style: { textAlign: "left" } }, "状态"),
+              h("th", null, "")
+            )
+          ),
+          h("tbody", null,
+            presets.map((preset) =>
+              h(
+                "tr",
+                { key: preset.id, "data-testid": `rig-anim-row-${preset.id}` },
+                h("td", { style: { paddingRight: 8 } }, `${preset.label}（${preset.id}）`),
+                h("td", { style: { paddingRight: 8 } },
+                  h(NumField, {
+                    label: "",
+                    value: preset.duration,
+                    min: 0.1,
+                    max: 10,
+                    step: 0.1,
+                    onChange: (value) => patch(preset.id, { duration: value })
+                  })
+                ),
+                h("td", { style: { paddingRight: 8 } },
+                  h(NumField, {
+                    label: "",
+                    value: preset.amplitude,
+                    min: 0.1,
+                    max: 4,
+                    step: 0.1,
+                    onChange: (value) => patch(preset.id, { amplitude: value })
+                  })
+                ),
+                h("td", { style: { paddingRight: 8, opacity: 0.8 } },
+                  (preset.enabled ? "会生成" : "未勾选") +
+                    (preset.duration !== preset.defaultDuration ? ` · 预设 ${preset.defaultDuration}s` : "")
+                ),
+                h("td", null,
+                  settings[preset.id] === undefined
+                    ? h("span", { style: { opacity: 0.4 } }, "—")
+                    : h("button", {
+                        type: "button",
+                        className: "SPR_miniBtn",
+                        "data-testid": `rig-anim-reset-${preset.id}`,
+                        onClick: () => void run(
+                          () => api.resetRigAnimationSettings({ jobId: job.id, ids: [preset.id] }),
+                          `已重置「${preset.id}」`,
+                          activeKey
+                        )
+                      }, "重置")
+                )
+              )
+            )
+          )
+        ),
+        changed > 0
+          ? h(
+              "div",
+              { className: "SPR_toolbar", style: { marginTop: 8 } },
+              h(
+                BusyBtn,
+                {
+                  busy: busy,
+                  busyText: "重置中…",
+                  onClick: () => void run(
+                    () => api.resetRigAnimationSettings({ jobId: job.id }),
+                    "已重置全部动画参数",
+                    activeKey
+                  )
+                },
+                `重置全部（${changed} 个）`
+              )
+            )
+          : null
+      );
+    }
+
     const RIG_HANDLES = [
       ["nw", 0, 0], ["n", 0.5, 0], ["ne", 1, 0],
       ["e", 1, 0.5], ["se", 1, 1], ["s", 0.5, 1],
@@ -5160,6 +5274,7 @@
                                 h("iframe", { className: "SPR_rigPreview", src: `${job.rig.preview}#${anim}`, title: "骨骼动画预览" })
                               )
                             : h("p", { className: "SPR_hint", style: { marginTop: 10 } }, job.layout?.status === "ready" ? "点「生成骨骼与动画」得到 skeleton.json 与可播放预览。" : "先完成第②步装配定位。"),
+                          h(RigAnimationPanel, { job, api, run, busy, activeKey: K_RIG_BONES }),
                           h(RigBoneEditor, { job, api, run, busy, activeKey: K_RIG_BONES }),
                           h(
                             "div",
@@ -5756,6 +5871,8 @@
     setRigSemantics: (payload) => call("setRigSemantics", payload),
     setRigBoneOffsets: (payload) => call("setRigBoneOffsets", payload),
     resetRigBoneOffsets: (payload) => call("resetRigBoneOffsets", payload),
+    setRigAnimationSettings: (payload) => call("setRigAnimationSettings", payload),
+    resetRigAnimationSettings: (payload) => call("resetRigAnimationSettings", payload),
         runRigSheet: (payload) => call("runRigSheet", payload),
         runRigSegment: (payload) => call("runRigSegment", payload),
         runRigLayout: (payload) => call("runRigLayout", payload),

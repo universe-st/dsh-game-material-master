@@ -54,18 +54,23 @@ import {
   RIG_ANIMATIONS,
   RIG_GRID_COLUMNS,
   RIG_GRID_ROWS,
+  animationDurationOf,
+  animationPresetOf,
   buildAtlasText,
   buildSkeleton,
   defaultAnimationIds,
   defaultPartNames,
   drawRankOf,
   isAnimationId,
+  normalizeAnimationSettings,
   packAtlas,
   partLabel,
+  type RigAnimationSettings,
   type RigPlacedPart
 } from "./spine.js";
 import { buildPreviewHtml } from "./rigpreview.js";
 import {
+  validateAnimationLoops,
   validateAtlas,
   validateSkeletonAtlasMatch,
   validateSpineWire,
@@ -269,6 +274,15 @@ export interface RigJob {
    * JSON diff 也干净。
    */
   boneOffsets?: Record<string, { x?: number; y?: number; rotation?: number }>;
+  /**
+   * 逐动画的可调参数（时长 / 幅度）。
+   *
+   * v1 把六个预设的每一帧写死在 `spine.ts` 里，「走路幅度小一点」只能改源码。
+   * 现在动画是数据：这两个旋钮覆盖了绝大多数真实诉求，而**不需要**一整套 K 帧编辑器。
+   * 「生成哪些动作」仍由 `settings.animations` 决定——不在这里再放一个 enabled，
+   * 同一个概念只有一个真源。
+   */
+  animationSettings?: RigAnimationSettings;
   reviewMode?: "auto" | "manual";
   log: JobLogEntry[];
 }
@@ -629,6 +643,7 @@ function normalizeRigJob(raw: any): RigJob {
     },
     reviewMode: raw?.reviewMode === "manual" ? "manual" : raw?.reviewMode === "auto" ? "auto" : undefined,
     boneOffsets: normalizeBoneOffsets(raw?.boneOffsets),
+    animationSettings: normalizeAnimationSettings(raw?.animationSettings),
     log: Array.isArray(raw?.log) ? raw.log.slice(-200) : []
   };
 }
@@ -840,7 +855,24 @@ export function rigSnapshot(job: RigJob, origin = "") {
        */
       boneList: job.rig.boneList ?? [],
       /** 手工偏移的**当前真源**：骨骼还没重跑时，界面上也要能看到自己调过什么。 */
-      boneOffsets: job.boneOffsets ?? {}
+      boneOffsets: job.boneOffsets ?? {},
+      /**
+       * 动画参数与**生效后的时长**。
+       *
+       * `presets` 给界面渲染可调项（连同预设的原始时长，好显示「你把它从 1.6 改成 1.0」），
+       * `durations` 是本次实际会写进 skeleton.json 的时长。
+       */
+      animationSettings: job.animationSettings ?? {},
+      animationPresets: RIG_ANIMATIONS.map((preset) => ({
+        id: preset.id,
+        label: preset.label,
+        summary: preset.summary,
+        loop: preset.loop,
+        defaultDuration: preset.duration,
+        duration: animationDurationOf(preset.id, job.animationSettings ?? {}),
+        amplitude: job.animationSettings?.[preset.id]?.amplitude ?? 1,
+        enabled: (job.settings.animations ?? []).includes(preset.id)
+      }))
     },
     atlas: {
       status: job.atlas.status,
@@ -1169,6 +1201,63 @@ export function stopRigPoller(jobId: string): void {
   const timer = pollers.get(jobId);
   if (timer !== undefined) clearInterval(timer);
   pollers.delete(jobId);
+}
+
+// ── 动画参数（M3：让动画从代码常量变成数据）─────────────────────────────
+
+/**
+ * 写入逐动画的可调参数。
+ *
+ * 只改骨骼与图集（动画变了、骨架没变），不动装配。
+ */
+export async function setRigAnimationSettings(
+  jobId: string,
+  patches: Array<{ id: string } & RigAnimationSettings[string]>,
+  options: { by?: "ai" | "human" } = {}
+): Promise<{ touched: number; settings: RigAnimationSettings }> {
+  const job = await readRigJob(jobId);
+  if (job === undefined) throw new Error(`任务不存在：${jobId}`);
+  const unknown = patches.filter((patch) => animationPresetOf(patch.id) === undefined);
+  if (unknown.length > 0) throw new Error(`没有这个动画：${unknown.map((patch) => patch.id).join("、")}`);
+  if (patches.length === 0) return { touched: 0, settings: job.animationSettings ?? {} };
+
+  const current: RigAnimationSettings = { ...(job.animationSettings ?? {}) };
+  let touched = 0;
+  for (const patch of patches) {
+    const merged = normalizeAnimationSettings({ [patch.id]: { ...(current[patch.id] ?? {}), ...patch } })?.[patch.id];
+    // 归一化后为空 = 这个动画的参数回到了默认值，条目直接删掉（与骨骼偏移同一套语义）。
+    if (merged === undefined) delete current[patch.id];
+    else current[patch.id] = merged;
+    touched++;
+  }
+  job.animationSettings = Object.keys(current).length === 0 ? undefined : current;
+  invalidateFrom(job, "rig");
+  appendJobLog(
+    job.log,
+    "info",
+    `${options.by === "ai" ? "AI" : "手工"}调整动画参数：${patches.map((patch) => patch.id).join("、")}`
+  );
+  await writeRigJob(job);
+  return { touched, settings: job.animationSettings ?? {} };
+}
+
+/** 清除动画参数（全部，或点名几个），回到预设的原始数值。 */
+export async function resetRigAnimationSettings(jobId: string, ids?: string[]): Promise<{ touched: number }> {
+  const job = await readRigJob(jobId);
+  if (job === undefined) throw new Error(`任务不存在：${jobId}`);
+  const current: RigAnimationSettings = { ...(job.animationSettings ?? {}) };
+  const targets = ids === undefined || ids.length === 0 ? Object.keys(current) : ids;
+  let touched = 0;
+  for (const id of targets) {
+    if (current[id] === undefined) continue;
+    delete current[id];
+    touched++;
+  }
+  job.animationSettings = Object.keys(current).length === 0 ? undefined : current;
+  invalidateFrom(job, "rig");
+  appendJobLog(job.log, "info", touched > 0 ? `已重置 ${touched} 个动画的参数` : "没有需要重置的动画参数");
+  await writeRigJob(job);
+  return { touched };
 }
 
 // ── 手工骨骼偏移（三通道的中间那一层）─────────────────────────────────
@@ -2291,17 +2380,20 @@ export async function buildRigOutput(jobId: string): Promise<void> {
       canvasWidth: job.source.width,
       canvasHeight: job.source.height,
       parts: placedParts,
-      animationIds: job.settings.animations
+      animationIds: job.settings.animations,
+      animationSettings: job.animationSettings
     });
 
     // **写盘之前先校验 wire format**。这四条地雷的共同特征是「插件里一路绿灯，
     // 到引擎里才发现」：`angle` 让骨骼不转、bezier 少几个数让骨架渲染一帧后消失、
     // 控制点不绝对化让运动突跳。宁可这一步失败，也不要交出一份坏资源。
     const wireReport = validateSpineWire(spine);
-    if (!wireReport.ok) {
+    const loopReport = validateAnimationLoops(spine);
+    if (!wireReport.ok || !loopReport.ok) {
+      const all = [...wireReport.errors, ...loopReport.errors];
       throw new Error(
-        `skeleton.json 未通过 Spine 4.2 校验（${wireReport.errors.length} 处）：` +
-          wireReport.errors.slice(0, 3).map((issue) => `${issue.where} ${issue.message}`).join("；")
+        `skeleton.json 未通过导出前校验（${all.length} 处）：` +
+          all.slice(0, 3).map((issue) => `${issue.where} ${issue.message}`).join("；")
       );
     }
 
@@ -2335,7 +2427,11 @@ export async function buildRigOutput(jobId: string): Promise<void> {
       slots: spine.slots.length,
       animations: Object.keys(spine.animations),
       // 几何推导的告警 + 导出校验的提示合并在一起给界面看。
-      warnings: [...warnings, ...wireReport.warnings.map((issue) => `${issue.where} ${issue.message}`)],
+      warnings: [
+        ...warnings,
+        ...wireReport.warnings.map((issue) => `${issue.where} ${issue.message}`),
+        ...loopReport.warnings.map((issue) => `${issue.where} ${issue.message}`)
+      ],
       // 派生数据：给界面展示「这根骨头现在是什么样、我挪了多少」。
       boneList: bones.map((bone) => ({
         name: bone.name,

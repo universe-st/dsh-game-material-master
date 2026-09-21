@@ -215,6 +215,30 @@ const resetRigBoneOffsetsSchema = z.object({
   /** 不传或传空数组 = 清除全部手工偏移。 */
   names: z.array(z.string()).optional()
 });
+/**
+ * 动画参数（M3）。
+ *
+ * 只传要改的字段；两个旋钮覆盖绝大多数真实诉求：
+ *   - `amplitude` 统一缩放旋转与位移（「动作太大了」）；
+ *   - `duration`  改一个循环的时长（「这是慢节奏的 NPC」）。
+ * 「生成哪些动作」仍由 `saveRigJob` 的 `settings.animations` 决定，不在这里重复。
+ */
+const setRigAnimationSettingsSchema = z.object({
+  jobId: z.string(),
+  animations: z.array(
+    z.object({
+      id: z.string(),
+      duration: z.number().optional(),
+      amplitude: z.number().optional()
+    })
+  ),
+  by: z.enum(["ai", "human"]).optional()
+});
+const resetRigAnimationSettingsSchema = z.object({
+  jobId: z.string(),
+  /** 不传或传空数组 = 重置全部。 */
+  ids: z.array(z.string()).optional()
+});
 const setRigSemanticsSchema = z.object({
   jobId: z.string(),
   parts: z.array(
@@ -327,6 +351,8 @@ export const METHODS: MethodSpec[] = [
   { method: "setRigSemantics", payload: setRigSemanticsSchema, result: jsonObject },
   { method: "setRigBoneOffsets", payload: setRigBoneOffsetsSchema, result: jsonObject },
   { method: "resetRigBoneOffsets", payload: resetRigBoneOffsetsSchema, result: jsonObject },
+  { method: "setRigAnimationSettings", payload: setRigAnimationSettingsSchema, result: jsonObject },
+  { method: "resetRigAnimationSettings", payload: resetRigAnimationSettingsSchema, result: jsonObject },
   { method: "runRigSheet", payload: rigJobIdSchema, result: startedSchema },
   { method: "runRigSegment", payload: rigJobIdSchema, result: startedSchema },
   { method: "runRigLayout", payload: runRigLayoutSchema, result: startedSchema },

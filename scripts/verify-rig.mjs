@@ -25,7 +25,7 @@ import {
   resizeRgba
 } from "../lib/rigpose.js";
 import { buildSkeleton, buildAtlasText, packAtlas, defaultPartNames, RIG_SLOTS, DEFAULT_DRAW_ORDER } from "../lib/spine.js";
-import { validateAtlas, validateSkeletonAtlasMatch, validateSpineWire } from "../lib/rigvalidate.js";
+import { validateAnimationLoops, validateAtlas, validateSkeletonAtlasMatch, validateSpineWire } from "../lib/rigvalidate.js";
 import { buildPreviewHtml } from "../lib/rigpreview.js";
 import { readFile } from "node:fs/promises";
 
@@ -594,6 +594,66 @@ console.log("=== 8c. Spine 4.2 四条地雷的校验器 ===");
   check("骨架与图集一致", mismatch.ok, mismatch.errors.map((e) => e.where).join("、"));
   const mismatchBad = validateSkeletonAtlasMatch({ skins: [{ attachments: { slotA: { attMissing: {} } } }] }, packed.pages);
   check("挂点找不到区域 → error", !mismatchBad.ok && mismatchBad.errors.some((e) => e.code === "attachment-missing-region"), mismatchBad.summary);
+}
+
+console.log("=== 8d. 动画参数与循环接缝 ===");
+{
+  // 预设本身必须首尾闭合——参考项目只在 prose 里要求「All loops must return to
+  // starting values」，脚本完全不校验。
+  const loops = validateAnimationLoops(spine);
+  check("预设动画都首尾闭合", loops.ok, loops.errors.slice(0, 2).map((e) => `${e.where}: ${e.message}`).join(" | "));
+
+  const open = validateAnimationLoops({
+    animations: { walk: { bones: { torso: { rotate: [{ time: 0, value: 0 }, { time: 0.4, value: 5 }, { time: 0.8, value: 9 }] } } } }
+  });
+  check("不闭合的循环 → error", !open.ok && open.errors.some((e) => e.code === "loop-not-closed"), open.summary);
+
+  // 非循环动作不参与该检查。
+  const idleOnly = validateAnimationLoops({ animations: { notALoop: { bones: { torso: { rotate: [{ time: 0, value: 0 }, { time: 1, value: 9 }] } } } } });
+  check("不在预设表里的动作不检查", idleOnly.ok, idleOnly.summary);
+
+  // 用完整 16 部件骨架测参数：幅度与时长都要真的生效，
+  // 而且必须**仍然通过 wire 校验**（参数若在绝对化之后缩放，控制点就会跑出段外）。
+  const fullParts = defaultPartNames().map((name, index) => ({
+    name,
+    file: `${name}.png`,
+    x: 20 + (index % 4) * 90,
+    y: 20 + Math.floor(index / 4) * 130,
+    width: 80,
+    height: 120,
+    scale: 1,
+    rotation: 0,
+    z: index
+  }));
+  const plain = buildSkeleton({ canvasWidth: W, canvasHeight: H, parts: fullParts, animationIds: ["walk"] });
+  const scaled = buildSkeleton({
+    canvasWidth: W,
+    canvasHeight: H,
+    parts: fullParts,
+    animationIds: ["walk"],
+    animationSettings: { walk: { amplitude: 2, duration: 1.6 } }
+  });
+
+  const plainFrames = plain.spine.animations.walk.bones.torso.rotate;
+  const scaledFrames = scaled.spine.animations.walk.bones.torso.rotate;
+  const plainAmp = Math.max(...plainFrames.map((f) => Math.abs(f.value)));
+  const scaledAmp = Math.max(...scaledFrames.map((f) => Math.abs(f.value)));
+  check("amplitude 放大旋转幅度", Math.abs(scaledAmp - plainAmp * 2) < 0.01, `${plainAmp} → ${scaledAmp}`);
+
+  const plainEnd = plainFrames[plainFrames.length - 1].time;
+  const scaledEnd = scaledFrames[scaledFrames.length - 1].time;
+  check("duration 改循环时长", Math.abs(plainEnd - 0.8) < 1e-6 && Math.abs(scaledEnd - 1.6) < 1e-6, `${plainEnd} → ${scaledEnd}`);
+
+  check("缩放后仍然通过 wire 校验（控制点没跑出段外）", validateSpineWire(scaled.spine).ok,
+    validateSpineWire(scaled.spine).errors.slice(0, 2).map((e) => `${e.where}: ${e.message}`).join(" | "));
+  check("缩放后仍然首尾闭合", validateAnimationLoops(scaled.spine).ok);
+
+  // 幅度只该作用在数值上，不该动控制点的归属结构。
+  const scaledCurve = scaledFrames[0].curve;
+  check("控制点仍是 4 个数（rotate）", Array.isArray(scaledCurve) && scaledCurve.length === 4, JSON.stringify(scaledCurve));
+  check("控制点仍在所属区间内",
+    scaledCurve[0] >= scaledFrames[0].time - 1e-3 && scaledCurve[2] <= scaledFrames[1].time + 1e-3,
+    `${scaledCurve[0]},${scaledCurve[2]} vs [${scaledFrames[0].time}, ${scaledFrames[1].time}]`);
 }
 
 console.log("=== 9. 预览 HTML ===");
