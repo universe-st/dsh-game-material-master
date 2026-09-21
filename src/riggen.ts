@@ -191,6 +191,13 @@ export interface RigRigState {
   slots?: number;
   animations?: string[];
   warnings?: string[];
+  /**
+   * 上一次成功构建的骨骼表（派生数据，不参与失效判断）。
+   *
+   * 存下来是为了让界面能显示「这根骨头现在长什么样、我把它挪了多少」——
+   * 否则要展示骨骼就得每次快照都重算一遍 `buildSkeleton`，而快照是轮询调用的。
+   */
+  boneList?: Array<{ name: string; parent?: string; x: number; y: number; rotation: number; length: number; offset?: RigBoneOffset }>;
   updatedAt?: number;
 }
 
@@ -234,6 +241,17 @@ export interface RigJob {
   layout: RigLayoutState;
   rig: RigRigState;
   atlas: RigAtlasState;
+  /**
+   * **手工骨骼偏移**：部件名（= 骨骼名）→ 相对绑定姿势的增量。
+   *
+   * 三通道模型里 `origin` 由布局+语义算出来、每次重跑都会被重算；这一份是人的
+   * 那一层，**任何自动重跑都不碰它**。所以「重跑骨骼」不会丢掉手工调过的偏置，
+   * 而「重跑装配」也不会——因为它压根不由布局推导。
+   *
+   * 只存**非零**字段（全零的条目直接删掉），这样「改回去」等于删条目，
+   * JSON diff 也干净。
+   */
+  boneOffsets?: Record<string, { x?: number; y?: number; rotation?: number }>;
   reviewMode?: "auto" | "manual";
   log: JobLogEntry[];
 }
@@ -555,7 +573,20 @@ function normalizeRigJob(raw: any): RigJob {
       slots: Number.isFinite(raw?.rig?.slots) ? raw.rig.slots : undefined,
       animations: Array.isArray(raw?.rig?.animations) ? raw.rig.animations.map(String) : undefined,
       warnings: Array.isArray(raw?.rig?.warnings) ? raw.rig.warnings.map(String) : undefined,
-      updatedAt: Number.isFinite(raw?.rig?.updatedAt) ? raw.rig.updatedAt : undefined
+      boneList: Array.isArray(raw?.rig?.boneList)
+      ? raw.rig.boneList
+          .filter((bone: any) => typeof bone?.name === "string")
+          .map((bone: any) => ({
+            name: String(bone.name),
+            parent: typeof bone.parent === "string" ? bone.parent : undefined,
+            x: num(bone.x, 0),
+            y: num(bone.y, 0),
+            rotation: num(bone.rotation, 0),
+            length: num(bone.length, 0),
+            offset: pruneBoneOffset(bone.offset)
+          }))
+      : undefined,
+    updatedAt: Number.isFinite(raw?.rig?.updatedAt) ? raw.rig.updatedAt : undefined
     },
     atlas: {
       status: (raw?.atlas?.status ?? "empty") as NodeStatus,
@@ -569,6 +600,7 @@ function normalizeRigJob(raw: any): RigJob {
       updatedAt: Number.isFinite(raw?.atlas?.updatedAt) ? raw.atlas.updatedAt : undefined
     },
     reviewMode: raw?.reviewMode === "manual" ? "manual" : raw?.reviewMode === "auto" ? "auto" : undefined,
+    boneOffsets: normalizeBoneOffsets(raw?.boneOffsets),
     log: Array.isArray(raw?.log) ? raw.log.slice(-200) : []
   };
 }
@@ -683,7 +715,11 @@ export function rigSnapshot(job: RigJob, origin = "") {
       slots: job.rig.slots,
       animations: job.rig.animations ?? [],
       warnings: job.rig.warnings ?? [],
-      error: job.rig.error
+      error: job.rig.error,
+      /** 上一次成功构建的骨骼表（含每根的手工偏移），界面用它画骨骼编辑器。 */
+      boneList: job.rig.boneList ?? [],
+      /** 手工偏移的**当前真源**：即使骨骼还没重跑，界面上也要能看到自己调过什么。 */
+      boneOffsets: job.boneOffsets ?? {}
     },
     {
       stage: "atlas" as const,
@@ -872,6 +908,12 @@ export async function removeRigPart(jobId: string, name: string): Promise<void> 
   if (node.file !== undefined) await rm(rigAssetPath(jobId, node.file), { force: true }).catch(() => undefined);
   // 别的部件的父级可能指向它；先摘掉再修复，避免留下悬空父级。
   for (const other of job.parts) if (other.parent === name) other.parent = undefined;
+  // 它自己的手工偏移也一并清掉，否则会留下一条永远用不上的孤儿记录。
+  if (job.boneOffsets?.[name] !== undefined) {
+    const rest = { ...job.boneOffsets };
+    delete rest[name];
+    job.boneOffsets = Object.keys(rest).length === 0 ? undefined : rest;
+  }
   invalidateFrom(job, "parts");
   ensurePartSemantics(job);
   appendJobLog(job.log, "info", `已删除部件「${name}」`);
@@ -905,6 +947,13 @@ export async function renameRigPart(jobId: string, from: string, to: string): Pr
   // 改名会改变语义推断（`left-lower-arm` 与 `blob-3` 的角色完全不同），
   // 所以把别人的父级引用改过来，再重算这一条的角色/锚点。
   for (const other of job.parts) if (other.parent === from) other.parent = name;
+  // 手工骨骼偏移是按名字索引的，改名要跟着搬——否则用户改个名就「白调了」。
+  if (job.boneOffsets?.[from] !== undefined) {
+    const moved = { ...job.boneOffsets };
+    moved[name] = moved[from];
+    delete moved[from];
+    job.boneOffsets = moved;
+  }
   node.role = undefined;
   node.proximal = undefined;
   node.distal = undefined;
@@ -1078,6 +1127,108 @@ export function stopRigPoller(jobId: string): void {
   const timer = pollers.get(jobId);
   if (timer !== undefined) clearInterval(timer);
   pollers.delete(jobId);
+}
+
+// ── 手工骨骼偏移（三通道的中间那一层）─────────────────────────────────
+
+export interface RigBoneOffset {
+  x?: number;
+  y?: number;
+  rotation?: number;
+}
+
+export const EMPTY_BONE_OFFSET_TOLERANCE = 0.01;
+
+function roundOffset(value: number): number {
+  return Number(value.toFixed(2));
+}
+
+/**
+ * 归一化一枚偏移：**去掉等于默认值的字段**。
+ *
+ * 这不是洁癖：`boneOffsets` 的语义是「人相对绑定姿势改了什么」，
+ * 全零的条目意味着「什么都没改」。把它留在文件里会让「改回去了没有」
+ * 变成一个需要比较数值才能回答的问题，也会让 JSON diff 噪音很大。
+ * 返回 `undefined` 表示这枚偏移是空的。
+ */
+export function pruneBoneOffset(value: unknown): RigBoneOffset | undefined {
+  const record = value !== null && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const out: RigBoneOffset = {};
+  const x = num(record.x, 0);
+  const y = num(record.y, 0);
+  const rotation = num(record.rotation, 0);
+  if (Math.abs(x) > EMPTY_BONE_OFFSET_TOLERANCE) out.x = roundOffset(x);
+  if (Math.abs(y) > EMPTY_BONE_OFFSET_TOLERANCE) out.y = roundOffset(y);
+  if (Math.abs(rotation) > EMPTY_BONE_OFFSET_TOLERANCE) out.rotation = roundOffset(rotation);
+  return Object.keys(out).length === 0 ? undefined : out;
+}
+
+function normalizeBoneOffsets(raw: unknown): Record<string, RigBoneOffset> | undefined {
+  if (raw === null || typeof raw !== "object") return undefined;
+  const out: Record<string, RigBoneOffset> = {};
+  for (const [name, value] of Object.entries<any>(raw)) {
+    const item = pruneBoneOffset(value);
+    if (item !== undefined) out[name] = item;
+  }
+  return Object.keys(out).length === 0 ? undefined : out;
+}
+
+/**
+ * 写入手工骨骼偏移（人在界面上拖/转骨骼，或 agent 给出建议）。
+ *
+ * 与 `setRigSemantics` 一样只作废**骨骼与图集**：偏移只影响骨骼推导，
+ * 部件摆在画布上的位置与它无关，作废到 layout 会让用户白丢一次手工摆位。
+ */
+export async function setRigBoneOffsets(
+  jobId: string,
+  patches: Array<{ name: string } & RigBoneOffset>,
+  options: { by?: "ai" | "human"; label?: string } = {}
+): Promise<{ touched: number }> {
+  const job = await readRigJob(jobId);
+  if (job === undefined) throw new Error(`任务不存在：${jobId}`);
+  if (patches.length === 0) return { touched: 0 };
+  const known = new Set(job.parts.map((part) => part.name));
+  for (const patch of patches) {
+    if (!known.has(patch.name)) throw new Error(`没有这个部件：${patch.name}`);
+  }
+
+  const current = { ...(job.boneOffsets ?? {}) };
+  let touched = 0;
+  for (const patch of patches) {
+    const merged = pruneBoneOffset({ ...(current[patch.name] ?? {}), ...patch });
+    if (merged === undefined) delete current[patch.name];
+    else current[patch.name] = merged;
+    touched++;
+  }
+  job.boneOffsets = Object.keys(current).length === 0 ? undefined : current;
+  invalidateFrom(job, "rig");
+  appendJobLog(
+    job.log,
+    "info",
+    `${options.by === "ai" ? "AI" : "手工"}骨骼偏移：${patches.map((patch) => patch.name).join("、")}` +
+      (options.label === undefined ? "" : `（${options.label}）`)
+  );
+  await writeRigJob(job);
+  return { touched };
+}
+
+/** 清除手工骨骼偏移（全部，或点名几根）。这是「回到 AI 推的姿势」的唯一入口。 */
+export async function resetRigBoneOffsets(jobId: string, names?: string[]): Promise<{ touched: number }> {
+  const job = await readRigJob(jobId);
+  if (job === undefined) throw new Error(`任务不存在：${jobId}`);
+  const current = { ...(job.boneOffsets ?? {}) };
+  const targets = names === undefined || names.length === 0 ? Object.keys(current) : names;
+  let touched = 0;
+  for (const name of targets) {
+    if (current[name] === undefined) continue;
+    delete current[name];
+    touched++;
+  }
+  job.boneOffsets = Object.keys(current).length === 0 ? undefined : current;
+  invalidateFrom(job, "rig");
+  appendJobLog(job.log, "info", touched > 0 ? `已清除 ${touched} 根骨骼的手工偏移` : "没有需要清除的手工偏移");
+  await writeRigJob(job);
+  return { touched };
 }
 
 // ── 语义层（阶段③）──────────────────────────────────────────────────────
@@ -2087,7 +2238,9 @@ export async function buildRigOutput(jobId: string): Promise<void> {
         // 语义层的父级与锚点优先；没给时 `buildSkeleton` 会回落到按名字推断。
         parent: node?.parent,
         proximal: node?.proximal,
-        distal: node?.distal
+        distal: node?.distal,
+        // 三通道的中间那一层：人的手工偏置，任何自动重跑都不碰它。
+        offset: job.boneOffsets?.[name]
       };
     });
 
@@ -2129,6 +2282,16 @@ export async function buildRigOutput(jobId: string): Promise<void> {
       slots: spine.slots.length,
       animations: Object.keys(spine.animations),
       warnings,
+      // 派生数据：给界面展示「这根骨头现在是什么样、我挪了多少」。
+      boneList: bones.map((bone) => ({
+        name: bone.name,
+        parent: bone.parent,
+        x: bone.x,
+        y: bone.y,
+        rotation: bone.rotation,
+        length: bone.length,
+        offset: job.boneOffsets?.[bone.name]
+      })),
       updatedAt: Date.now()
     };
     fresh.atlas = { status: "empty" };

@@ -102,6 +102,8 @@
       ["saveRigLayoutItems", true],
       ["setRigLayoutHints", true],
     ["setRigSemantics", true],
+    ["setRigBoneOffsets", true],
+    ["resetRigBoneOffsets", true],
       ["runRigSheet", true],
       ["runRigSegment", true],
       ["runRigLayout", true],
@@ -3875,6 +3877,134 @@
       );
     }
 
+    /**
+     * 骨骼编辑器（阶段③）——三通道模型的界面。
+     *
+     * 这里改的是**手工偏移 `offset`**，不是绑定姿势 `origin`：
+     *   - `origin` 由②的装配位置 + 语义层的锚点算出来，每次重跑②或改语义都会被重算；
+     *   - `offset` 只属于人，**任何自动重跑都不碰它**。
+     *
+     * 所以「重新推骨骼」不会丢掉这里调过的偏置，而「清除偏移」就是回到
+     * AI/几何推出来的姿势——这正是方案里「AI 重新想一遍不会抹掉人的工作」那条。
+     *
+     * 三根数字：位移 x/y（部件像素）与旋转（度）。全零的条目宿主会自动删掉，
+     * 所以「改回 0」等于「没调过」，不需要额外的开关。
+     */
+    function RigBoneEditor({ job, api, run, busy, activeKey }) {
+      const bones = job.rig?.boneList ?? [];
+      const offsets = job.rig?.boneOffsets ?? {};
+      if (bones.length === 0) {
+        return h("p", { className: "SPR_hint", style: { marginTop: 10 } },
+          "还没有骨骼。先点上面的「生成骨骼与动画」——生成之后这里可以逐根微调。");
+      }
+      const manualCount = Object.keys(offsets).length;
+
+      const patch = (name, fields) =>
+        void run(
+          () => api.setRigBoneOffsets({ jobId: job.id, bones: [{ name, ...fields }], by: "human" }),
+          `已调整「${name}」`,
+          activeKey
+        );
+
+      return h(
+        "div",
+        { "data-testid": "rig-bone-editor", style: { marginTop: 12 } },
+        h("h3", { style: { fontSize: 13, margin: "0 0 4px" } },
+          `骨骼手工偏移（${manualCount > 0 ? `已调 ${manualCount} 根` : "未调整"}）`),
+        h("p", { className: "SPR_hint", style: { marginTop: 0 } },
+          "这里调的是「你相对绑定姿势改了多少」，不会被重新推骨骼覆盖。位移单位是参考图像素，旋转是度。全零即视为未调整。"),
+        h(
+          "div",
+          { style: { marginTop: 8, maxHeight: 320, overflowY: "auto" } },
+          h(
+            "table",
+            { className: "SPR_table", style: { width: "100%", fontSize: 12, borderCollapse: "collapse" } },
+            h("thead", null,
+              h("tr", null,
+                h("th", { style: { textAlign: "left" } }, "骨骼"),
+                h("th", { style: { textAlign: "left" } }, "父级"),
+                h("th", { style: { textAlign: "left" } }, "绑定姿势"),
+                h("th", { style: { textAlign: "left" } }, "手工位移 x"),
+                h("th", { style: { textAlign: "left" } }, "手工位移 y"),
+                h("th", { style: { textAlign: "left" } }, "手工旋转"),
+                h("th", null, "")
+              )
+            ),
+            h("tbody", null,
+              bones.filter((bone) => bone.name !== "root").map((bone) => {
+                const offset = offsets[bone.name] ?? {};
+                return h(
+                  "tr",
+                  { key: bone.name, "data-testid": `rig-bone-row-${bone.name}` },
+                  h("td", { style: { paddingRight: 8 } }, bone.name),
+                  h("td", { style: { paddingRight: 8, opacity: 0.7 } }, bone.parent ?? "root"),
+                  h("td", { style: { paddingRight: 8, opacity: 0.7, whiteSpace: "nowrap" } },
+                    `${Math.round(bone.x)},${Math.round(bone.y)} · ${Math.round(bone.rotation)}°`),
+                  h("td", { style: { paddingRight: 8 } },
+                    h(NumField, {
+                      label: "",
+                      value: offset.x ?? 0,
+                      step: 1,
+                      onChange: (value) => patch(bone.name, { x: value })
+                    })
+                  ),
+                  h("td", { style: { paddingRight: 8 } },
+                    h(NumField, {
+                      label: "",
+                      value: offset.y ?? 0,
+                      step: 1,
+                      onChange: (value) => patch(bone.name, { y: value })
+                    })
+                  ),
+                  h("td", { style: { paddingRight: 8 } },
+                    h(NumField, {
+                      label: "",
+                      value: offset.rotation ?? 0,
+                      step: 1,
+                      onChange: (value) => patch(bone.name, { rotation: value })
+                    })
+                  ),
+                  h("td", null,
+                    offsets[bone.name] === undefined
+                      ? h("span", { style: { opacity: 0.4 } }, "—")
+                      : h("button", {
+                          type: "button",
+                          className: "SPR_miniBtn",
+                          "data-testid": `rig-bone-reset-${bone.name}`,
+                          onClick: () => void run(
+                            () => api.resetRigBoneOffsets({ jobId: job.id, names: [bone.name] }),
+                            `已清除「${bone.name}」的手工偏移`,
+                            activeKey
+                          )
+                        }, "清除")
+                  )
+                );
+              })
+            )
+          )
+        ),
+        manualCount > 0
+          ? h(
+              "div",
+              { className: "SPR_toolbar", style: { marginTop: 8 } },
+              h(
+                BusyBtn,
+                {
+                  busy: busy,
+                  busyText: "清除中…",
+                  onClick: () => void run(
+                    () => api.resetRigBoneOffsets({ jobId: job.id }),
+                    "已清除全部手工骨骼偏移",
+                    activeKey
+                  )
+                },
+                `清除全部手工偏移（${manualCount} 根）`
+              )
+            )
+          : null
+      );
+    }
+
     const RIG_HANDLES = [
       ["nw", 0, 0], ["n", 0.5, 0], ["ne", 1, 0],
       ["e", 1, 0.5], ["se", 1, 1], ["s", 0.5, 1],
@@ -5030,6 +5160,7 @@
                                 h("iframe", { className: "SPR_rigPreview", src: `${job.rig.preview}#${anim}`, title: "骨骼动画预览" })
                               )
                             : h("p", { className: "SPR_hint", style: { marginTop: 10 } }, job.layout?.status === "ready" ? "点「生成骨骼与动画」得到 skeleton.json 与可播放预览。" : "先完成第②步装配定位。"),
+                          h(RigBoneEditor, { job, api, run, busy, activeKey: K_RIG_BONES }),
                           h(
                             "div",
                             { className: "SPR_toolbar", style: { marginTop: 12 } },
@@ -5607,6 +5738,8 @@
         saveRigLayoutItems: (payload) => call("saveRigLayoutItems", payload),
         setRigLayoutHints: (payload) => call("setRigLayoutHints", payload),
     setRigSemantics: (payload) => call("setRigSemantics", payload),
+    setRigBoneOffsets: (payload) => call("setRigBoneOffsets", payload),
+    resetRigBoneOffsets: (payload) => call("resetRigBoneOffsets", payload),
         runRigSheet: (payload) => call("runRigSheet", payload),
         runRigSegment: (payload) => call("runRigSegment", payload),
         runRigLayout: (payload) => call("runRigLayout", payload),

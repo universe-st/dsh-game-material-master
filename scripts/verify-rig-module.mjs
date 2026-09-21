@@ -181,6 +181,46 @@ console.log("=== 1b. 语义层 ===");
   ]);
 }
 
+console.log("=== 1c. 三通道：手工骨骼偏移 ===");
+{
+  // 还没跑过骨骼时也能先写下偏移——它是独立于 origin 的一层。
+  const set = await riggen.setRigBoneOffsets(job.id, [{ name: "torso", rotation: -3, y: 4 }], { by: "human" });
+  check("写入偏移成功", set.touched === 1);
+  let s = await riggen.readRigJob(job.id);
+  check("偏移已落盘", s.boneOffsets?.torso?.rotation === -3 && s.boneOffsets?.torso?.y === 4, JSON.stringify(s.boneOffsets));
+
+  // 只改一个字段时不能把另外两个抹掉（局部补丁语义）。
+  await riggen.setRigBoneOffsets(job.id, [{ name: "torso", x: 7 }]);
+  s = await riggen.readRigJob(job.id);
+  check("局部补丁保留其它字段", s.boneOffsets.torso.x === 7 && s.boneOffsets.torso.rotation === -3 && s.boneOffsets.torso.y === 4,
+    JSON.stringify(s.boneOffsets.torso));
+
+  // 全零 = 未调整：条目要被自动删掉，而不是留一堆 0。
+  await riggen.setRigBoneOffsets(job.id, [{ name: "torso", x: 0, y: 0, rotation: 0 }]);
+  s = await riggen.readRigJob(job.id);
+  check("全零条目被自动删除", s.boneOffsets === undefined, JSON.stringify(s.boneOffsets));
+
+  // 改偏移只作废骨骼与图集。
+  const beforeOffsets = JSON.stringify(s.layout.items);
+  await riggen.setRigBoneOffsets(job.id, [{ name: "head", rotation: 5 }]);
+  s = await riggen.readRigJob(job.id);
+  check("改偏移作废骨骼与图集", s.rig.status === "empty" && s.atlas.status === "empty");
+  void beforeOffsets;
+
+  let threw = false;
+  try {
+    await riggen.setRigBoneOffsets(job.id, [{ name: "no-such-bone", x: 1 }]);
+  } catch {
+    threw = true;
+  }
+  check("给不存在的骨骼写偏移会报错", threw);
+
+  const cleared = await riggen.resetRigBoneOffsets(job.id);
+  check("清除全部偏移", cleared.touched === 1);
+  s = await riggen.readRigJob(job.id);
+  check("清除后没有残留", s.boneOffsets === undefined);
+}
+
 console.log("=== 2. 装配定位 ===");
 const t0 = Date.now();
 await riggen.solveRigLayout(job.id);
@@ -247,6 +287,13 @@ for (const group of MIRRORED_GROUPS) {
   check("改语义后骨骼被作废", afterSem.rig.status === "empty");
   // 改回躯干，后面按标准骨架断言。
   await riggen.setRigSemantics(job.id, [{ name: "torso", role: "torso" }]);
+
+  // 手工骨骼偏移同样不该动装配——它只影响骨骼推导。
+  const beforeOffset = JSON.stringify((await riggen.readRigJob(job.id)).layout.items);
+  await riggen.setRigBoneOffsets(job.id, [{ name: "head", rotation: 4 }]);
+  const afterOffset = await riggen.readRigJob(job.id);
+  check("改骨骼偏移保留装配结果", JSON.stringify(afterOffset.layout.items) === beforeOffset && afterOffset.layout.status === "ready");
+  await riggen.resetRigBoneOffsets(job.id);
 }
 
 console.log("=== 3. 手工微调 + 局部重跑 ===");
@@ -284,6 +331,32 @@ const html = await readFile(riggen.rigAssetPath(job.id, "rig/preview.html"), "ut
 check("预览 HTML 无外部依赖", !/<script[^>]+src=/.test(html) && !/<link[^>]+href=/.test(html));
 check("预览 HTML 内联了部件图", html.includes("data:image/png;base64,"));
 check("预览 HTML 内联了骨架", html.includes('"spine\\":\\"4.2.0') || html.includes('"spine":"4.2.0"'));
+
+// ── 三通道的核心保证：手工偏移不被「重新推骨骼」覆盖 ──────────────────
+{
+  const baseline = skeleton.bones.find((bone) => bone.name === "head");
+  await riggen.setRigBoneOffsets(job.id, [{ name: "head", rotation: 9, y: 6 }], { by: "human" });
+  await riggen.buildRigOutput(job.id);
+  const after = JSON.parse(await readFile(riggen.rigAssetPath(job.id, "rig/skeleton.json"), "utf8"));
+  const head = after.bones.find((bone) => bone.name === "head");
+  check("重跑骨骼后手工偏移仍在", Math.abs(head.rotation - (baseline.rotation + 9)) < 0.01, `${baseline.rotation} -> ${head.rotation}`);
+  check("重跑骨骼后位移偏移生效", Math.abs(head.y - (baseline.y + 6)) < 0.01, `${baseline.y} -> ${head.y}`);
+  check("偏移不污染绑定姿势（其它骨骼未变）",
+    after.bones.filter((b) => b.name !== "head").every((b) => {
+      const before = skeleton.bones.find((x) => x.name === b.name);
+      return Math.abs(b.rotation - before.rotation) < 0.01;
+    }));
+
+  const stateWithOffset = await riggen.readRigJob(job.id);
+  check("骨骼表里带上了偏移记录", stateWithOffset.rig.boneList.find((b) => b.name === "head").offset.rotation === 9);
+
+  await riggen.resetRigBoneOffsets(job.id);
+  await riggen.buildRigOutput(job.id);
+  const restored = JSON.parse(await readFile(riggen.rigAssetPath(job.id, "rig/skeleton.json"), "utf8"));
+  const headBack = restored.bones.find((bone) => bone.name === "head");
+  check("清除偏移后回到绑定姿势", Math.abs(headBack.rotation - baseline.rotation) < 0.01 && Math.abs(headBack.y - baseline.y) < 0.01,
+    `${headBack.rotation} vs ${baseline.rotation}`);
+}
 
 console.log("=== 5. 图集打包 ===");
 await riggen.buildAtlas(job.id);

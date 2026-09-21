@@ -583,6 +583,23 @@ export interface RigPlacedPart {
   /** 语义层给出的锚点（归一化到部件包围盒，y 向下）。 */
   proximal?: [number, number];
   distal?: [number, number];
+  /**
+   * **手工偏移**（三通道模型的中间那一层）。
+   *
+   * DragonBones 的 `Bone.offsetMode = Additive` 把局部姿势拆成三段相加：
+   *   `local = origin ⊕ offset ⊕ animationPose`
+   * 我们这里没有独立的 animationPose（动画直接写时间轴），但把 `origin` 与
+   * `offset` 分开同样有意义：
+   *   - `origin` 由装配/语义**算出来**，每次重跑都会被重算；
+   *   - `offset` 由**人**给出，任何自动重跑都不会碰它。
+   * 于是「AI 重新推一遍骨骼」与「人手调过的偏置」不再互相覆盖——
+   * 这正是 reskin-app 那套「两套变换语义冲突、拖好的位置导出后全丢」的反面。
+   *
+   * 目前只支持**平移与旋转**：Spine 的 bone setup 可以带 scale，但预览播放器
+   * 的骨骼世界变换还没传播缩放，加上去会变成「导出有效、预览看不到」的假象。
+   * 宁可先不给，也不要给一个只在导出处生效的开关。
+   */
+  offset?: { x?: number; y?: number; rotation?: number };
 }
 
 export interface BuildSkeletonOptions {
@@ -750,12 +767,20 @@ export function buildSkeleton(options: BuildSkeletonOptions): { spine: any; bone
     const localX = deltaX * cosP - deltaY * sinP;
     const localY = deltaX * sinP + deltaY * cosP;
 
+    // ── 三通道：local = origin ⊕ offset（动画由时间轴另行叠加）──────────
+    //
+    // 注意 `world` 里存的仍然是 **origin**（不含 offset）：
+    // 子骨骼的局部坐标要相对父骨骼的**绑定姿势**去算，这样运行时父骨骼一旦带上
+    // offset，子骨骼会跟着一起动（转躯干时头/手臂跟着转）——这才是「手工调骨骼」
+    // 期望的手感。若把 offset 也并进 world，子骨骼会被抵消掉、不跟随。
+    const originRotation = normalizeAngle(worldRot - (parentName === undefined ? 0 : parentWorld.rotation));
+    const boneOffset = part.offset ?? {};
     bones.push({
       name,
       parent: parentName,
-      x: round(localX, 4),
-      y: round(localY, 4),
-      rotation: normalizeAngle(worldRot - (parentName === undefined ? 0 : parentWorld.rotation)),
+      x: round(localX + (boneOffset.x ?? 0), 4),
+      y: round(localY + (boneOffset.y ?? 0), 4),
+      rotation: normalizeAngle(originRotation + (boneOffset.rotation ?? 0)),
       length: round(length, 4)
     });
     world.set(name, { x: prox.x, y: prox.y, rotation: worldRot });

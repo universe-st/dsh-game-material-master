@@ -1044,6 +1044,36 @@ export class GameStudioGateway extends TypertRemoteService {
   }
 
   /**
+   * 手工骨骼偏移（三通道的中间那一层）。
+   *
+   * 它与 `setRigSemantics` 一样只作废「骨骼与图集」：偏置只影响骨骼推导，
+   * 部件摆在画布上的位置与它无关。
+   */
+  async setRigBoneOffsets(payload) {
+    const input = asRecord(payload);
+    const rawBones = Array.isArray(input.bones) ? input.bones : [];
+    const bones = rawBones.map((item: any) => {
+      const record = asRecord(item);
+      const patch: { name: string; x?: number; y?: number; rotation?: number } = { name: asString(record.name) };
+      if (typeof record.x === "number") patch.x = record.x;
+      if (typeof record.y === "number") patch.y = record.y;
+      if (typeof record.rotation === "number") patch.rotation = record.rotation;
+      return patch;
+    });
+    const touched = await riggen.setRigBoneOffsets(asString(input.jobId), bones, {
+      by: input.by === "ai" ? "ai" : "human",
+      label: typeof input.label === "string" ? input.label : undefined
+    });
+    return { ok: true, ...touched };
+  }
+
+  async resetRigBoneOffsets(payload) {
+    const input = asRecord(payload);
+    const names = Array.isArray(input.names) ? input.names.filter((name: unknown) => typeof name === "string") : undefined;
+    return { ok: true, ...(await riggen.resetRigBoneOffsets(asString(input.jobId), names)) };
+  }
+
+  /**
    * 语义层（阶段③）：AI 或人改「这块是什么、挂在谁身上、骨骼从哪伸到哪」。
    *
    * 校验不通过时**不抛异常**，而是把 errors/warnings 原样回给调用方——

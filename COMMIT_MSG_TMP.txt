@@ -1,0 +1,38 @@
+feat(rig): 三通道姿势模型（origin / offset）+ 骨骼编辑器
+
+按 docs/骨骼动画生成-重开发方案.md 的 M2 实施。这是方案里 AI 与手工共存的
+架构核心，照搬 DragonBones `Bone.offsetMode = Additive` 的
+`local = origin ⊕ offset ⊕ animationPose`，拆成三段：
+
+  - `origin`：由②的装配位置 + 语义层的锚点**算出来**，每次重跑都会被重算；
+  - `offset`：**人**给出的偏置，任何自动重跑都不碰它。
+
+于是「AI / 几何重新推一遍骨骼」与「人手调过的偏置」不再互相覆盖——
+这正是 reskin-app 那套「两套变换语义冲突、拖好的位置导出后全丢」的反面。
+
+## 实现
+- `spine.ts`：`RigPlacedPart` 增加 `offset{x,y,rotation}`，`buildSkeleton` 把它
+  叠加到发出去的骨骼上。
+  **关键点**：`world` 映射里存的仍然是**不含 offset 的 origin**——子骨骼的局部
+  坐标要相对父骨骼的绑定姿势算，这样父骨骼一旦带上 offset，子骨骼会跟着一起动
+  （转躯干时头/手臂跟着转）；若把 offset 并进 world，子骨骼会被抵消、不跟随。
+  目前只支持平移与旋转：Spine 的 bone setup 可以带 scale，但预览播放器的骨骼
+  世界变换还没传播缩放，加上去会变成「导出有效、预览看不到」的假象。
+- `riggen.ts`：`job.boneOffsets`（只存非零字段，全零条目自动删除，所以「改回去」
+  = 「没有这条记录」）；`setRigBoneOffsets` / `resetRigBoneOffsets`；
+  删部件时连带清掉它的偏移、改名时把偏移搬到新名字（否则用户改个名就白调了）；
+  `rig.boneList` 存下上一次成功构建的骨骼表，供界面展示。
+- 偏移与语义一样**只作废骨骼与图集**，不动②里已经摆好的位置。
+- wire 新增 `setRigBoneOffsets` / `resetRigBoneOffsets`；快照的 rig 阶段增加
+  `boneList` 与 `boneOffsets`（后者是当前真源，骨骼还没重跑时也要能看到自己调过什么）。
+- 客户端新增骨骼编辑器：逐根显示「绑定姿势 vs 我的手改」，可改位移 x/y 与旋转，
+  单根可清除、也可一键清除全部。
+
+## 测试
+- `verify-rig-module.mjs` 新增 1c 节（局部补丁保留其它字段 / 全零条目自动删除 /
+  不存在的骨骼报错 / 清除后无残留）与三通道的核心断言：
+  **重跑骨骼后手工偏移仍在、且不污染其它骨骼的绑定姿势；清除后回到绑定姿势**。
+  另有「改语义与改偏移都保留装配结果」两条。
+- `verify-host.mjs` 的方法数契约 67 → 69。
+
+全部离线套件通过。
