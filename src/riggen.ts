@@ -82,6 +82,7 @@ import { buildPreviewHtml } from "./rigpreview.js";
 import { buildDragonBonesSkeleton, buildDragonBonesTexture } from "./rigexport.js";
 import { assessParts, type QaDuplicateGroup, type QaIssue, type QaPart, type QaReport } from "./rigqa.js";
 import { MESH_DEFAULT_DIVISIONS, MESH_MAX_DIVISIONS } from "./rigmesh.js";
+import { normalizePath } from "./rigpath.js";
 import {
   validateAnimationLoops,
   validateAtlas,
@@ -312,6 +313,24 @@ export interface RigWaveDeform {
 
 export type RigDeform = RigWaveDeform;
 
+/**
+ * 一条 Path 约束：路径本身 + 沿它排列的骨骼链。
+ *
+ * 两者放在同一个结构里，是因为它们**只能一起改**：换一条骨链而留着旧路径的间距，
+ * 结果一定是错的。分成两张表（`paths` 与 `constraints`）会让"改了一半"成为可能。
+ */
+export interface RigPathEntry {
+  /** 折线点：`[x0,y0, x1,y1, …]`（参考图像素）。 */
+  points: number[];
+  closed: boolean;
+  /** 沿路径排列的骨骼链（**从根到末端**）。 */
+  bones: string[];
+  /** 相邻两根骨的间距（参考图像素）；0 = 均匀铺满整条路径。 */
+  spacing: number;
+  translateMix: number;
+  rotateMix: number;
+}
+
 /** 拆件质检结果。
  *
  * 之所以要**存在任务里**而不是每次现算：重复件检测要解码全部部件 PNG，
@@ -419,6 +438,16 @@ export interface RigJob {
    * 手工逐帧拖顶点的关键帧形式留给编辑器。
    */
   deforms?: Record<string, RigDeform>;
+  /**
+   * **Path 约束**（M5）：把一串骨骼沿一条折线铺开。
+   *
+   * 解决的场景是「尾巴、辫子、鞭子」这类**长度远超单根骨**的部件：给每节单独 K 旋转
+   * 也能做，但那是「手动摆姿势」，改一次目标形状就要重摆一遍；沿路径排列是「描述结果」，
+   * 路径变了骨骼自己跟着走。
+   *
+   * 路径点用**参考图像素**（与部件同一坐标系），当前不挂在骨骼上（静态路径）。
+   */
+  paths?: Record<string, RigPathEntry>;
   /** 拆件质检结论（分割后自动写、可手动重跑）。 */
   qa?: RigQaState;
   reviewMode?: "auto" | "manual";
@@ -866,6 +895,7 @@ function normalizeRigJob(raw: any): RigJob {
     constraints: normalizeConstraints(raw?.constraints),
     meshes: normalizeMeshes(raw?.meshes),
     deforms: normalizeDeforms(raw?.deforms),
+    paths: normalizePaths(raw?.paths),
     log: Array.isArray(raw?.log) ? raw.log.slice(-200) : []
   };
 }
@@ -936,7 +966,30 @@ function normalizeDeforms(raw: unknown): Record<string, RigDeform> | undefined {
   return Object.keys(out).length === 0 ? undefined : out;
 }
 
-/** 读盘时的质检状态归一化：字段缺失/手改过都不该让整个任务读不出来。 */function normalizeQaState(raw: any): RigQaState | undefined {
+/** 读盘时的 Path 约束归一化（同上：白名单字段，漏了就会静默丢）。 */
+function normalizePaths(raw: unknown): Record<string, RigPathEntry> | undefined {
+  if (raw === null || typeof raw !== "object") return undefined;
+  const out: Record<string, RigPathEntry> = {};
+  for (const [name, value] of Object.entries<any>(raw)) {
+    if (value === null || typeof value !== "object") continue;
+    const path = normalizePath(value);
+    if (path === undefined) continue;
+    const bones = Array.isArray(value.bones) ? value.bones.filter((entry: unknown) => typeof entry === "string") : [];
+    if (bones.length === 0) continue;
+    out[name] = {
+      points: path.points,
+      closed: path.closed,
+      bones,
+      spacing: Math.max(0, num(value.spacing, 0)),
+      translateMix: Math.max(0, Math.min(1, num(value.translateMix, 1))),
+      rotateMix: Math.max(0, Math.min(1, num(value.rotateMix, 1)))
+    };
+  }
+  return Object.keys(out).length === 0 ? undefined : out;
+}
+
+/** 读盘时的质检状态归一化：字段缺失/手改过都不该让整个任务读不出来。 */
+function normalizeQaState(raw: any): RigQaState | undefined {
   if (raw === null || typeof raw !== "object") return undefined;
   if (typeof raw.summary !== "string") return undefined;
   return {
@@ -1224,6 +1277,8 @@ export function rigSnapshot(job: RigJob, origin = "") {
        * 少一个字段，界面上那个滑杆就只能显示默认值，用户改完看不出到底存了什么。
        */
       meshes: job.meshes ?? {},
+      /** Path 约束：点仍是**参考图像素**，界面/脚本读它来显示与编辑。 */
+      paths: job.paths ?? {},
       deforms: job.deforms ?? {},
       animationPresets: RIG_ANIMATIONS.map((preset) => ({
         id: preset.id,
@@ -2473,8 +2528,112 @@ export async function setRigMesh(
   return { touched, warnings };
 }
 
-/** 清除网格与变形（全部，或点名几个部件）。 */
-export async function resetRigMesh(jobId: string, names?: string[]): Promise<{ touched: number }> {
+// ── Path 约束（M5）──────────────────────────────────────────────────────
+
+/**
+ * 把路径点从**参考图像素**转成**骨骼世界坐标**（y 向上），供预览内联。
+ *
+ * 换算与 `buildSkeleton` 里的 `toWorld` 必须一致，所以直接读骨架自己写下来的
+ * `x/y/width/height`（那是导出时真正用的画布参数），而不是另取一份 settings。
+ */
+function previewPathsOf(
+  job: RigJob,
+  spine: any
+): Record<string, { points: number[]; closed: boolean; bones: string[]; spacing: number; translateMix: number; rotateMix: number }> {
+  const out: Record<string, any> = {};
+  const entries = Object.entries(job.paths ?? {});
+  if (entries.length === 0) return out;
+  // 画布尺寸只有骨架自己写下来的那份是准的——导出时用的就是它。
+  const width = num(spine?.skeleton?.width, 0);
+  const height = num(spine?.skeleton?.height, 0);
+  if (width <= 0 || height <= 0) return out;
+  for (const [name, entry] of entries) {
+    const points: number[] = [];
+    for (let i = 0; i + 1 < entry.points.length; i += 2) {
+      points.push(Number((entry.points[i] - width / 2).toFixed(3)), Number((height - entry.points[i + 1]).toFixed(3)));
+    }
+    out[name] = {
+      points,
+      closed: entry.closed,
+      bones: entry.bones,
+      spacing: entry.spacing,
+      translateMix: entry.translateMix,
+      rotateMix: entry.rotateMix
+    };
+  }
+  return out;
+}
+
+/**
+ * 写入 / 覆盖一条路径约束。
+ *
+ * `bones` 不传时会用「沿路径最近的若干根骨」猜一条链——但那只是给个起点，
+ * 猜错了用户要能一眼看出来（面板里会把骨链列出来）。
+ */
+export async function setRigPath(
+  jobId: string,
+  patches: Array<{ name: string; points?: number[]; closed?: boolean; bones?: string[]; spacing?: number; translateMix?: number; rotateMix?: number }>,
+  options: { by?: "ai" | "human" } = {}
+): Promise<{ touched: number; warnings: string[] }> {
+  const job = await readRigJob(jobId);
+  if (job === undefined) throw new Error(`任务不存在：${jobId}`);
+  const paths = { ...(job.paths ?? {}) };
+  const warnings: string[] = [];
+  let touched = 0;
+  const available = new Set(boneNamesOf(job));
+
+  for (const patch of patches) {
+    const previous = paths[patch.name];
+    const normalized = normalizePath(
+      patch.points !== undefined ? { points: patch.points, closed: patch.closed } : previous ?? { points: [] }
+    );
+    if (normalized === undefined) {
+      warnings.push(`路径「${patch.name}」至少需要两个有效点`);
+      continue;
+    }
+    const chain = (patch.bones ?? previous?.bones ?? []).filter((name) => available.has(name));
+    if (chain.length === 0) {
+      warnings.push(`路径「${patch.name}」没有指定沿路径排列的骨骼`);
+      continue;
+    }
+    paths[patch.name] = {
+      points: normalized.points,
+      closed: normalized.closed,
+      bones: chain,
+      spacing: Math.max(0, num(patch.spacing, previous?.spacing ?? 0)),
+      translateMix: Math.max(0, Math.min(1, num(patch.translateMix, previous?.translateMix ?? 1))),
+      rotateMix: Math.max(0, Math.min(1, num(patch.rotateMix, previous?.rotateMix ?? 1)))
+    };
+    touched++;
+  }
+
+  job.paths = Object.keys(paths).length === 0 ? undefined : paths;
+  invalidateFrom(job, "rig");
+  appendJobLog(job.log, "info", `${options.by === "ai" ? "AI" : "手工"}编辑路径约束：${patches.map((patch) => patch.name).join("、")}`);
+  await writeRigJob(job);
+  return { touched, warnings };
+}
+
+/** 清除路径约束（全部，或点名几条）。 */
+export async function resetRigPath(jobId: string, names?: string[]): Promise<{ touched: number }> {
+  const job = await readRigJob(jobId);
+  if (job === undefined) throw new Error(`任务不存在：${jobId}`);
+  const paths = { ...(job.paths ?? {}) };
+  const targets = names === undefined || names.length === 0 ? Object.keys(paths) : names;
+  let touched = 0;
+  for (const name of targets) {
+    if (paths[name] === undefined) continue;
+    delete paths[name];
+    touched++;
+  }
+  job.paths = Object.keys(paths).length === 0 ? undefined : paths;
+  invalidateFrom(job, "rig");
+  appendJobLog(job.log, "info", touched > 0 ? `已清除 ${touched} 条路径约束` : "没有需要清除的路径约束");
+  await writeRigJob(job);
+  return { touched };
+}
+
+/** 清除网格与变形（全部，或点名几个部件）。 */export async function resetRigMesh(jobId: string, names?: string[]): Promise<{ touched: number }> {
   const job = await readRigJob(jobId);
   if (job === undefined) throw new Error(`任务不存在：${jobId}`);
   const meshes = { ...(job.meshes ?? {}) };
@@ -3803,7 +3962,11 @@ export async function buildRigOutput(jobId: string): Promise<void> {
       defaultAnimation: job.settings.animations.includes("idle") ? "idle" : job.settings.animations[0],
       // FFD 变形参数内联进预览：波形位移要在播放时**逐帧**算，把参数带过去比
       // 预烘焙一串位移更省体积，也不会在改幅度之后留下一堆过期数据。
-      deforms: job.deforms
+      deforms: job.deforms,
+      // 路径点在这里就转成**骨骼世界坐标**（y 向上）：预览既不知道画布尺寸、
+      // 也不知道 toWorld 的约定，让它自己转迟早会转错——而且转错的表现是
+      // 「骨骼排到画面外」，很难联想到是坐标系的事。
+      paths: previewPathsOf(job, spine)
     });
     await writeFile(rigAssetPath(jobId, "rig/preview.html"), html, "utf8");
 

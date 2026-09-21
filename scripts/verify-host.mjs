@@ -63,7 +63,7 @@ async function main() {
   check("注册了一条 prefix 路由", captured.routes.length === 1 && captured.routes[0].kind === "prefix", JSON.stringify(captured.routes.map((r) => r.path)));
 
   const invocations = captured.manifest?.invocations ?? [];
-  check("manifest 方法数为 84", invocations.length === 84, `实际 ${invocations.length}`);
+  check("manifest 方法数为 86", invocations.length === 86, `实际 ${invocations.length}`);
   const ids = new Set(invocations.map((i) => i.id));
   check("方法 id 唯一", ids.size === invocations.length);
   check("所有方法都声明在 gameStudio 服务下", invocations.every((i) => i.service === "gameStudio" && i.namespace === "gameStudio"));

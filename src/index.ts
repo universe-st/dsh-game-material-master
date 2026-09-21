@@ -1216,6 +1216,38 @@ export class GameStudioGateway extends TypertRemoteService {
     return { ok: true, ...result };
   }
 
+  /**
+   * Path 约束（M5）。`points` 是扁平的 `[x0,y0,x1,y1,…]`（参考图像素）。
+   *
+   * 路径点与骨链放在同一条记录里：它们**只能一起改**——换一条骨链而留着旧路径的间距，
+   * 结果一定是错的。
+   */
+  async setRigPath(payload) {
+    const input = asRecord(payload);
+    const raw = Array.isArray(input.paths) ? input.paths : [];
+    const patches = raw.map((item: any) => {
+      const record = asRecord(item);
+      const patch: any = { name: asString(record.name) };
+      if (Array.isArray(record.points)) patch.points = record.points.filter((n: unknown) => typeof n === "number");
+      if (typeof record.closed === "boolean") patch.closed = record.closed;
+      if (Array.isArray(record.bones)) patch.bones = record.bones.filter((n: unknown) => typeof n === "string");
+      if (typeof record.spacing === "number") patch.spacing = record.spacing;
+      if (typeof record.translateMix === "number") patch.translateMix = record.translateMix;
+      if (typeof record.rotateMix === "number") patch.rotateMix = record.rotateMix;
+      return patch;
+    });
+    const result = await riggen.setRigPath(asString(input.jobId), patches, {
+      by: input.by === "ai" ? "ai" : "human"
+    });
+    return { ok: true, ...result };
+  }
+
+  async resetRigPath(payload) {
+    const input = asRecord(payload);
+    const names = Array.isArray(input.names) ? input.names.filter((name: unknown) => typeof name === "string") : undefined;
+    return { ok: true, ...(await riggen.resetRigPath(asString(input.jobId), names)) };
+  }
+
   async resetRigMesh(payload) {
     const input = asRecord(payload);
     const names = Array.isArray(input.names) ? input.names.filter((name: unknown) => typeof name === "string") : undefined;

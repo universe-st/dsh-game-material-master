@@ -320,6 +320,26 @@ const setRigMeshSchema = z.object({
   ),
   by: z.enum(["ai", "human"]).optional()
 });
+/** Path 约束（M5）：把一串骨沿折线铺开。`points` 是扁平的 `[x0,y0,x1,y1,…]`（参考图像素）。 */
+const setRigPathSchema = z.object({
+  jobId: z.string(),
+  paths: z.array(
+    z.object({
+      name: z.string(),
+      points: z.array(z.number()).optional(),
+      closed: z.boolean().optional(),
+      bones: z.array(z.string()).optional(),
+      spacing: z.number().min(0).max(4000).optional(),
+      translateMix: z.number().min(0).max(1).optional(),
+      rotateMix: z.number().min(0).max(1).optional()
+    })
+  ),
+  by: z.enum(["ai", "human"]).optional()
+});
+const resetRigPathSchema = z.object({
+  jobId: z.string(),
+  names: z.array(z.string()).optional()
+});
 const resetRigMeshSchema = z.object({
   jobId: z.string(),
   /** 不传或传空数组 = 清除全部网格。 */
@@ -504,6 +524,8 @@ export const METHODS: MethodSpec[] = [
   { method: "resetRigConstraints", payload: resetRigConstraintsSchema, result: jsonObject },
   { method: "setRigMesh", payload: setRigMeshSchema, result: jsonObject },
   { method: "resetRigMesh", payload: resetRigMeshSchema, result: jsonObject },
+  { method: "setRigPath", payload: setRigPathSchema, result: jsonObject },
+  { method: "resetRigPath", payload: resetRigPathSchema, result: jsonObject },
   { method: "tintRigParts", payload: tintRigPartsSchema, result: jsonObject },
   { method: "uploadRigTexture", payload: uploadRigTextureSchema, result: jsonObject },
   { method: "setRigTextureVersion", payload: setRigTextureVersionSchema, result: jsonObject },

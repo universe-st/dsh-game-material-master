@@ -33,6 +33,7 @@ import { buildSkeleton, buildAtlasText, packAtlas, defaultPartNames, RIG_SLOTS, 
 import { buildDragonBonesSkeleton, buildDragonBonesTexture, DRAGONBONES_FRAME_RATE } from "../lib/rigexport.js";
 import { assessParts, findDuplicateParts } from "../lib/rigqa.js";
 import { buildRigMesh, buildWaveDeform } from "../lib/rigmesh.js";
+import { normalizePath, pathBounds, pathPlacements, pathSegmentLengths, pathTotalLength, samplePath } from "../lib/rigpath.js";
 import {
   validateAnimationLoops,
   validateAtlas,
@@ -1447,6 +1448,52 @@ console.log("=== 16. 蒙皮网格与 FFD 变形（M5）===");
     check("ffd 首帧顶点数与 mesh 一致", ffd[0].frame[0].vertices.length / 2 === 25);
     check("ffd 中间帧 duration ≥ 1（末帧被忽略）", ffd[0].frame.slice(0, -1).every((f) => f.duration >= 1));
   }
+}
+
+console.log("=== 17. Path 约束（M5）===");
+{
+  // 三种输入写法都要认：内部用扁平数组，手写 JSON 时 `[[x,y]]` 与 `[{x,y}]` 更清楚。
+  const flat = normalizePath({ points: [0, 0, 100, 0] });
+  check("接受扁平点数组", flat !== undefined && flat.points.join(",") === "0,0,100,0", JSON.stringify(flat?.points));
+  const pairs = normalizePath({ points: [[0, 0], [100, 0]] });
+  check("接受 [[x,y]] 写法", pairs !== undefined && pairs.points.join(",") === "0,0,100,0");
+  const named = normalizePath({ points: [{ x: 0, y: 0 }, { x: 100, y: 0 }] });
+  check("接受 [{x,y}] 写法", named !== undefined && named.points.join(",") === "0,0,100,0");
+  check("少于两个点会被拒绝", normalizePath({ points: [0, 0] }) === undefined);
+  check("非数字点会被拒绝", normalizePath({ points: ["a", "b", 1, 2] }) === undefined);
+
+  // 直角折线：3-4-5 三角形，段长是整数，便于手算。
+  const corner = { points: [0, 0, 30, 0, 30, 40], closed: false };
+  const lengths = pathSegmentLengths(corner);
+  check("段长按折线算（30 / 40）", lengths.join(",") === "30,40", lengths.join(","));
+  check("总弧长 = 70", pathTotalLength(corner, lengths) === 70, String(pathTotalLength(corner, lengths)));
+
+  const mid = samplePath(corner, 15, lengths);
+  check("弧长 15 落在第一段中点", Math.abs(mid.x - 15) < 1e-6 && Math.abs(mid.y) < 1e-6, JSON.stringify(mid));
+  check("第一段的切线角为 0（向 +x）", Math.abs(mid.angle) < 1e-6, String(mid.angle));
+  const inSecond = samplePath(corner, 50, lengths);
+  check("弧长 50 落在第二段中点", Math.abs(inSecond.x - 30) < 1e-6 && Math.abs(inSecond.y - 20) < 1e-6, JSON.stringify(inSecond));
+  check("第二段的切线角为 π/2（向 +y，图像坐标向下）", Math.abs(inSecond.angle - Math.PI / 2) < 1e-6, String(inSecond.angle));
+  // 越界夹紧而不是报错：排列骨链时本来就会算出越界值，那时"停在端点"才是想要的。
+  check("弧长越界会夹到端点（负）", (() => { const p = samplePath(corner, -10, lengths); return p.x === 0 && p.y === 0; })());
+  check("弧长越界会夹到端点（超长）", (() => { const p = samplePath(corner, 999, lengths); return Math.abs(p.x - 30) < 1e-6 && Math.abs(p.y - 40) < 1e-6; })());
+
+  // 排列：spacing=0 均匀铺满（末根落在终点），spacing>0 就是固定间距。
+  const even = pathPlacements(corner, 3, 0);
+  check("均匀铺满：3 根骨的弧长为 0/35/70", even.join(",") === "0,35,70", even.join(","));
+  const fixed = pathPlacements(corner, 3, 10);
+  check("固定间距：弧长为 0/10/20", fixed.join(",") === "0,10,20", fixed.join(","));
+  check("只有一根骨时落在起点", pathPlacements(corner, 1, 0).join(",") === "0");
+
+  // 闭合路径会比开放路径多一段（最后一点回到第一点）。
+  const closed = { points: [0, 0, 30, 0, 30, 40], closed: true };
+  check("闭合路径多一段（30/40/50）", pathSegmentLengths(closed).join(",") === "30,40,50", pathSegmentLengths(closed).join(","));
+
+  check("包围盒覆盖所有点", (() => {
+    const box = pathBounds(corner);
+    return box.minX === 0 && box.minY === 0 && box.maxX === 30 && box.maxY === 40;
+  })());
+  check("归一化会保留 closed", normalizePath({ points: [0, 0, 10, 10], closed: true }).closed === true);
 }
 
 console.log("");
