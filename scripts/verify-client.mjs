@@ -416,6 +416,20 @@ console.log(`共 ${checks} 项检查，全部通过。`);
 function checkRigContracts(text, label) {
   check(`${label}：注册了 RigModule`, text.includes("function RigModule"));
   check(`${label}：模块导航含骨骼动画生成`, text.includes("骨骼动画生成"));
+  // 模块④是实验性功能，三处标记缺一都会让「实验性」名不副实：页签角标（先在入口
+  // 说清楚）、进入时的说明弹窗（别让人不知情地把它当稳定功能用）、模块内常驻提示条
+  // （弹窗关掉之后标记不能跟着消失）。弹窗还必须 fixed —— 放进 .SPR_rigPanel 这个
+  // 滚动容器里用 absolute 会被裁成一小条。
+  check(`${label}：模块④带实验性角标`, text.includes("experimental: true") && text.includes("SPR_expTag"));
+  check(
+    `${label}：进入模块④弹出实验性提示`,
+    text.includes("RigExperimentalDialog") && text.includes("本次会话不再提示")
+  );
+  check(
+    `${label}：模块④常驻提示条与共建仓库入口`,
+    text.includes("RigExperimentalBar") && text.includes("https://github.com/universe-st/dsh-game-material-master")
+  );
+  check(`${label}：实验性弹窗用 position:fixed`, /\.SPR_gateMask\{[^}]*position:fixed/.test(text));
   check(`${label}：深链接允许 rig 模块`, text.includes('new Set(["sprite", "image", "sequence", "rig"])'));
   for (const method of [
     "listRigJobs",
