@@ -1,9 +1,17 @@
 {
   "name": "dsh-game-material-master",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "游戏素材大师：DSH 插件，包含八方向图生成、图片生成、序列帧生成三个游戏素材模块，以及实验性的骨骼动画生成模块。火山方舟 Seedream 生图 + MiniMax 图生视频 + 本地抠绿幕合成。",
   "type": "module",
   "main": "lib/index.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/universe-st/dsh-game-material-master.git"
+  },
+  "homepage": "https://github.com/universe-st/dsh-game-material-master#readme",
+  "bugs": {
+    "url": "https://github.com/universe-st/dsh-game-material-master/issues"
+  },
   "exports": {
     ".": "./lib/index.js",
     "./client": "./lib/client.js",
