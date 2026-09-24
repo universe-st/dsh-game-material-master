@@ -8,6 +8,12 @@
  *   3. frames  每段视频按时长平均抽 N 帧                    （ffmpeg）
  *   4. sheet   全部帧抠绿幕 → 拼成一张 8×8 整图             （内置抠像 + PNGu 编码）
  *
+ * 阶段 1 有两种生成方式（`Project.imageMode`）：
+ *   - `turn`（默认）先让视频模型绕竖轴转一整圈，再按时长匀抽候选帧，
+ *     按八个截帧位置切出八张绿幕图——八个方向出自同一段视频，一致性最好；
+ *   - `direct` 逐个方向 Seedream 生图（原来那条路，按依赖顺序生成）。
+ * 两条路产出的都是同一批 `images/<方向>.png`，所以阶段 2~4 完全不必区分。
+ *
  * 所有耗时操作都通过 kick() 丢到后台，远程调用只负责「启动」和「读状态」，
  * 界面靠自己轮询 getState 看进度——一次 Hailuo 生成要几分钟，绝不能同步阻塞。
  */
@@ -15,7 +21,17 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { loadConfig, type Config } from "./config.js";
-import { DIRECTIONS, DIRECTION_KEYS, directionOf } from "./directions.js";
+import {
+  DEFAULT_TURN_PROMPT,
+  DIRECTIONS,
+  DIRECTION_KEYS,
+  TURN_DIRECTION_DEFAULT,
+  TURN_FRAME_COUNT_MAX,
+  TURN_FRAME_COUNT_MIN,
+  directionOf,
+  turnOrder,
+  type TurnDirection
+} from "./directions.js";
 import { generateImage } from "./ark.js";
 import { downloadVideo, queryVideo, retrieveFile, submitVideo } from "./minimax.js";
 import { extractFrames, mimeOf, toDataUri, toJpegDataUri } from "./media.js";
@@ -23,6 +39,7 @@ import { composeSheet, keyGreen, type SheetRow } from "./chroma.js";
 import { encodePng } from "./png.js";
 import {
   assetPath,
+  freshPicks,
   log,
   patchProject,
   readProject,
@@ -283,6 +300,410 @@ export function startAllImages(projectId: string, force = false): { started: boo
   return started ? { started: true } : { started: false, reason: "批量生成已在进行中" };
 }
 
+// ── 阶段 1b：转圈截帧（八方向绿幕图的默认生成方式）──────────────────────
+//
+// 一次生成、多次截取：整圈只有一段视频，八个方向是它时间轴上的八个截帧位置。
+// 好处是八个方向天生一致（同一个角色、同一段光线、同一套画风），
+// 代价是分辨率取决于视频、以及「转速是否真的均匀」——所以位置必须可拖。
+
+function clampInt(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, Math.round(value)));
+}
+
+/**
+ * 转圈视频的首帧。
+ *
+ * 优先用已经有的正面绿幕图，没有就退回源图：源图不一定是绿幕，但提示词里
+ * 已经明确要求「纯色绿幕 #00FF00」，模型会照着重画背景。把实际用的那张记进
+ * `turn.video.firstFrame`，排查「第一帧就不是正面」时才有据可依。
+ */
+function turnFirstFrame(project: Project): { file: string; label: string } | undefined {
+  const front = project.images["front"]?.file;
+  if (front !== undefined) return { file: front, label: "正面绿幕图" };
+  if (project.source !== null) return { file: project.source.file, label: "源图" };
+  return undefined;
+}
+
+export function startTurnVideo(projectId: string): { started: boolean; reason?: string } {
+  if (jobs.get(projectId)?.has("turn:video") === true) return { started: false, reason: "转圈视频正在生成中" };
+  const started = kick(projectId, "turn:video", "生成转圈视频", () => submitTurnVideo(projectId));
+  return started ? { started: true } : { started: false, reason: "任务已在进行中" };
+}
+
+async function submitTurnVideo(projectId: string): Promise<void> {
+  const project = await readProject(projectId);
+  if (project === undefined) throw new Error(`项目不存在：${projectId}`);
+  const config = await loadConfig();
+  if (config.minimaxApiKey.trim() === "") throw new Error("尚未配置 MiniMax API Key");
+
+  const first = turnFirstFrame(project);
+  if (first === undefined) throw new Error("还没有源图，无法生成转圈视频");
+
+  const base = (project.prompts.turn ?? DEFAULT_TURN_PROMPT).trim();
+  if (base === "") throw new Error("提示词为空，请先填写转圈视频提示词");
+  const suffix = (project.prompts.suffix ?? "").trim();
+  const prompt = suffix === "" ? base : `${base}\n${suffix}`;
+
+  await patchProject(projectId, (current) => {
+    current.turn.video = {
+      ...current.turn.video,
+      status: "running",
+      remoteStatus: "提交中",
+      error: undefined,
+      firstFrame: first.file
+    };
+    // 旧视频的候选帧还在，但已经和这次的新视频对不上了：标成「需重抽」，
+    // 而不是直接清空——用户还能对着上一版继续调位置，直到新视频落地。
+    if (current.turn.frames.frames.length > 0) current.turn.frames.stale = true;
+    log(current, "info", `开始生成转圈视频（首帧：${first.label}）`);
+  });
+
+  const startedAt = Date.now();
+  try {
+    const jpegRel = "videos/turn-first-frame.jpg";
+    const dataUri = await toJpegDataUri(assetPath(projectId, first.file), assetPath(projectId, jpegRel));
+    const taskId = await submitVideo({
+      ...miniMaxRequest(config),
+      prompt,
+      firstFrameImage: dataUri,
+      duration: config.minimaxDuration,
+      resolution: config.minimaxResolution,
+      promptOptimizer: config.minimaxPromptOptimizer
+    });
+    await patchProject(projectId, (current) => {
+      current.turn.video = {
+        ...current.turn.video,
+        status: "running",
+        taskId,
+        remoteStatus: "已提交",
+        elapsedMs: Date.now() - startedAt,
+        updatedAt: Date.now()
+      };
+      log(current, "info", `转圈视频任务已提交（${taskId}）`);
+    });
+    ensurePoller(projectId);
+  } catch (error) {
+    const message = messageOf(error);
+    await patchProject(projectId, (current) => {
+      current.turn.video = { ...current.turn.video, status: "error", error: message, remoteStatus: "提交失败", updatedAt: Date.now() };
+      log(current, "error", `转圈视频提交失败：${message}`);
+    });
+    throw error;
+  }
+}
+
+/** 轮询一次转圈视频任务（由 ensurePoller 的定时器驱动）。 */
+async function pollTurnVideoOnce(projectId: string, config: Config): Promise<void> {
+  const project = await readProject(projectId);
+  if (project === undefined) return;
+  const taskId = project.turn?.video?.taskId;
+  if (project.turn?.video?.status !== "running" || taskId === undefined) return;
+
+  const request = miniMaxRequest(config);
+  try {
+    const query = await queryVideo({ ...request, taskId });
+    if (query.status === "failed") {
+      const reason = query.error ?? "MiniMax 报告该任务失败";
+      await patchProject(projectId, (current) => {
+        current.turn.video = { ...current.turn.video, status: "error", error: reason, remoteStatus: query.remoteStatus, updatedAt: Date.now() };
+        log(current, "error", `转圈视频生成失败：${reason}`);
+      });
+      return;
+    }
+    if (query.status !== "succeeded") {
+      await patchProject(projectId, (current) => {
+        current.turn.video = { ...current.turn.video, remoteStatus: query.remoteStatus, updatedAt: Date.now() };
+      });
+      return;
+    }
+
+    const url =
+      query.videoUrl ??
+      (query.fileId !== undefined ? await retrieveFile({ ...request, fileId: query.fileId }) : undefined);
+    if (url === undefined) throw new Error("任务已成功，但响应里既没有视频地址也没有 file_id");
+
+    const bytes = await downloadVideo(url, config.minimaxTimeoutMs);
+    const relative = "videos/turn.mp4";
+    await writeFile(assetPath(projectId, relative), bytes);
+    await patchProject(projectId, (current) => {
+      current.turn.video = {
+        ...current.turn.video,
+        status: "ready",
+        file: relative,
+        remoteStatus: query.remoteStatus,
+        error: undefined,
+        updatedAt: Date.now()
+      };
+      current.turn.frames.stale = true;
+      log(current, "info", `转圈视频已下载（${(bytes.length / 1024 / 1024).toFixed(1)} MB），接着抽取候选帧`);
+    });
+    // 视频到手就把候选帧抽出来：抽帧是本机 ffmpeg，不花钱，让链路自己往下走
+    // 比「再点一次按钮」更省事。用户拖圆圈之前本来也要先有候选帧。
+    startTurnFrames(projectId);
+  } catch (error) {
+    // 单次轮询失败不等于任务失败（网络抖动很常见），保留 running 让下一轮重试。
+    await patchProject(projectId, (current) => {
+      const node = current.turn?.video;
+      if (node !== undefined) node.remoteStatus = `查询异常：${messageOf(error)}`;
+    });
+  }
+}
+
+export function startTurnFrames(projectId: string, count?: number): { started: boolean; reason?: string } {
+  if (jobs.get(projectId)?.has("turn:frames") === true) return { started: false, reason: "抽帧已在进行中" };
+  const started = kick(projectId, "turn:frames", "抽取转圈候选帧", async () => {
+    // 第一个 await 之前公布覆盖面：抽完候选帧才会逐个切出八张方向图，
+    // 那段空窗里八个格子全靠这张表盖着（与批量抽帧同一套约定）。
+    setJobTargets(projectId, "turn:frames", DIRECTION_KEYS);
+    await extractTurnFrames(projectId, count);
+  });
+  return started ? { started: true } : { started: false, reason: "任务已在进行中" };
+}
+
+/**
+ * 候选帧数变了之后，把用户拖过的位置按比例换算过去。
+ *
+ * 直接保留下标是不行的：32 帧里的第 17 帧和 64 帧里的第 17 帧朝向完全不同，
+ * 相当于把用户调好的八个位置整体打乱。按比例缩放至少保持「相对位置」不变。
+ */
+function rescalePicks(picks: Record<string, number>, from: number, to: number): Record<string, number> {
+  const out: Record<string, number> = {};
+  const ratio = from > 0 ? to / from : 1;
+  for (const key of DIRECTION_KEYS) {
+    out[key] = clampInt((picks[key] ?? 0) * ratio, 0, Math.max(0, to - 1));
+  }
+  return out;
+}
+
+async function extractTurnFrames(projectId: string, count?: number): Promise<void> {
+  const project = await readProject(projectId);
+  if (project === undefined) throw new Error(`项目不存在：${projectId}`);
+  if (project.turn?.video?.file === undefined) throw new Error("还没有转圈视频，请先生成转圈视频");
+
+  const frameCount = clampInt(count ?? project.settings.turnFrameCount, TURN_FRAME_COUNT_MIN, TURN_FRAME_COUNT_MAX);
+  const previous = project.turn.frames;
+
+  await patchProject(projectId, (current) => {
+    current.turn.frames = { ...current.turn.frames, status: "running", error: undefined };
+    current.settings.turnFrameCount = frameCount;
+    log(current, "info", `开始抽取转圈候选帧：${frameCount} 张`);
+  });
+
+  try {
+    const settings = project.settings;
+    const extracted = await extractFrames({
+      video: assetPath(projectId, project.turn.video.file),
+      frameCount,
+      longEdge: settings.workingLongEdge,
+      cropInset: settings.cropInset
+    });
+
+    const rawRelative = "turn/raw.bin";
+    await mkdir(dirname(assetPath(projectId, rawRelative)), { recursive: true });
+    await writeFile(assetPath(projectId, rawRelative), Buffer.concat(extracted.frames));
+
+    const files: string[] = [];
+    const times: number[] = [];
+    // 候选帧写在 turn/frames/ 下，ensureLayout 只建到 turn/ 这一层，这里补建。
+    await mkdir(dirname(assetPath(projectId, "turn/frames/f00.png")), { recursive: true });
+    for (let i = 0; i < extracted.frames.length; i++) {
+      const relative = `turn/frames/f${String(i).padStart(2, "0")}.png`;
+      await writeFile(assetPath(projectId, relative), encodePng(extracted.frames[i], extracted.width, extracted.height));
+      files.push(relative);
+      // 与 ffmpeg 的 `fps=张数/时长` 一致：第 i 帧取在 i * 时长/张数 秒处。
+      times.push((i * extracted.duration) / Math.max(1, extracted.frames.length));
+    }
+
+    // 轴上的圆圈是「对着整圈缩略条带」拖的，所以条带必须和候选帧一一对应。
+    const strip = composeSheet([{ key: "turn", frames: extracted.frames, width: extracted.width, height: extracted.height }], {
+      cellWidth: 96,
+      cellHeight: Math.max(24, Math.round((96 * extracted.height) / Math.max(1, extracted.width))),
+      frameCount: extracted.frames.length,
+      autoCrop: false,
+      fillRatio: 1,
+      pixelSize: 0,
+      fitMode: "stretch",
+      bottomMargin: 0
+    });
+    const stripRelative = "turn/strip.png";
+    await writeFile(assetPath(projectId, stripRelative), encodePng(strip.rgba, strip.width, strip.height));
+
+    // 位置怎么来：
+    //   · 从来没有抽过候选帧（rawFrameCount 还没有）→ 这八个位置只是占位，
+    //     按**这次的**张数重新等分。否则第一次抽 16 张时，那套按 32 张算的
+    //     默认位置会有四个方向一起被夹到最后一帧（实测过）。
+    //   · 抽过、这次张数变了 → 按比例换算（保留用户拖过的相对位置）。
+    //   · 抽过、张数没变 → 原样保留。
+    const picks =
+      previous.rawFrameCount !== undefined && previous.rawFrameCount > 0
+        ? previous.rawFrameCount !== files.length
+          ? rescalePicks(previous.picks, previous.rawFrameCount, files.length)
+          : previous.picks
+        : freshPicks(files.length, project.turn?.direction ?? TURN_DIRECTION_DEFAULT);
+
+    await patchProject(projectId, (current) => {
+      current.turn.frames = {
+        status: "ready",
+        frames: files,
+        times,
+        raw: rawRelative,
+        rawWidth: extracted.width,
+        rawHeight: extracted.height,
+        rawFrameCount: files.length,
+        duration: extracted.duration,
+        picks,
+        strip: stripRelative,
+        approved: false,
+        stale: false,
+        updatedAt: Date.now()
+      };
+      log(
+        current,
+        "info",
+        `候选帧抽取完成：${files.length} 张 / ${extracted.width}×${extracted.height} / 视频时长 ${extracted.duration.toFixed(2)} 秒`
+      );
+    });
+
+    await applyTurnPicks(projectId);
+  } catch (error) {
+    const message = messageOf(error);
+    await patchProject(projectId, (current) => {
+      current.turn.frames = { ...current.turn.frames, status: "error", error: message };
+      log(current, "error", `候选帧抽取失败：${message}`);
+    });
+    throw error;
+  }
+}
+
+/**
+ * 按 `picks` 把八个方向的绿幕图从候选帧里切出来。
+ *
+ * 这一步是本机 CPU：读 `turn/raw.bin` 的第 N 帧 → 编码成 PNG → 覆盖
+ * `images/<方向>.png`。所以拖动圆圈可以随便试，改一个位置不必重新抽帧、
+ * 更不必重新生成视频。
+ *
+ * 换了朝向 = 这个方向的行走视频与它的序列帧都作废（它们拍的是另一个朝向），
+ * 整图同样作废——不然后面几步会拿着旧朝向的帧合成。
+ */
+export async function applyTurnPicks(projectId: string, keys?: string[]): Promise<void> {
+  const project = await readProject(projectId);
+  if (project === undefined) throw new Error(`项目不存在：${projectId}`);
+  const node = project.turn?.frames;
+  if (node?.raw === undefined || node.rawWidth === undefined || node.rawWidth <= 0) {
+    throw new Error("还没有候选帧，请先抽取转圈候选帧");
+  }
+  const width = node.rawWidth;
+  const height = node.rawHeight;
+  const raw = await readFile(assetPath(projectId, node.raw));
+  const frameBytes = width * height * 4;
+  const total = Math.max(0, Math.floor(raw.length / frameBytes));
+  if (total === 0) throw new Error("候选帧缓存是空的，请重新抽取候选帧");
+
+  const targets = (keys ?? DIRECTION_KEYS).filter((key) => directionOf(key) !== undefined);
+  for (const key of targets) {
+    const index = clampInt(node.picks[key] ?? 0, 0, total - 1);
+    const slice = Buffer.from(raw.subarray(index * frameBytes, (index + 1) * frameBytes));
+    const relative = `images/${key}.png`;
+    await writeFile(assetPath(projectId, relative), encodePng(slice, width, height));
+    const label = directionOf(key)?.label ?? key;
+    await patchProject(projectId, (current) => {
+      current.images[key] = {
+        status: "ready",
+        file: relative,
+        approved: false,
+        stale: false,
+        model: "转圈截帧",
+        updatedAt: Date.now()
+      };
+      if (current.videos[key]?.file !== undefined || current.videos[key]?.status !== "empty") {
+        current.videos[key] = { status: "empty", approved: false };
+      }
+      if (current.frames[key]?.raw !== undefined || current.frames[key]?.status !== "empty") {
+        current.frames[key] = { status: "empty", frames: [], keyed: [], approved: false };
+      }
+      current.sheet = { status: "empty", approved: false };
+      log(current, "info", `截出「${label}」：第 ${index + 1}/${total} 帧（${(node.times[index] ?? 0).toFixed(2)} 秒）`);
+    });
+    // 这一格的方向图已经写出来了，把它从「抽帧中」的覆盖面里摘掉。
+    dropJobTarget(projectId, "turn:frames", key);
+  }
+}
+
+/** 改一个方向的截帧位置（拖动圆圈松手时调用），只重切那一张。 */
+export async function setTurnPick(projectId: string, key: string, index: number): Promise<{ index: number; changed: boolean }> {
+  const project = await readProject(projectId);
+  if (project === undefined) throw new Error(`项目不存在：${projectId}`);
+  if (directionOf(key) === undefined) throw new Error(`未知方向：${key}`);
+  const total = project.turn?.frames?.frames?.length ?? 0;
+  const next = clampInt(index, 0, Math.max(0, total - 1));
+  const currentPick = project.turn?.frames?.picks?.[key];
+  const unchanged = currentPick === next && project.images[key]?.file !== undefined;
+
+  await patchProject(projectId, (current) => {
+    current.turn.frames.picks = { ...current.turn.frames.picks, [key]: next };
+  });
+  // 位置没变、图也已经在，就别白重切一遍——更要紧的是**不要**因此把下游作废。
+  if (!unchanged) await applyTurnPicks(projectId, [key]);
+  return { index: next, changed: !unchanged };
+}
+
+/** 重新铺一遍八个位置（用一个转圈方向的默认等分位置）。 */
+export async function resetTurnPicks(projectId: string, direction?: TurnDirection): Promise<void> {
+  const project = await readProject(projectId);
+  if (project === undefined) throw new Error(`项目不存在：${projectId}`);
+  const round: TurnDirection = direction ?? project.turn?.direction ?? TURN_DIRECTION_DEFAULT;
+  const count = project.turn?.frames?.frames?.length || project.settings.turnFrameCount;
+  await patchProject(projectId, (current) => {
+    current.turn.direction = round;
+    current.turn.frames.picks = freshPicks(count, round);
+    log(
+      current,
+      "info",
+      `八个截帧位置已重置为${round === "ccw" ? "逆时针" : "顺时针"}的默认等分位置（依次：${turnOrder(round)
+        .map((key) => directionOf(key)?.label ?? key)
+        .join(" → ")}）`
+    );
+  });
+  if ((project.turn?.frames?.raw ?? undefined) !== undefined) await applyTurnPicks(projectId);
+}
+
+/**
+ * 一次写多个截帧位置（agent 看完条带后整份写回，与 `setRigLayoutHints` 同一角色）。
+ *
+ * 只看单张方向图判断不了「是不是转反了」——必须对着整圈条带看。所以这条路的
+ * 正确用法是：`read_image` 看 `turn.stripUrl` → 判断八个朝向各落在第几帧 →
+ * 一次写回，而不是逐个点方向图去猜。
+ */
+export async function setTurnPicks(projectId: string, picks: Record<string, number>): Promise<{ picks: Record<string, number> }> {
+  const project = await readProject(projectId);
+  if (project === undefined) throw new Error(`项目不存在：${projectId}`);
+  const total = project.turn?.frames?.frames?.length ?? 0;
+  const next: Record<string, number> = { ...(project.turn?.frames?.picks ?? {}) };
+  const keys: string[] = [];
+  for (const [key, value] of Object.entries(picks)) {
+    if (directionOf(key) === undefined) throw new Error(`未知方向：${key}`);
+    if (!Number.isFinite(Number(value))) throw new Error(`${key} 的截帧位置必须是数字`);
+    next[key] = clampInt(Number(value), 0, Math.max(0, total - 1));
+    keys.push(key);
+  }
+  if (keys.length === 0) throw new Error("没有要改的方向");
+  await patchProject(projectId, (current) => {
+    current.turn.frames.picks = next;
+  });
+  if (total > 0) await applyTurnPicks(projectId, keys);
+  return { picks: next };
+}
+
+/** 切换阶段①的生成方式。只换「怎么产出八张图」，产物一律不动。 */
+export async function setImageMode(projectId: string, mode: "turn" | "direct"): Promise<void> {
+  await patchProject(projectId, (project) => {
+    if (project.imageMode === mode) return;
+    project.imageMode = mode;
+    log(project, "info", mode === "turn" ? "阶段①改用「转圈截帧」" : "阶段①改用「逐方向生图」");
+  });
+}
+
 // ── 阶段 2：八段视频 ──────────────────────────────────────────────────────
 
 export function startVideos(projectId: string, keys?: string[]): { started: boolean; reason?: string } {
@@ -397,7 +818,10 @@ export async function pollVideosOnce(projectId: string): Promise<void> {
   const pending = DIRECTION_KEYS.filter(
     (key) => project.videos[key]?.status === "running" && typeof project.videos[key]?.taskId === "string"
   );
-  if (pending.length === 0) {
+  // 转圈视频走同一个轮询器：它和八段行走视频是同一类任务（同一个模型、同一套
+  // query/download），单独再起一个定时器只多一份「谁负责停」的账。
+  const turnPending = project.turn?.video?.status === "running" && typeof project.turn?.video?.taskId === "string";
+  if (pending.length === 0 && !turnPending) {
     stopPoller(projectId);
     return;
   }
@@ -454,8 +878,16 @@ export async function pollVideosOnce(projectId: string): Promise<void> {
     })
   );
 
+  if (turnPending) {
+    await pollTurnVideoOnce(projectId, config).catch(() => undefined);
+  }
+
   const after = await readProject(projectId);
-  if (after !== undefined && !DIRECTION_KEYS.some((key) => after.videos[key]?.status === "running")) {
+  if (
+    after !== undefined &&
+    !DIRECTION_KEYS.some((key) => after.videos[key]?.status === "running") &&
+    after.turn?.video?.status !== "running"
+  ) {
     stopPoller(projectId);
   }
 }
@@ -606,6 +1038,12 @@ async function renderSheet(projectId: string, options: RenderOptions = {}): Prom
     const rows: SheetRow[] = [];
     let hasFrames = false;
     let working = { width: 0, height: 0 };
+    // 抠像诊断：背景占比能看出「是不是没抠干净」，被排除的边框采样点能看出
+    // 「角色是不是贴到了画面边缘」（贴边时那一小撮角色色会被挡在调色板之外）。
+    let backgroundSum = 0;
+    let keyedSamples = 0;
+    let borderSamples = 0;
+    let borderSamplesDropped = 0;
     for (const key of order) {
       const node = project.frames[key];
       if (node?.rawWidth !== undefined && node.rawWidth > 0) working = { width: node.rawWidth, height: node.rawHeight };
@@ -626,6 +1064,10 @@ async function renderSheet(projectId: string, options: RenderOptions = {}): Prom
         for (let i = 0; i < count; i++) {
           const slice = Buffer.from(raw.subarray(i * frameBytes, (i + 1) * frameBytes));
           const result = keyGreen(slice, width, height, keyOptions);
+          backgroundSum += result.backgroundFraction;
+          keyedSamples++;
+          borderSamples += result.borderSamples;
+          borderSamplesDropped += result.borderSamplesDropped;
           row.frames.push(result.rgba);
           keyedBuffers.push(result.rgba);
           const relative = `keyed/${key}/f${String(i).padStart(2, "0")}.png`;
@@ -685,6 +1127,7 @@ async function renderSheet(projectId: string, options: RenderOptions = {}): Prom
     await writeFile(assetPath(projectId, relative), encodePng(sheet.rgba, sheet.width, sheet.height));
 
     await patchProject(projectId, (current) => {
+      const backgroundFraction = keyedSamples > 0 ? backgroundSum / keyedSamples : undefined;
       current.sheet = {
         status: "ready",
         file: relative,
@@ -696,12 +1139,19 @@ async function renderSheet(projectId: string, options: RenderOptions = {}): Prom
         rowOrder: [...order],
         cellWidth: settings.cellWidth,
         cellHeight: settings.cellHeight,
-        frameCount: settings.frameCount
+        frameCount: settings.frameCount,
+        backgroundFraction,
+        borderSamples,
+        borderSamplesDropped
       };
+      const droppedNote =
+        borderSamplesDropped > 0
+          ? `；边框采样 ${borderSamples} 个里排除了 ${borderSamplesDropped} 个不属于背景主色的点（通常是角色贴到了画面边缘，已自动排除）`
+          : "";
       log(
         current,
         "info",
-        `整图合成完成：${sheet.width}×${sheet.height}（${sheet.columns} 列 × ${sheet.rows} 行，裁剪框 ${sheet.bbox.width}×${sheet.bbox.height}）`
+        `整图合成完成：${sheet.width}×${sheet.height}（${sheet.columns} 列 × ${sheet.rows} 行，裁剪框 ${sheet.bbox.width}×${sheet.bbox.height}，背景占比 ${backgroundFraction === undefined ? "?" : (backgroundFraction * 100).toFixed(1)}%${droppedNote}）`
       );
     });
   } catch (error) {

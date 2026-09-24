@@ -422,6 +422,116 @@ section("阶段① 八方向绿幕图");
   );
 }
 
+// ── 阶段①的另一条路：转圈截帧（默认）────────────────────────────────────
+section("阶段① 转圈截帧（默认生成方式）");
+{
+  /** 转圈模式的项目桩：一段转圈视频 + 32 张候选帧 + 八个方向图（都是切出来的）。 */
+  function makeTurnProject(overrides = {}) {
+    const images = {};
+    const picks = {};
+    const order = ["front", "downLeft", "left", "upLeft", "back", "upRight", "right", "downRight"];
+    COMPASSES.forEach((key, index) => {
+      images[key] = { file: `images/${key}.png`, status: "ready", updatedAt: 1, model: "转圈截帧" };
+      picks[key] = Math.round((index * 32) / 8);
+    });
+    return makeProject({
+      imageMode: "turn",
+      images,
+      turn: {
+        direction: "cw",
+        video: { status: "ready", file: "videos/turn.mp4", updatedAt: 1, firstFrame: "source/hero.png", approved: false },
+        frames: {
+          status: "ready",
+          frames: Array.from({ length: 32 }, (_, i) => `turn/frames/f${String(i).padStart(2, "0")}.png`),
+          times: Array.from({ length: 32 }, (_, i) => (i * 2) / 32),
+          raw: "turn/raw.bin",
+          rawWidth: 120,
+          rawHeight: 120,
+          rawFrameCount: 32,
+          duration: 2,
+          picks,
+          strip: "turn/strip.png",
+          approved: false,
+          updatedAt: 2
+        }
+      },
+      ...overrides
+    });
+  }
+
+  /** 把整棵树（含函数组件内部）的文字拼起来：textOf 只走 element.children，够不到组件内部。 */
+  const renderedText = (tree) => collect(tree, () => true).map((node) => textOf(node)).join(" | ");
+
+  const idle = renderStage(makeTurnProject(), "images", makeTasks());
+  check("空闲时一个遮罩都没有", overlays(idle.tree).length === 0, `${overlays(idle.tree).length} 个`);
+  const turnPanels = collect(idle.tree, (node) => typeof node.type === "function" && node.type.name === "TurnImageStage");
+  check("有转圈截帧面板", turnPanels.length >= 1, `${turnPanels.length} 个`);
+  const modeButtons = byClass(idle.tree, "SPR_mode");
+  check("两种生成方式都能选", modeButtons.length === 2, `${modeButtons.length} 个`);
+  const defaultTag = byClass(idle.tree, "SPR_modeTag");
+  check(
+    "默认那种被标成「默认」且处于选中态",
+    defaultTag.length === 1 &&
+      textOf(defaultTag[0]) === "默认" &&
+      modeButtons.some((node) => node.props["data-active"] === "true"),
+    `${defaultTag.length} 个标记 / ${modeButtons.map((node) => node.props["data-active"]).join(",")}`
+  );
+  const dots = collect(idle.tree, (node) => typeof node.props?.["data-testid"] === "string" && node.props["data-testid"].startsWith("turn-dot-"));
+  check("时间轴上有八个圆圈", dots.length === 8, `${dots.length} 个`);
+  check(
+    "圆圈是按钮（可聚焦 / 可键盘微调）",
+    dots.every((node) => node.type === "button" && typeof node.props.onPointerDown === "function" && typeof node.props.onKeyDown === "function")
+  );
+  check("圆圈上有缩略条带", byClass(idle.tree, "SPR_axisStrip").length === 1);
+  check("转圈视频能播", collect(idle.tree, (node) => node.type === "video").length === 1);
+  check("八个方向图都在网格里", byClass(idle.tree, "SPR_node").length === 8, `${byClass(idle.tree, "SPR_node").length} 个`);
+  check("转圈模式也有审核模式下拉", hasReviewModeSelect(idle.tree));
+  check("有「通过」按钮", approveLabels(idle.tree).length >= 1);
+
+  // 宿主那批「抽候选帧 + 切八张图」还在跑：已经切过的方向在重切时要盖着遮罩，
+  // 还没切出来的方向要给可读的等待文案——否则界面会退回「还没有这一方向的图」，
+  // 看着像点击没生效（实测过的表现）。
+  const cutting = makeTurnProject();
+  cutting.jobs = [{ key: "turn:frames", label: "抽取转圈候选帧", startedAt: 1, targets: ["front", "back"] }];
+  const cuttingTree = renderStage(cutting, "images", makeTasks()).tree;
+  check("切帧期间正在重切的方向被盖住", overlays(cuttingTree).length === 2, `${overlays(cuttingTree).length} 个`);
+  check("切帧遮罩文案可读", overlayText(cuttingTree).includes("候选帧"), overlayText(cuttingTree));
+  check("切帧期间出现忙碌徽章", byClass(cuttingTree, "SPR_busyBadge").length >= 1);
+  check(
+    "切帧期间重复抽帧被禁用",
+    byClass(cuttingTree, "SPR_btn").some((node) => node.props.disabled === true)
+  );
+
+  const cuttingEmpty = makeTurnProject();
+  cuttingEmpty.images.front = { status: "empty" };
+  cuttingEmpty.jobs = [{ key: "turn:frames", label: "抽取转圈候选帧", startedAt: 1, targets: ["front"] }];
+  const cuttingEmptyTree = renderStage(cuttingEmpty, "images", makeTasks()).tree;
+  check(
+    "还没切出来的方向显示等待文案",
+    emptyTexts(cuttingEmptyTree).includes("正在切出这一帧…"),
+    emptyTexts(cuttingEmptyTree).join("、")
+  );
+
+  // 本地刚点下「生成转圈视频」：视频区要立刻有转圈 / 遮罩反馈。
+  const submitting = renderStage(makeTurnProject(), "images", makeTasks(["turn:*video"]));
+  check("提交转圈视频时出现遮罩", overlays(submitting.tree).length >= 1, `${overlays(submitting.tree).length} 个`);
+  check("提交转圈视频时按钮转圈", byClass(submitting.tree, "SPR_btn").some((node) => node.props["data-busy"] === "true"));
+
+  // 还没有视频（新项目）：整条链路要给出「先做什么」，而不是空白。
+  const empty = makeTurnProject();
+  COMPASSES.forEach((key) => (empty.images[key] = { status: "empty" }));
+  empty.turn = {
+    direction: "cw",
+    video: { status: "empty", approved: false },
+    frames: { status: "empty", frames: [], times: [], picks: Object.fromEntries(COMPASSES.map((k) => [k, 0])), approved: false }
+  };
+  const emptyTree = renderStage(empty, "images", makeTasks()).tree;
+  const emptyRendered = renderedText(emptyTree);
+  check("没有视频时给出下一步提示", emptyRendered.includes("生成转圈视频"), emptyRendered.slice(0, 120));
+  check("没有候选帧时给出说明", emptyRendered.includes("还没有候选帧"), "");
+  check("空闲时仍然一个遮罩都没有", overlays(emptyTree).length === 0, `${overlays(emptyTree).length} 个`);
+}
+
 // ── 阶段②：视频 ─────────────────────────────────────────────────────────
 section("阶段② 行走动作视频");
 {
@@ -542,6 +652,37 @@ section("批量抽帧：宿主任务的覆盖面");
 }
 
 // ── 阶段④：合成整图 ─────────────────────────────────────────────────────
+section("序列帧预览：双击看大图");
+{
+  const zoomables = (tree) =>
+    collect(tree, (node) => node.props?.["data-zoomable"] === "true" && typeof node.props.onDoubleClick === "function");
+  const frames = renderStage(makeProject(), "frames", makeTasks());
+  check("空闲时一个遮罩都没有（大图窗口默认关闭）", overlays(frames.tree).length === 0, `${overlays(frames.tree).length} 个`);
+  check("八个方向的预览带都能双击放大", zoomables(frames.tree).length === 8, `${zoomables(frames.tree).length} 个`);
+  check(
+    "缩略图带「双击看大图」提示",
+    zoomables(frames.tree).every((node) => node.props.title === "双击看大图")
+  );
+
+  // 大图窗口本身：把 __test 里的 ZoomableImage 直接渲染成"已打开"（Hook 槽位喂 true）。
+  const { ZoomableImage } = bundle.__test ?? {};
+  check("测试把手导出 ZoomableImage", typeof ZoomableImage === "function");
+  if (typeof ZoomableImage === "function") {
+    HOOK.slots = [true];
+    HOOK.cursor = 0;
+    const opened = collect(ZoomableImage({ src: "/a/b.png", alt: "第 1 帧", className: "SPR_frame", caption: "第 1 / 8 帧" }), () => true);
+    const mask = collect(opened, (node) => node.props?.className === "SPR_zoomMask");
+    const close = collect(opened, (node) => node.props?.className === "SPR_zoomClose");
+    const big = collect(opened, (node) => node.props?.className === "SPR_zoomImg");
+    check("大图窗口渲染出遮罩", mask.length === 1, `${mask.length} 个`);
+    check("右上角有关闭按钮", close.length === 1 && textOf(close[0]) === "×", close.map(textOf).join("、"));
+    check("大图用的是原图地址", big.length === 1 && big[0].props.src === "/a/b.png");
+    check("大图窗口有点击背景关闭", typeof mask[0].props.onClick === "function");
+    check("大图窗口有图注", /第 1 \/ 8 帧/.test(textOf(collect(opened, (node) => node.props?.className === "SPR_zoomCaption")[0] ?? {})));
+    check("关闭按钮的点击不会冒泡到遮罩", typeof close[0].props.onClick === "function");
+  }
+}
+
 section("阶段④ 抠绿幕合成整图");
 {
   const idle = renderStage(makeProject(), "sheet", makeTasks());
@@ -615,7 +756,7 @@ function makeSequenceJob(overrides = {}) {
     keying: {},
     refs: { firstFrame: { file: "refs/first.png", name: "first.png" }, referenceImages: [], referenceVideos: [] },
     video: { status: "ready", file: "videos/out.mp4", updatedAt: 3, remoteStatus: "Success" },
-    frames: { status: "ready", files: ["frames/1.png"], keyed: ["keyed/1.png"], duration: 5, updatedAt: 3 },
+    frames: { status: "ready", files: ["frames/1.png", "frames/2.png", "frames/3.png"], keyed: ["keyed/1.png", "keyed/2.png", "keyed/3.png"], duration: 5, updatedAt: 3 },
     sheet: { status: "ready", file: "out/strip.png", updatedAt: 3 },
     log: [],
     ...overrides
@@ -736,6 +877,11 @@ if (typeof SequenceModule === "function") {
     // 验收：视频 / 序列帧 / 条图三步各自可「通过」，审核模式下拉在。
     const acceptance = renderModule(SequenceModule, makeSequenceJob(), makeTasks());
     check("序列帧三步都有「通过」按钮", approveLabels(acceptance.tree).length === 3, approveLabels(acceptance.tree).join("、"));
+    const seqZoom = collect(
+      acceptance.tree,
+      (node) => node.props?.["data-zoomable"] === "true" && typeof node.props.onDoubleClick === "function"
+    );
+    check("序列帧的逐帧缩略图可双击放大", seqZoom.length === 3, `${seqZoom.length} 个`);
     check("序列帧任务有审核模式下拉", hasReviewModeSelect(acceptance.tree), modeOptions(acceptance.tree).join("、"));
     const halfApproved = makeSequenceJob();
     halfApproved.frames = { ...halfApproved.frames, approved: true };

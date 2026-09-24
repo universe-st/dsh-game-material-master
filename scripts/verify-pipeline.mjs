@@ -15,7 +15,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { extractFrames, probeDuration, probeSize, workingSize } from "../lib/media.js";
-import { composeSheet, keyGreen, segmentBackground, unionBoundingBox } from "../lib/chroma.js";
+import { composeSheet, keyGreen, segmentBackground, segmentBackgroundDetailed, unionBoundingBox } from "../lib/chroma.js";
 import { encodePng } from "../lib/png.js";
 
 const ROOT = fileURLToPath(new URL("../.verify/", import.meta.url));
@@ -335,6 +335,91 @@ async function main() {
   const fraction = maskCount / mask.length;
   check("四边一定被判为背景", mask[0] === 1 && mask[probeRow.width - 1] === 1 && mask[mask.length - 1] === 1);
   check("背景占比在合理区间", fraction > 0.3 && fraction < 0.99, `${(fraction * 100).toFixed(1)}%`);
+
+  console.log("12) 抠像回归：角色贴边时不得把自己的颜色当成背景");
+  // 实测踩过的坑（转圈截帧的真实素材）：角色的尾巴被裁到画面左边缘后，
+  // 边框采样里混进了角色的藏青色，背景调色板因此"认识"了角色色，洪水填充
+  // 顺着同色的裙子和头发一路吃进身体——一张 438×768 的帧里 7.7% 的掩码
+  // 变成了角色本身，半条裙子直接没了。修法是调色板只采信「背景主色簇」。
+  const touching = (() => {
+    const w = 160;
+    const h = 120;
+    const buf = Buffer.alloc(w * h * 4);
+    const put = (x, y, r, g, b) => {
+      const i = (y * w + x) * 4;
+      buf[i] = r;
+      buf[i + 1] = g;
+      buf[i + 2] = b;
+      buf[i + 3] = 255;
+    };
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        // 绿幕
+        put(x, y, 0, 192, 64);
+        // 身体（灰白，和背景差得很远）
+        if (x >= 60 && x < 110 && y >= 30 && y < 100) put(x, y, 200, 200, 200);
+        // 同色的"尾巴"从身体一直伸到左边缘（贴边）——这就是污染源
+        if (x < 60 && y >= 80 && y < 92) put(x, y, 60, 67, 128);
+        // 身体上也有一块同色的深蓝（裙子），修好之前它会被整片抠掉
+        if (x >= 60 && x < 110 && y >= 60 && y < 100) put(x, y, 60, 67, 128);
+      }
+    }
+    return { buf, w, h };
+  })();
+  const detailed = segmentBackgroundDetailed(touching.buf, touching.w, touching.h, 90);
+  check("贴边的角色色被排除出背景调色板", detailed.dropped > 0, `排除 ${detailed.dropped}/${detailed.samples} 个边框采样点`);
+  check("四边仍然是背景", detailed.mask[0] === 1);
+  check(
+    "贴边的同色部位不被判为背景",
+    detailed.mask[(85 * touching.w) + 5] === 0,
+    `尾巴贴边处的掩码 = ${detailed.mask[(85 * touching.w) + 5]}`
+  );
+  const touchingKeyed = keyGreen(touching.buf, touching.w, touching.h, KEY_OPTIONS);
+  const bodyIndex = (85 * touching.w + 85) * 4;
+  check(
+    "角色身上的深蓝被保住（修好前整片被抠掉）",
+    touchingKeyed.rgba[bodyIndex + 3] === 255 && touchingKeyed.rgba[bodyIndex + 2] > 100,
+    `alpha=${touchingKeyed.rgba[bodyIndex + 3]} rgb=${touchingKeyed.rgba[bodyIndex]},${touchingKeyed.rgba[bodyIndex + 1]},${touchingKeyed.rgba[bodyIndex + 2]}`
+  );
+  const bodyTop = (40 * touching.w + 85) * 4;
+  check("身体其它部分同样保住", touchingKeyed.rgba[bodyTop + 3] === 255);
+  check("绿幕仍然被抠掉", touchingKeyed.rgba[(10 * touching.w + 10) * 4 + 3] === 0);
+
+  // 干净素材（角色不贴边）不该有采样点被排除——不能靠"多排除"来换正确性。
+  const cleanProbe = await extractFrames({ video: greenVideos.front, frameCount: 1, longEdge: 96, cropInset: 0 });
+  const cleanDetailed = segmentBackgroundDetailed(cleanProbe.frames[0], cleanProbe.width, cleanProbe.height, 90);
+  check(
+    "角色不贴边时一个采样点都不排除",
+    cleanDetailed.dropped === 0,
+    `排除 ${cleanDetailed.dropped}/${cleanDetailed.samples}`
+  );
+
+  // 双色背景（上半绿、下半蓝）：两块都算背景，不能被"只留最大簇"误伤。
+  const twoTone = (() => {
+    const w = 120;
+    const h = 100;
+    const buf = Buffer.alloc(w * h * 4);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = (y * w + x) * 4;
+        const top = y < h / 2;
+        buf[i] = top ? 0 : 40;
+        buf[i + 1] = top ? 192 : 60;
+        buf[i + 2] = top ? 64 : 200;
+        buf[i + 3] = 255;
+      }
+    }
+    // 中间一个明显不同的主体
+    for (let y = 40; y < 60; y++) for (let x = 50; x < 70; x++) {
+      const i = (y * w + x) * 4;
+      buf[i] = 230; buf[i + 1] = 230; buf[i + 2] = 230; buf[i + 3] = 255;
+    }
+    return { buf, w, h };
+  })();
+  const twoMask = segmentBackground(twoTone.buf, twoTone.w, twoTone.h, 40);
+  check("双色背景的上半被抠掉", twoMask[5 * twoTone.w + 5] === 1);
+  check("双色背景的下半也被抠掉", twoMask[95 * twoTone.w + 5] === 1);
+  check("双色背景里的主体保住了", twoMask[50 * twoTone.w + 60] === 0);
 
   console.log(`\n产物：${sheetFile}\n`);
   if (failures.length > 0) {

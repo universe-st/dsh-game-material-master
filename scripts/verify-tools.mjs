@@ -212,6 +212,16 @@ async function main() {
     "缺源图时问源图",
     emptyIntake.questions.some((question) => question.key === "source")
   );
+  check(
+    "必问阶段①的生成方式（转圈截帧 / 逐方向生图）",
+    emptyIntake.questions.some((question) => question.key === "generateMode" && /转圈截帧/.test(question.question)),
+    emptyIntake.questions.map((question) => question.key).join("、")
+  );
+  check(
+    "已知默认生成方式时进 known",
+    emptyIntake.known["阶段1两种生成方式"] !== undefined || emptyIntake.known["阶段1生成方式"] !== undefined,
+    Object.keys(emptyIntake.known).join("、")
+  );
 
   // 配置一个假 Key，blocker 应当消失。
   await studio.saveConfig({ arkApiKey: "sk-verify-tools", minimaxApiKey: "mm-verify-tools" });
@@ -284,6 +294,65 @@ async function main() {
   check("approve 回执带上标的位置", approve.approved === true && approve.key === "front", JSON.stringify(approve));
   check("approve 之后 getProject 能看到已通过", (await studio.getProject({ projectId })).images.front.approved === true);
   check("approve 之后验收包里是已通过", (await run("game_material_review", { id: projectId, stage: "images", direction: "front" })).stages[0].cells[0].approved === true);
+
+  // ── 转圈截帧：状态 / 验收 / 下一步都要说到点上 ──────────────────────────
+  // 阶段①默认走这条路，而它的下一步与逐方向生图完全不同（runTurnVideo /
+  // runTurnFrames / setTurnPick），提示写错模型就会照着 runImages 一路跑偏。
+  await patchProject(projectId, (project) => {
+    project.imageMode = "turn";
+    project.turn.video = { status: "ready", file: "videos/turn.mp4", approved: false, firstFrame: "source/hero.png" };
+    project.turn.frames = {
+      status: "ready",
+      frames: Array.from({ length: 16 }, (_, i) => `turn/frames/f${String(i).padStart(2, "0")}.png`),
+      times: Array.from({ length: 16 }, (_, i) => (i * 2) / 16),
+      raw: "turn/raw.bin",
+      rawWidth: 120,
+      rawHeight: 120,
+      rawFrameCount: 16,
+      duration: 2,
+      picks: { front: 0, downLeft: 2, downRight: 14, upLeft: 6, upRight: 10, back: 8, left: 4, right: 12 },
+      strip: "turn/strip.png",
+      approved: false
+    };
+    project.images = Object.fromEntries(
+      Object.keys(project.images).map((key) => [key, { status: "ready", file: `images/${key}.png`, approved: false }])
+    );
+  });
+  const turnStatus = await run("game_material_status", { module: "sprite", id: projectId });
+  const turnSnapshot = await studio.getProject({ projectId });
+  const turnReview = await run("game_material_review", { module: "sprite", id: projectId, stage: "images" });
+  check(
+    "转圈模式的状态里带出生成方式与候选帧",
+    turnStatus.imageMode === "turn" && turnStatus.turn?.frameCount === 16 && turnStatus.stages[0].cells.length === 8,
+    JSON.stringify({ mode: turnStatus.imageMode, frames: turnStatus.turn?.frameCount })
+  );
+  check(
+    "验收包的八张方向图带上「第几帧」",
+    turnReview.stages[0].cells.every((cell) => typeof cell.frameIndex === "number" && cell.frameTotal === 16),
+    JSON.stringify(turnReview.stages[0].cells[0])
+  );
+  check(
+    "验收包带上转圈视频与缩略条带（能点开看圈转得对不对）",
+    typeof turnReview.turn?.videoUrl === "string" && turnReview.turn.videoUrl.includes("videos/turn.mp4") &&
+      typeof turnReview.turn?.stripUrl === "string" && turnReview.turn.stripUrl.includes("turn/strip.png"),
+    JSON.stringify({ video: turnReview.turn?.videoUrl, strip: turnReview.turn?.stripUrl })
+  );
+  check("验收包带上八个截帧位置", turnReview.turnPicks?.front === 0 && turnReview.turnPicks?.back === 8, JSON.stringify(turnReview.turnPicks));
+  check("转圈模式的验收包不出现 undefined", !JSON.stringify(turnReview).includes("undefined") && !JSON.stringify(turnStatus).includes("undefined"));
+  // 八张图还没切出来时，建议动作必须指向转圈那条路（不是 runImages）。
+  await patchProject(projectId, (project) => {
+    project.images.back = { status: "empty" };
+    project.images.left = { status: "empty" };
+    project.turn.video.status = "ready";
+  });
+  const turnNext = (await run("game_material_review", { module: "sprite", id: projectId })).nextActions.join(" | ");
+  check("转圈模式下建议动作指向 runTurnFrames", /runTurnFrames/.test(turnNext) && !/method:'runImages'/.test(turnNext), turnNext.slice(0, 160));
+  // 视频还没生成时，第一步必须是 runTurnVideo（一次计费的视频调用），不是生图。
+  await patchProject(projectId, (project) => {
+    project.turn.video = { status: "empty", approved: false };
+  });
+  const turnNextFresh = (await run("game_material_review", { module: "sprite", id: projectId })).nextActions.join(" | ");
+  check("没有转圈视频时建议动作指向 runTurnVideo", /runTurnVideo/.test(turnNextFresh), turnNextFresh.slice(0, 160));
 
   const waited = await run("game_material_wait", { id: projectId, timeoutSeconds: 1 });
   check("没有任务在跑时 wait 立刻返回 settled", waited.settled === true && waited.timedOut === false, JSON.stringify({ settled: waited.settled, elapsedMs: waited.elapsedMs }));

@@ -52,6 +52,13 @@
       ["revealProject", true],
       ["runImage", true],
       ["runImages", true],
+      ["setImageMode", true],
+      ["runTurnVideo", true],
+      ["runTurnFrames", true],
+      ["setTurnPick", true],
+      ["setTurnPicks", true],
+      ["resetTurnPicks", true],
+      ["cutTurnFrames", true],
       ["runVideos", true],
       ["pollVideos", true],
       ["clearVideos", true],
@@ -471,6 +478,37 @@
 .SPR_badge{font-size:11px;padding:1px 7px;border-radius:999px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-tertiary)}
 .SPR_videoWrap{position:relative;width:100%}
 .SPR_video{width:100%;border-radius:8px;display:block;background:#000}
+/* 转圈视频多半是竖屏（角色立绘比例）：按 width:100% 铺开会有上千像素高，把下面的
+   时间轴与八个方向图全顶出屏幕，所以改成按高度封顶、水平居中。 */
+.SPR_videoTurn{width:auto;max-width:100%;max-height:360px;margin:0 auto}
+/* 双击看大图：序列帧缩略图太小，看不清动作与抠像质量 */
+.SPR_zoomMask{position:fixed;inset:0;z-index:80;background:rgba(10,12,16,.84);display:flex;align-items:center;justify-content:center;padding:28px;box-sizing:border-box;cursor:zoom-out}
+.SPR_zoomImg{max-width:92vw;max-height:82vh;object-fit:contain;image-rendering:pixelated;border-radius:8px;background-color:var(--dsw-alias-bg-layer-1);cursor:default;box-shadow:0 14px 44px rgba(0,0,0,.5)}
+.SPR_zoomClose{position:absolute;top:16px;right:20px;width:36px;height:36px;border-radius:999px;border:1px solid rgba(255,255,255,.34);background:rgba(28,32,40,.86);color:#fff;font-size:20px;line-height:1;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;padding:0}
+.SPR_zoomClose:hover{background:rgba(64,70,82,.96)}
+.SPR_zoomCaption{position:absolute;left:20px;right:20px;bottom:16px;text-align:center;color:#e9ebf1;font-size:12px}
+.SPR_input[data-dirty=true]{border-color:var(--dsw-alias-state-business-primary)}
+/* 阶段①的生成方式切换（转圈截帧为默认，逐方向生图为备选） */
+.SPR_modeBar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 10px}
+.SPR_modeBarLabel{font-size:12px;color:var(--dsw-alias-label-tertiary)}
+.SPR_mode{font:inherit;font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l2);border-radius:999px;padding:4px 12px;color:var(--dsw-alias-label-secondary)}
+.SPR_mode[data-active=true]{color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-state-business-primary);box-shadow:0 0 0 1px color-mix(in srgb, var(--dsw-alias-state-business-primary) 28%, transparent)}
+.SPR_modeTag{font-size:10px;line-height:14px;padding:0 5px;border-radius:999px;background:var(--dsw-alias-state-business-primary);color:#fff}
+.SPR_modeBarHint{font-size:11px;color:var(--dsw-alias-label-tertiary)}
+/* 转圈截帧的时间轴：缩略条带 + 八个可拖动的圆圈 */
+.SPR_axisWrap{margin:12px 0 4px}
+.SPR_axis{position:relative;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;background:var(--dsw-alias-bg-layer-1);padding:34px 0 8px;touch-action:none;user-select:none}
+.SPR_axis[data-dragging=true]{cursor:ew-resize}
+.SPR_axisStrip{display:block;width:100%;border-radius:6px;pointer-events:none;-webkit-user-drag:none}
+.SPR_axisDot{position:absolute;transform:translateX(-50%);min-width:30px;padding:2px 6px;display:flex;flex-direction:column;align-items:center;gap:0;font:inherit;font-size:11px;line-height:14px;cursor:grab;border:1px solid var(--dsw-alias-state-business-primary);border-radius:999px;background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-primary);box-shadow:0 1px 3px rgba(0,0,0,.22)}
+.SPR_axisDot:active{cursor:grabbing}
+.SPR_axisDot[data-active=true]{box-shadow:0 0 0 2px color-mix(in srgb, var(--dsw-alias-state-business-primary) 40%, transparent)}
+.SPR_axisDot[data-approved=true]{border-color:var(--dsw-alias-state-success-primary)}
+.SPR_axisDot[data-approved=true] .SPR_axisDotIndex{color:var(--dsw-alias-state-success-primary)}
+.SPR_axisDotLabel{font-weight:600;white-space:nowrap}
+.SPR_axisDotIndex{font-size:10px;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums}
+.SPR_axisRuler{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:11px;color:var(--dsw-alias-label-tertiary);margin-top:6px}
+.SPR_axisRulerMid{text-align:center}
 .SPR_modules{display:flex;gap:8px;padding:10px 18px;border-bottom:1px solid var(--dsw-alias-border-l2);flex:none;flex-wrap:wrap}
 .SPR_module{font:inherit;cursor:pointer;text-align:left;display:flex;flex-direction:column;gap:1px;padding:6px 12px;border-radius:10px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary)}
 .SPR_module:hover{background:var(--dsw-alias-interactive-bg-hover-solid)}
@@ -684,7 +722,32 @@
       );
     }
 
-    function NumField({ label, value, onChange, min, max, step }) {
+    /**
+     * 数字参数输入框。
+     *
+     * ★ 必须**在失焦 / 回车时才提交**，不能边打字边提交：宿主那边对每个参数
+     * 都会 clamp（单格宽最小 16、时长最小 4 秒…），敲一个字符就提交一次的话，
+     * 想输入「128」会在敲下「1」的瞬间被夹成 16、输入框随即被回包覆盖——
+     * 表现就是「数字总跳成别的值，根本没法输入」。所以这里本地存草稿文本，
+     * 只在 onBlur / Enter 时解析 + 夹取 + 回调，输入过程中一个远程调用都不发。
+     */
+    function NumField({ label, value, onChange, min, max, step, hint }) {
+      const [text, setText] = React.useState(String(value ?? ""));
+      const [focused, setFocused] = React.useState(false);
+      // 外部值变了（宿主回包、切换项目）而用户没在输入时，同步过来。
+      React.useEffect(() => {
+        if (!focused) setText(String(value ?? ""));
+      }, [value, focused]);
+      const commit = () => {
+        const parsed = Number(text);
+        if (text.trim() === "" || !Number.isFinite(parsed)) {
+          setText(String(value ?? ""));
+          return;
+        }
+        const clamped = Math.min(max ?? Number.POSITIVE_INFINITY, Math.max(min ?? Number.NEGATIVE_INFINITY, parsed));
+        setText(String(clamped));
+        if (clamped !== value) onChange(clamped);
+      };
       return h(
         "label",
         { className: "SPR_field" },
@@ -692,15 +755,34 @@
         h("input", {
           className: "SPR_input",
           type: "number",
-          value: value,
+          inputMode: "decimal",
+          value: text,
           min,
           max,
           step: step === undefined ? 1 : step,
-          onChange: (event) => {
-            const next = Number(event.target.value);
-            if (Number.isFinite(next)) onChange(next);
+          "data-dirty": focused && text !== String(value ?? "") ? "true" : undefined,
+          onChange: (event) => setText(event.target.value),
+          onFocus: (event) => {
+            setFocused(true);
+            // 光标落进来就全选：改参数基本都是整份替换，省一次三击。
+            try {
+              event.target.select?.();
+            } catch {
+              /* 个别浏览器对 number 输入框的 select 有限制，忽略即可 */
+            }
+          },
+          onBlur: () => {
+            setFocused(false);
+            commit();
+          },
+          onKeyDown: (event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              event.currentTarget.blur();
+            }
           }
-        })
+        }),
+        hint === undefined ? null : h("span", { className: "SPR_fieldLabel" }, hint)
       );
     }
 
@@ -744,6 +826,79 @@
       const base = project.assetBase ?? "";
       const suffix = version === undefined ? "" : `?v=${version}`;
       return `${base}${relative}${suffix}`;
+    }
+
+    /**
+     * 双击看大图的缩略图。
+     *
+     * 序列帧缩略图按格子尺寸显示（默认 256px、像素风还会更小），肉眼根本看不清
+     * 动作与抠像质量——双击弹出原图，右上角「×」、点背景、按 Esc 都能关。
+     * 遮罩用 position:fixed，所以它在卡片内部渲染也能盖住整页。
+     */
+    function ZoomableImage({ src, alt, className, caption, style }) {
+      const [open, setOpen] = React.useState(false);
+      React.useEffect(() => {
+        if (!open) return undefined;
+        const onKey = (event) => {
+          if (event.key === "Escape") setOpen(false);
+        };
+        if (typeof window !== "undefined") window.addEventListener("keydown", onKey);
+        return () => {
+          if (typeof window !== "undefined") window.removeEventListener("keydown", onKey);
+        };
+      }, [open]);
+      const openImage = (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        setOpen(true);
+      };
+      return h(
+        React.Fragment,
+        null,
+        h("img", {
+          className,
+          src,
+          alt,
+          style,
+          title: "双击看大图",
+          "data-zoomable": "true",
+          onDoubleClick: openImage
+        }),
+        open
+          ? h(
+              "div",
+              {
+                className: "SPR_zoomMask",
+                role: "dialog",
+                "aria-modal": "true",
+                "data-testid": "zoom-mask",
+                onClick: () => setOpen(false)
+              },
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "SPR_zoomClose",
+                  "aria-label": "关闭大图",
+                  title: "关闭（Esc）",
+                  "data-testid": "zoom-close",
+                  onClick: (event) => {
+                    event.stopPropagation();
+                    setOpen(false);
+                  }
+                },
+                "×"
+              ),
+              h("img", {
+                className: "SPR_zoomImg",
+                src,
+                alt,
+                onClick: (event) => event.stopPropagation()
+              }),
+              caption !== undefined && caption !== null ? h("div", { className: "SPR_zoomCaption" }, caption) : null
+            )
+          : null
+      );
     }
 
     // ── 「正在调用接口」的视觉反馈 ───────────────────────────────────────
@@ -982,7 +1137,11 @@
       }, [intent]);
 
       const busy = project !== null && ((project.jobs?.length ?? 0) > 0 ||
-        DIRECTION_KEYS.some((key) => project.videos?.[key]?.status === "running"));
+        DIRECTION_KEYS.some((key) => project.videos?.[key]?.status === "running") ||
+        // 转圈视频是「提交完就返回」的后台任务：kick 的那条记录在提交结束时就撤了，
+        // 之后只剩节点自己还是 running。不把它算进来，界面在几分钟的等视频期间
+        // 一次都不会刷新（宿主其实一直在轮询），看着就像卡住了。
+        project.turn?.video?.status === "running");
       // 轮询条件也要算上正在跑的这一次调用，否则点完按钮到 running 落盘之间不会刷新。
       const polling = busy || tasks.active;
 
@@ -1301,7 +1460,9 @@
                     "div",
                     { className: "SPR_card" },
                     h("div", { className: "SPR_cardHead" }, h("h3", null, activeStage.title)),
-                    h("p", { className: "SPR_hint" }, activeStage.hint),
+                    // 阶段①的说明跟着生成方式走：转圈截帧不是「八个方向各生成一次」，
+                    // 沿用逐方向生图那句话会让人以为走错了页面。
+                    h("p", { className: "SPR_hint" }, stageHint(project, stage, activeStage)),
                     stage === "images"
                       ? renderImageStage({
                           project,
@@ -1429,6 +1590,14 @@
       );
     }
 
+    /** 阶段卡片下方的说明文字（阶段①有两种生成方式，各说各的）。 */
+    function stageHint(project, stage, activeStage) {
+      if (stage === "images" && imageModeOf(project) === "turn") {
+        return "先生成一段「角色原地匀速转一整圈」的绿幕视频，再按时间截出八个方向的帧；下面时间轴上的八个圆圈就是各自的截帧位置，拖动即可改。";
+      }
+      return activeStage.hint;
+    }
+
     function stageDone(project, key) {
       if (key === "images") return DIRECTION_KEYS.every((k) => project.images?.[k]?.approved);
       if (key === "videos") return DIRECTION_KEYS.every((k) => project.videos?.[k]?.approved);
@@ -1444,8 +1613,478 @@
     const KEY_IMG_REGENERATE = "image:*regenerate";
     const KEY_PROMPT_RESET = "prompt:*reset";
 
+    // ── 阶段①的另一种生成方式：转圈截帧 ──────────────────────────────────
+    //
+    // 逐方向生图是八次独立调用，模型每次都要重新「理解」角色，脸型/发色/服装
+    // 容易在八个方向之间漂移。转圈截帧只生成**一段**「原地匀速转一整圈」的视频，
+    // 八个方向是它时间轴上的八个截帧位置——八个方向天生同源，一致性最好。
+    // 这条是默认路径，逐方向生图保留为备选（单张更清晰，但一致性看运气）。
+    const IMAGE_MODES = [
+      { key: "turn", title: "转圈截帧", hint: "先生成一段「原地匀速转一整圈」的视频，再按时间截出八个方向（默认，一致性最好）" },
+      { key: "direct", title: "逐方向生图", hint: "每个方向单独生图（备选：单张更清晰，但八个方向容易不一致）" }
+    ];
+    const KEY_TURN_VIDEO = "turn:*video";
+    const KEY_TURN_FRAMES = "turn:*frames";
+    const KEY_TURN_PICK = (key) => `turn:pick:${key}`;
+    const TURN_FRAME_MIN = 8;
+    const TURN_FRAME_MAX = 64;
+
+    /**
+     * 项目用的是哪种生成方式。
+     *
+     * 宿主 `normalizeProject` 一定会补齐 `imageMode`；这里再兜一层是给**渲染桩数据**
+     * 用的（测试里的项目对象不经过宿主），也是给「字段还不存在的老项目」用的：
+     * 已经有图就按逐方向生图走，否则走默认的转圈截帧。
+     */
+    function imageModeOf(project) {
+      if (project?.imageMode === "direct") return "direct";
+      if (project?.imageMode === "turn") return "turn";
+      const hasImages = DIRECTION_KEYS.some((key) => project?.images?.[key]?.file !== undefined);
+      return hasImages ? "direct" : "turn";
+    }
+
+    /** 方向的短名（轴上的圆圈放不下「西南 · 四分之三正面」这种长标签）。 */
+    function shortLabelOf(key) {
+      const label = LABEL_OF[key] ?? key;
+      return label.split(" · ")[0];
+    }
+
+    function clamp01(value) {
+      return Math.min(1, Math.max(0, value));
+    }
+
+    /** 阶段①的生成方式切换条。 */
+    function ImageModeBar({ project, api, start, mode }) {
+      return h(
+        "div",
+        { className: "SPR_modeBar" },
+        h("span", { className: "SPR_modeBarLabel" }, "生成方式"),
+        IMAGE_MODES.map((entry) =>
+          h(
+            "button",
+            {
+              key: entry.key,
+              type: "button",
+              className: "SPR_mode",
+              "data-active": mode === entry.key ? "true" : "false",
+              title: entry.hint,
+              "data-testid": `image-mode-${entry.key}`,
+              onClick: () =>
+                void start(() => api.setImageMode({ projectId: project.id, mode: entry.key }), { reload: true })
+            },
+            h("span", { className: "SPR_modeTitle" }, entry.title),
+            entry.key === "turn" ? h("span", { className: "SPR_modeTag" }, "默认") : null
+          )
+        ),
+        h("span", { className: "SPR_modeBarHint" }, (IMAGE_MODES.find((entry) => entry.key === mode) ?? IMAGE_MODES[0]).hint)
+      );
+    }
+
+    /**
+     * 八个截帧位置的时间轴。
+     *
+     * 轴底是整圈候选帧的缩略条带，「对着画面拖圆圈」是唯一不需要解释的交互——
+     * 拖到哪个位置，那个方向就切那一帧。松手才提交（拖动过程只改本地状态），
+     * 所以一次拖动最多只触发一次重切。方向键 ←/→ 也能逐个候选帧地微调。
+     */
+    function TurnAxis({ project, total, duration, picks, images, api, start, busy }) {
+      const trackRef = React.useRef(null);
+      // 拖动过程只改这份本地状态（圆圈跟着手走），松手才提交一次远程调用。
+      const [drag, setDrag] = React.useState(null);
+      const pickOf = (key) => {
+        if (drag !== null && drag.key === key) return drag.index;
+        return Math.min(total - 1, Math.max(0, Number(picks?.[key] ?? 0)));
+      };
+      const indexFromEvent = (event) => {
+        const node = trackRef.current;
+        if (node === null || total <= 0) return 0;
+        const rect = node.getBoundingClientRect();
+        if (rect.width <= 0) return 0;
+        const fraction = clamp01((event.clientX - rect.left) / rect.width);
+        return Math.min(total - 1, Math.max(0, Math.round(fraction * total - 0.5)));
+      };
+      const commit = (key, index) => {
+        const current = Math.min(total - 1, Math.max(0, Number(picks?.[key] ?? 0)));
+        if (index === current) return;
+        void start(
+          () => api.setTurnPick({ projectId: project.id, key, index }),
+          { reload: true },
+          { key: KEY_TURN_PICK(key), label: `正在切出「${LABEL_OF[key] ?? key}」第 ${index + 1} 帧…` }
+        );
+      };
+      const nudge = (key, delta) => {
+        const next = Math.min(total - 1, Math.max(0, Number(picks?.[key] ?? 0) + delta));
+        commit(key, next);
+      };
+
+      // 两个方向被拖到同一帧时会叠在一起，往上错一层；顺序不变，只是看起来分明。
+      const lanes = {};
+      const used = [];
+      [...DIRECTION_KEYS]
+        .map((key) => ({ key, index: pickOf(key) }))
+        .sort((a, b) => a.index - b.index)
+        .forEach((item) => {
+          let lane = 0;
+          while (used.some((slot) => slot.lane === lane && Math.abs(slot.index - item.index) < 2)) lane++;
+          used.push({ lane, index: item.index });
+          lanes[item.key] = lane;
+        });
+
+      return h(
+        "div",
+        { className: "SPR_axisWrap" },
+        h(
+          "div",
+          {
+            className: "SPR_axis",
+            ref: trackRef,
+            "data-dragging": drag === null ? undefined : "true",
+            onPointerMove: (event) => {
+              if (drag === null) return;
+              const index = indexFromEvent(event);
+              if (index !== drag.index) setDrag({ key: drag.key, index });
+            },
+            onPointerUp: (event) => {
+              if (drag === null) return;
+              const index = indexFromEvent(event);
+              const key = drag.key;
+              setDrag(null);
+              commit(key, index);
+            },
+            onPointerLeave: () => {
+              if (drag === null) return;
+              setDrag(null);
+            }
+          },
+          h("img", {
+            className: "SPR_axisStrip",
+            src: assetUrl(project, project.turn?.frames?.strip, project.turn?.frames?.updatedAt),
+            alt: "整圈候选帧",
+            draggable: false
+          }),
+          DIRECTION_KEYS.map((key) => {
+            const index = pickOf(key);
+            const approved = images?.[key]?.approved === true;
+            const active = drag !== null && drag.key === key;
+            const time = duration > 0 && total > 0 ? (index * duration) / total : 0;
+            return h(
+              "button",
+              {
+                key,
+                type: "button",
+                className: "SPR_axisDot",
+                "data-active": active ? "true" : "false",
+                "data-approved": approved ? "true" : "false",
+                "data-dragging": busy === true ? "true" : undefined,
+                "data-testid": `turn-dot-${key}`,
+                style: { left: `${((index + 0.5) / Math.max(1, total)) * 100}%`, top: `${6 + (lanes[key] ?? 0) * 26}px` },
+                title: `${LABEL_OF[key] ?? key}：第 ${index + 1}/${total} 帧（${time.toFixed(2)} 秒）— 拖动改位置，←/→ 微调`,
+                "aria-label": `${LABEL_OF[key] ?? key} 第 ${index + 1} 帧`,
+                onPointerDown: (event) => {
+                  event.preventDefault();
+                  setDrag({ key, index });
+                  try {
+                    event.currentTarget.setPointerCapture?.(event.pointerId);
+                  } catch {
+                    /* 指针捕获失败不影响拖动：move/up 挂在轴上 */
+                  }
+                },
+                onKeyDown: (event) => {
+                  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+                  event.preventDefault();
+                  nudge(key, event.key === "ArrowLeft" ? -1 : 1);
+                }
+              },
+              h("span", { className: "SPR_axisDotLabel" }, shortLabelOf(key)),
+              h("span", { className: "SPR_axisDotIndex" }, `${index + 1}`)
+            );
+          })
+        ),
+        h(
+          "div",
+          { className: "SPR_axisRuler" },
+          h("span", null, "0 秒"),
+          h(
+            "span",
+            { className: "SPR_axisRulerMid" },
+            total > 0
+              ? `共 ${total} 张候选帧 · 每张约 ${(duration / total).toFixed(2)} 秒 —— 拖动圆圈调整每个方向截在哪一帧`
+              : "还没有候选帧：先点「生成转圈视频」，视频到手会自动抽帧"
+          ),
+          h("span", null, `${duration.toFixed(2)} 秒`)
+        )
+      );
+    }
+
+    /** 转圈截帧：转圈视频 → 候选帧 → 八圆圈时间轴 → 八张方向图。 */
+    function TurnImageStage({ project, api, start, setNotice, tasks, savePrompts }) {
+      const video = project.turn?.video ?? {};
+      const frames = project.turn?.frames ?? {};
+      const total = Array.isArray(frames.frames) ? frames.frames.length : 0;
+      const duration = Number(frames.duration ?? 0);
+      const picks = frames.picks ?? {};
+      const [promptDraft, setPromptDraft] = React.useState(project.prompts?.turn ?? "");
+      const [countDraft, setCountDraft] = React.useState(null);
+      React.useEffect(() => {
+        setPromptDraft(project.prompts?.turn ?? "");
+      }, [project.prompts?.turn]);
+
+      const videoRunning = video.status === "running" || tasks.has(KEY_TURN_VIDEO);
+      const videoLabel = tasks.label(KEY_TURN_VIDEO) ?? (video.remoteStatus ?? "正在生成转圈视频…");
+      // 「在切帧」= 本地刚点下去 / 宿主那批抽帧还在跑。抽帧是 kick 型调用，
+      // 一提交就返回，真正的活（抽 32 张 + 切 8 张图）在后台，所以两者都要看。
+      const hostFrames = hostJob(project, "turn:frames");
+      const cutting = frames.status === "running" || tasks.has(KEY_TURN_FRAMES) || hostFrames !== undefined;
+      const cutLabel = tasks.label(KEY_TURN_FRAMES) ?? (frames.status === "running" ? "正在抽取候选帧…" : "正在抽取候选帧并切出八个方向…");
+      const promptDirty = promptDraft !== (project.prompts?.turn ?? "");
+      const frameCount = Number(countDraft ?? project.settings?.turnFrameCount ?? 32);
+      const allApproved = DIRECTION_KEYS.every((key) => project.images?.[key]?.approved);
+      const readyImages = DIRECTION_KEYS.filter((key) => project.images?.[key]?.file !== undefined).length;
+      const stale = frames.stale === true;
+
+      return h(
+        React.Fragment,
+        null,
+        h(
+          "p",
+          { className: "SPR_hint" },
+          "先生成一段「角色原地匀速转一整圈」的视频（绿幕、保持原图风格、除旋转外不做任何动作），再按时间截出八个方向的帧。八个方向出自同一段视频，一致性比逐方向生图好得多；下面时间轴上的八个圆圈就是各自的截帧位置，随便拖。"
+        ),
+        h("textarea", {
+          className: "SPR_area",
+          value: promptDraft,
+          "data-testid": "turn-prompt",
+          onChange: (event) => setPromptDraft(event.target.value)
+        }),
+        h(
+          "div",
+          { className: "SPR_toolbar" },
+          h(Btn, { disabled: !promptDirty, onClick: () => void savePrompts({ turn: promptDraft }) }, promptDirty ? "保存转圈提示词" : "转圈提示词已保存"),
+          h(
+            Btn,
+            {
+              onClick: () =>
+                void start(() => api.savePrompts({ projectId: project.id, resetTurnToDefault: true }), {
+                  reload: true,
+                  notice: "转圈提示词已重置为默认模板",
+                  noticeKind: "ok"
+                })
+            },
+            "重置为默认"
+          )
+        ),
+        h(
+          "div",
+          { className: "SPR_toolbar" },
+          h(
+            BusyBtn,
+            {
+              primary: video.file === undefined,
+              busy: tasks.has(KEY_TURN_VIDEO),
+              busyText: "正在提交…",
+              disabled: project.source === null || videoRunning,
+              onClick: () =>
+                void start(() => api.runTurnVideo({ projectId: project.id }), { reload: true }, {
+                  key: KEY_TURN_VIDEO,
+                  label: "正在提交转圈视频任务…"
+                })
+            },
+            video.file === undefined
+              ? "生成转圈视频（计费一次）"
+              : videoRunning
+                ? "转圈视频生成中…"
+                : "重新生成转圈视频（计费一次）"
+          ),
+          h(
+            BusyBtn,
+            {
+              busy: tasks.has(KEY_TURN_FRAMES),
+              busyText: "正在抽帧…",
+              disabled: video.file === undefined || cutting,
+              onClick: () =>
+                void start(() => api.runTurnFrames({ projectId: project.id }), { reload: true }, {
+                  key: KEY_TURN_FRAMES,
+                  label: "正在抽取候选帧并切出八个方向…"
+                })
+            },
+            total > 0 ? `重新抽帧（当前 ${total} 张）` : "抽取候选帧"
+          ),
+          h(NumField, {
+            label: "候选帧数（8~64）",
+            value: frameCount,
+            min: TURN_FRAME_MIN,
+            max: TURN_FRAME_MAX,
+            onChange: (value) => setCountDraft(value)
+          }),
+          h(
+            BusyBtn,
+            {
+              busy: tasks.has(KEY_TURN_FRAMES),
+              busyText: "正在抽帧…",
+              disabled: video.file === undefined || cutting || countDraft === null || countDraft === project.settings?.turnFrameCount,
+              onClick: () =>
+                void start(() => api.runTurnFrames({ projectId: project.id, count: frameCount }), { reload: true, notice: `已按 ${frameCount} 张重抽候选帧`, noticeKind: "ok" }, {
+                  key: KEY_TURN_FRAMES,
+                  label: `正在按 ${frameCount} 张重抽候选帧…`
+                })
+            },
+            "应用帧数"
+          ),
+          h("span", { className: "SPR_refRow" }, project.settings?.turnFrameCount === frameCount ? `当前 ${project.settings?.turnFrameCount ?? "—"} 张` : `未应用（当前 ${project.settings?.turnFrameCount ?? "—"} 张）`)
+        ),
+        h(
+          "div",
+          { className: "SPR_toolbar" },
+          h(
+            Btn,
+            {
+              disabled: total === 0 || cutting,
+              onClick: () =>
+                void start(() => api.resetTurnPicks({ projectId: project.id }), { reload: true, notice: "八个圆圈已回到默认等分位置", noticeKind: "ok" })
+            },
+            "重置八个圆圈"
+          ),
+          h(
+            Btn,
+            {
+              disabled: total === 0 || cutting,
+              title: "转圈方向决定默认位置怎么排；拖动过的圆圈以你的位置为准",
+              onClick: () =>
+                void start(() => api.resetTurnPicks({ projectId: project.id, direction: project.turn?.direction === "ccw" ? "cw" : "ccw" }), {
+                  reload: true,
+                  notice: project.turn?.direction === "ccw" ? "已改为顺时针并重排八个圆圈" : "已改为逆时针并重排八个圆圈",
+                  noticeKind: "ok"
+                })
+            },
+            project.turn?.direction === "ccw" ? "转圈方向：逆时针（点一下换向）" : "转圈方向：顺时针（点一下换向）"
+          ),
+          h(
+            Btn,
+            {
+              on: allApproved,
+              disabled: readyImages === 0,
+              onClick: () => void start(() => api.setApproved({ projectId: project.id, stage: "images", approved: !allApproved }), { reload: true })
+            },
+            allApproved ? "取消全部通过" : "全部标记通过"
+          ),
+          h(BusyBadge, { show: videoRunning || cutting, text: videoRunning ? videoLabel : cutLabel })
+        ),
+        video.file !== undefined
+          ? h(
+              "div",
+              { className: "SPR_videoWrap" },
+              h(MediaBox, {
+                overlay: videoRunning,
+                text: videoLabel,
+                children: h("video", {
+                  className: "SPR_video SPR_videoTurn",
+                  src: assetUrl(project, video.file, video.updatedAt),
+                  controls: true,
+                  preload: "metadata",
+                  "data-testid": "turn-video"
+                })
+              })
+            )
+          : h(
+              "div",
+              { className: "SPR_thumbEmpty", style: { aspectRatio: "16/9" } },
+              videoRunning ? "正在生成转圈视频…" : "还没有转圈视频：点上面的「生成转圈视频」"
+            ),
+        video.error !== undefined ? h("p", { className: "SPR_error" }, video.error) : null,
+        h(
+          "div",
+          { className: "SPR_refRow" },
+          `首帧用的是${video.firstFrame !== undefined && String(video.firstFrame).startsWith("images/") ? "已生成的正面绿幕图" : "上传的源图"}：${video.firstFrame ?? "—"}`
+        ),
+        total > 0
+          ? h(TurnAxis, {
+              project,
+              total,
+              duration,
+              picks,
+              images: project.images,
+              api,
+              start,
+              busy: cutting
+            })
+          : h(
+              "div",
+              { className: "SPR_thumbEmpty", style: { marginTop: 10 } },
+              cutting ? "正在抽取候选帧…" : stale ? "候选帧已过期（转圈视频换过了）：点「重新抽帧」" : "还没有候选帧"
+            ),
+        frames.error !== undefined ? h("p", { className: "SPR_error" }, frames.error) : null,
+        h(
+          "div",
+          { className: "SPR_grid", style: { marginTop: 12 } },
+          DIRECTION_KEYS.map((key) => {
+            const node = project.images?.[key];
+            const index = Math.min(Math.max(0, total - 1), Math.max(0, Number(picks[key] ?? 0)));
+            const queued = (tasks.has(KEY_TURN_FRAMES) || jobCovers(hostFrames, key)) && node?.status !== "error";
+            const nodeBusy = node?.status === "running" || tasks.has(KEY_TURN_PICK(key)) || queued;
+            const overlayText = tasks.label(KEY_TURN_PICK(key)) ?? (queued ? cutLabel : "正在切出这一帧…");
+            return h(
+              "div",
+              { key, className: "SPR_node", "data-busy": nodeBusy ? "true" : undefined },
+              h(
+                "div",
+                { className: "SPR_nodeTop" },
+                h("span", { className: "SPR_nodeTitle" }, LABEL_OF[key] ?? key),
+                nodeBusy ? h(Chip, { kind: "running", text: "切帧中" }) : h(StatusChip, { node })
+              ),
+              node?.file !== undefined
+                ? h(
+                    MediaBox,
+                    { overlay: nodeBusy, text: overlayText },
+                    h("img", { className: "SPR_thumb", src: assetUrl(project, node.file, node.updatedAt ?? project.updatedAt), alt: LABEL_OF[key] ?? key })
+                  )
+                : h("div", { className: "SPR_thumbEmpty" }, nodeBusy ? "正在切出这一帧…" : "还没有这一方向的图"),
+              node?.error !== undefined ? h("p", { className: "SPR_error" }, node.error) : null,
+              h(
+                "span",
+                { className: "SPR_refRow" },
+                total > 0
+                  ? `第 ${index + 1}/${total} 帧 · ${((index * duration) / Math.max(1, total)).toFixed(2)} 秒`
+                  : "等待候选帧"
+              ),
+              h(
+                "div",
+                { className: "SPR_btnRow" },
+                h(
+                  Btn,
+                  {
+                    disabled: node?.status !== "ready" || nodeBusy,
+                    on: node?.approved === true,
+                    onClick: () =>
+                      void start(() =>
+                        api.setApproved({
+                          projectId: project.id,
+                          stage: "images",
+                          key,
+                          approved: node?.approved !== true
+                        }), { reload: true })
+                  },
+                  node?.approved === true ? "已通过" : "通过"
+                )
+              )
+            );
+          })
+        )
+      );
+    }
+
     function renderImageStage(ctx) {
       const { project, api, promptDraft, setPromptDraft, promptOpen, setPromptOpen, savePrompts, start, setNotice, tasks } = ctx;
+      const mode = imageModeOf(project);
+      const modeBar = h(ImageModeBar, { project, api, start, mode });
+      // 转圈截帧（默认）：整条链路都在 TurnImageStage 里，产物同样是 images/<方向>.png。
+      if (mode === "turn") {
+        return h(
+          React.Fragment,
+          null,
+          modeBar,
+          h(TurnImageStage, { project, api, start, setNotice, tasks, savePrompts })
+        );
+      }
       const allApproved = DIRECTION_KEYS.every((key) => project.images?.[key]?.approved);
       // 「一键生成全部」/「全部重新生成」提交后，八个方向都可能要重出图，
       // 在宿主状态回来之前先整体盖住，别让用户以为按钮没生效。
@@ -1460,6 +2099,7 @@
       return h(
         React.Fragment,
         null,
+        modeBar,
         h(
           "div",
           { className: "SPR_toolbar" },
@@ -1894,7 +2534,12 @@
             onChange: (value) => saveSettings({ concurrency: value })
           })
         ),
-        h("p", { className: "SPR_hint" }, "抽帧抽到的是「工作尺寸」（长边上限），不是最终格子尺寸。自动裁剪、统一缩放和像素量化都在第 4 步做，这样八个方向才能共享同一个裁剪框、脚底对齐同一条基线。改完这里需要重新抽帧。"),
+        h(
+          "p",
+          { className: "SPR_hint" },
+          "抽帧抽到的是「工作尺寸」（长边上限），不是最终格子尺寸。自动裁剪、统一缩放和像素量化都在第 4 步做，这样八个方向才能共享同一个裁剪框、脚底对齐同一条基线。改完这里需要重新抽帧。" +
+            "预览带是**双击看大图**：格子尺寸只有 256px，看不清动作和抠像质量。"
+        ),
         h(
           "div",
           { className: "SPR_toolbar" },
@@ -1951,7 +2596,12 @@
                 ? h(
                     MediaBox,
                     { overlay: nodeBusy, text: overlayText },
-                    h("img", { className: "SPR_thumb", src: assetUrl(project, node.strip, node.updatedAt), alt: `${direction.label} 序列帧` })
+                    h(ZoomableImage, {
+                      className: "SPR_thumb",
+                      src: assetUrl(project, node.strip, node.updatedAt),
+                      alt: `${direction.label} 序列帧`,
+                      caption: `${direction.label} · ${node.frames?.length ?? 0} 帧 · 视频 ${(node.duration ?? 0).toFixed(2)} 秒（点「×」/ 背景 / Esc 关闭）`
+                    })
                   )
                 : h(
                     "div",
@@ -2012,10 +2662,15 @@
     function renderSheetStage(ctx) {
       const { project, settingsDraft, setSettingsDraft, saveSettings, start, api, tasks } = ctx;
       const draft = settingsDraft ?? project.settings ?? {};
+      // 用户会问「第 3 步不是已经抠过了吗」，所以这里把两处抠像的分工讲清楚：
+      // 第 3 步抠的是**每个方向的预览带**（顺手把整图也合出来），第 4 步在同样的
+      // 帧缓存上重抠一遍，只是为了让上面那十个参数改完立刻生效、不必重新抽帧。
+      // 两处读的是同一份 raw.bin、同一套参数，所以结果永远一致。
       const rowOrder = Array.isArray(draft.rowOrder) && draft.rowOrder.length > 0 ? draft.rowOrder : DIRECTION_KEYS;
       const framesReady = DIRECTION_KEYS.filter((key) => project.frames?.[key]?.status === "ready").length;
       // 合成整图是本地 CPU 重活，宿主侧会标 running；重抠像同样走这个状态。
       const composing = project.sheet?.status === "running" || tasks.has(KEY_SHEET_COMPOSE) || tasks.has(KEY_SHEET_REKEY);
+      const keyed = project.sheet?.backgroundFraction;
       const composeLabel = tasks.label(KEY_SHEET_REKEY) ?? tasks.label(KEY_SHEET_COMPOSE) ?? "正在抠绿幕并合成整图…";
 
       const moveRow = (index, delta) => {
@@ -2032,6 +2687,12 @@
       return h(
         React.Fragment,
         null,
+        h(
+          "p",
+          { className: "SPR_hint" },
+          "抠像在这里会**再跑一次**：第 3 步那次抠的是每个方向的预览带（顺便把整图合出来），这里重抠是为了让下面这些参数改完立刻生效——两次读的是同一份帧缓存（raw.bin）、同一套参数，所以结果一致。" +
+            "改完参数会自动重新抠像并合成整图，不需要重新抽帧。"
+        ),
         h(
           "div",
           { className: "SPR_fields" },
@@ -2248,16 +2909,21 @@
                   h(
                     "p",
                     { className: "SPR_hint" },
-                    `输出 ${project.sheet.width}×${project.sheet.height} 像素 · 单格 ${draft.cellWidth}×${draft.cellHeight} · 每行 ${draft.frameCount ?? 8} 帧`
+                    `输出 ${project.sheet.width}×${project.sheet.height} 像素 · 单格 ${draft.cellWidth}×${draft.cellHeight} · 每行 ${draft.frameCount ?? 8} 帧` +
+                      (keyed === undefined ? "" : ` · 抠掉的背景占 ${(keyed * 100).toFixed(1)}%`) +
+                      ((project.sheet?.borderSamplesDropped ?? 0) > 0
+                        ? ` · 边框采样排除了 ${project.sheet.borderSamplesDropped} 个不属于背景主色的点（角色贴边）`
+                        : "")
                   ),
                   h(
                     "div",
                     { className: "SPR_sheetWrap", style: { position: "relative" } },
-                    h("img", {
+                    h(ZoomableImage, {
                       className: "SPR_sheet",
                       src: assetUrl(project, project.sheet.file, project.sheet.generatedAt),
                       alt: "整图",
-                      style: { visibility: composing ? "hidden" : undefined }
+                      style: { visibility: composing ? "hidden" : undefined },
+                      caption: `整图 ${project.sheet.width}×${project.sheet.height} · 单格 ${draft.cellWidth}×${draft.cellHeight}（点「×」/ 背景 / Esc 关闭）`
                     }),
                     h(LoadingOverlay, { show: composing, text: composeLabel, sub: "本地抠像 + 合成，不上传" })
                   )
@@ -3519,7 +4185,15 @@
                       : h(
                           "div",
                           { className: "SPR_frames" },
-                          frameUrls.map((url, index) => h("img", { key: index, className: "SPR_frame", src: url, alt: `第 ${index + 1} 帧` }))
+                          frameUrls.map((url, index) =>
+                            h(ZoomableImage, {
+                              key: index,
+                              className: "SPR_frame",
+                              src: url,
+                              alt: `第 ${index + 1} 帧`,
+                              caption: `第 ${index + 1} / ${frameUrls.length} 帧（点「×」/ 背景 / Esc 关闭）`
+                            })
+                          )
                         )
                   ),
                   h(
@@ -7547,6 +8221,13 @@
         revealProject: (payload) => call("revealProject", payload),
         runImage: (payload) => call("runImage", payload),
         runImages: (payload) => call("runImages", payload),
+        setImageMode: (payload) => call("setImageMode", payload),
+        runTurnVideo: (payload) => call("runTurnVideo", payload),
+        runTurnFrames: (payload) => call("runTurnFrames", payload),
+        setTurnPick: (payload) => call("setTurnPick", payload),
+        setTurnPicks: (payload) => call("setTurnPicks", payload),
+        resetTurnPicks: (payload) => call("resetTurnPicks", payload),
+        cutTurnFrames: (payload) => call("cutTurnFrames", payload),
         runVideos: (payload) => call("runVideos", payload),
         pollVideos: (payload) => call("pollVideos", payload),
         clearVideos: (payload) => call("clearVideos", payload),
@@ -7688,7 +8369,7 @@
     bundleModule.exports.GAME_STUDIO_PANEL_ID = GAME_STUDIO_PANEL_ID;
     // 仅测试用把手：三个模块组件在工厂闭包里，脚本要能拿出来单独渲染
     // （见 scripts/verify-feedback.mjs）。运行时没有任何调用点。
-    bundleModule.exports.__test = { StudioPanel, ImageModule, SequenceModule, usePendingTasks, LoadingOverlay, MediaBox, BusyBtn, BusyBadge, CSS, subscribeIntent, parseIntents, openStudioIntent, OPEN_QUERY_KEY };
+    bundleModule.exports.__test = { StudioPanel, ImageModule, SequenceModule, usePendingTasks, LoadingOverlay, MediaBox, BusyBtn, BusyBadge, NumField, ZoomableImage, CSS, subscribeIntent, parseIntents, openStudioIntent, OPEN_QUERY_KEY };
     return bundleModule.exports;
   }
 });

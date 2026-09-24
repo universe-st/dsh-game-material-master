@@ -130,6 +130,19 @@ function spriteSnapshot(project: any) {
   const approved = (cells: DirectionCell[]) => cells.filter((cell) => cell.approved).length;
 
   const images = cellsOf(project.images, assetBase, (node) => ({ file: node.file }));
+  // 转圈模式下每张方向图都是「第几帧」切出来的：验收包带上这个下标，
+  // agent 才说得清「正面那帧截早了」这类问题，也才知道 setTurnPick 该往哪调。
+  if (project.imageMode === "turn") {
+    const total = project.turn?.frames?.frames?.length ?? 0;
+    const duration = Number(project.turn?.frames?.duration ?? 0);
+    for (const cell of images as any[]) {
+      if (total <= 0) continue;
+      const index = Math.min(total - 1, Math.max(0, Number(project.turn?.frames?.picks?.[cell.direction] ?? 0)));
+      cell.frameIndex = index;
+      cell.frameTotal = total;
+      cell.frameSeconds = Number(((index * duration) / total).toFixed(2));
+    }
+  }
   const videos = cellsOf(project.videos, assetBase, (node) => ({ file: node.file }));
   const frames = cellsOf(project.frames, assetBase, (node) => ({ file: node.strip, extra: { frameCount: node.frames?.length ?? 0 } }));
   const sheetCell: DirectionCell[] = [
@@ -141,6 +154,11 @@ function spriteSnapshot(project: any) {
       stale: false,
       file: project.sheet?.file,
       url: assetUrl(assetBase, project.sheet?.file),
+      // 抠像诊断：背景占比偏低 / 边框采样被大量排除，都是「抠歪了」的信号。
+      ...(typeof project.sheet?.backgroundFraction === "number" ? { backgroundFraction: project.sheet.backgroundFraction } : {}),
+      ...(typeof project.sheet?.borderSamplesDropped === "number" && project.sheet.borderSamplesDropped > 0
+        ? { borderSamplesDropped: project.sheet.borderSamplesDropped, borderSamples: project.sheet.borderSamples }
+        : {}),
       ...(typeof project.sheet?.error === "string" && project.sheet.error !== "" ? { error: project.sheet.error } : {})
     }
   ];
@@ -152,6 +170,29 @@ function spriteSnapshot(project: any) {
     sourceFile: project.source?.file ?? null,
     reviewMode: project.reviewMode ?? null,
     busy,
+    /**
+     * 阶段①的生成方式与它的转圈状态。
+     *
+     * 转圈模式下「八个方向图」不是八个节点各自生成的，而是同一段视频的八个
+     * 截帧位置——验收包里必须把视频、缩略条带和八个位置一起给出来，
+     * 否则 agent 看不到「圈转没转对」，只能对着一张张方向图猜。
+     */
+    imageMode: project.imageMode ?? "turn",
+    turn: {
+      direction: project.turn?.direction ?? "cw",
+      videoStatus: project.turn?.video?.status ?? "empty",
+      videoUrl: assetUrl(assetBase, project.turn?.video?.file),
+      firstFrame: project.turn?.video?.firstFrame ?? null,
+      remoteStatus: project.turn?.video?.remoteStatus ?? null,
+      error: project.turn?.video?.error ?? null,
+      framesStatus: project.turn?.frames?.status ?? "empty",
+      stripUrl: assetUrl(assetBase, project.turn?.frames?.strip),
+      frameCount: project.turn?.frames?.frames?.length ?? 0,
+      duration: project.turn?.frames?.duration ?? null,
+      stale: project.turn?.frames?.stale === true
+    },
+    /** 八个方向各自截在第几帧（转圈模式专用；逐方向生图时是空的）。 */
+    turnPicks: project.imageMode === "turn" ? { ...(project.turn?.frames?.picks ?? {}) } : {},
     stages: [
       { stage: "images", title: "① 八方向绿幕图", ready: count(images, "ready"), running: count(images, "running"), error: count(images, "error"), approved: approved(images), total: 8, cells: images },
       { stage: "videos", title: "② 行走动作视频", ready: count(videos, "ready"), running: count(videos, "running"), error: count(videos, "error"), approved: approved(videos), total: 8, cells: videos },
@@ -303,15 +344,21 @@ function intentFromCall(method: string, payload: Record<string, any>): OpenInten
 
 // ── 工具注册 ────────────────────────────────────────────────────────────
 
-/** `game_material_call` 的描述：把 45 个方法的用途与入参写清楚。 */
+/** `game_material_call` 的描述：把每个远程方法的用途与入参写清楚。 */
 const CALL_DESCRIPTION = [
   "调用「游戏素材大师」插件的任意远程方法——插件界面上的每个功能都能在这里调用。",
   "配置：getConfig() / saveConfig(payload: 任意配置字段，如 arkApiKey、arkModel、minimaxModel、cellWidth…) / testArk() / testMinimax()",
   "八方向图：listProjects() / createProject({name}) / getProject({projectId}) / deleteProject({projectId}) / renameProject({projectId,name}) /",
-  "  uploadSource({projectId,name,data:base64}) / savePrompts({projectId,images?,video?,videoPerDirection?,suffix?,resetImagesToDefault?,resetVideoToDefault?}) /",
+  "  uploadSource({projectId,name,data:base64}) / savePrompts({projectId,images?,video?,turn?,videoPerDirection?,suffix?,resetImagesToDefault?,resetVideoToDefault?,resetTurnToDefault?}) /",
   "  saveSettings({projectId,settings}) / setApproved({projectId,stage:images|videos|frames|sheet,key?,approved}) / revealProject({projectId}) /",
   "  runImage({projectId,key,prompt?}) / runImages({projectId,force?}) / runVideos({projectId,keys?,regenerate?}) / pollVideos({projectId}) /",
   "  clearVideos({projectId,keys?}) / runFrames({projectId,keys?}) / rekey({projectId}) / compose({projectId})",
+  "阶段①「八方向绿幕图」有两种生成方式（默认转圈截帧）：",
+  "  setImageMode({projectId,mode:turn|direct})【turn=转圈截帧（默认）：先生成一段「原地匀速转一整圈」的视频，再按时间截出八个方向，一致性好；direct=逐方向生图（备选）】/",
+  "  runTurnVideo({projectId})【★花钱：一次 MiniMax 调用，整圈只有这一段视频】/ runTurnFrames({projectId,count?})【本地 ffmpeg 抽候选帧并切出八张方向图，免费】/",
+  "  setTurnPick({projectId,key,index})【改某个方向的截帧位置（圆圈拖动），只重切那一张】/ setTurnPicks({projectId,picks:{front:index,…}})【看完整圈条带后整份写回】/",
+  "  resetTurnPicks({projectId,direction?cw|ccw})【八个位置回到默认等分；direction 决定左右斜向怎么排】/ cutTurnFrames({projectId,keys?})",
+  "  转圈模式的产物就是 images/<方向>.png（与逐方向生图完全相同），所以阶段②③④不用换做法。",
   "图片生成：listImageJobs() / createImageJob({name}) / getImageJob({jobId}) / deleteImageJob({jobId}) /",
   "  saveImageJob({jobId,name?,prompt?,suffix?,settings?,keying?,approved?,index?}) / uploadImageRef({jobId,name,data}) / removeImageRef({jobId,file}) /",
   "  addImageItem({jobId,name,data}) / removeImageItem({jobId,index}) / runImageJob({jobId,count?}) / keyImageJob({jobId})",
@@ -636,6 +683,11 @@ export function registerStudioTools(host: StudioToolHost, gateway: GameStudioGat
             ...entry,
             cells: entry.cells.filter((cell: any) => direction === undefined || cell.direction === direction)
           }));
+          // 转圈模式要审的不只是八张方向图：整圈视频转得对不对、缩略条带与八个
+          // 位置是不是落在该落的朝向上，都得能点开看。逐方向生图下这些是空的。
+          packet.imageMode = snapshot.imageMode;
+          packet.turn = snapshot.turn;
+          packet.turnPicks = snapshot.turnPicks;
           packet.nextActions = spriteNextActions(snapshot, stage, direction);
         } else if (module === "image") {
           const items = (snapshot.items as any[]).filter((item) => index === undefined || item.index === index);
@@ -764,6 +816,16 @@ const PROMPT_SECTION = [
   "序列帧是 video → frames → sheet；骨骼动画是 parts → layout → rig → atlas。每次提交类调用之后**立刻** `game_material_wait`。",
   "骨骼动画只有第 ① 步（runRigSheet）花钱，②③④ 都是本地计算，重跑不额外计费；装配失败时用 runRigLayout({jobId, names:[…]}) 只重跑那几个部件。",
   "",
+  "### 八方向图的第①步有两种生成方式（默认「转圈截帧」）",
+  "`getProject` 返回的 `imageMode` 决定这一步怎么做，产物都是 `images/<方向>.png`，第②③④步不变：",
+  "  · `turn`（默认）**转圈截帧**：`runTurnVideo({projectId})` 生成一段「角色原地匀速转一整圈」的绿幕视频（★一次 MiniMax 计费），",
+  "    视频到手后宿主**自动**抽候选帧并切出八个方向（本机 ffmpeg，免费）；",
+  "    八个方向的位置就是同一段视频的八个截帧下标，可以用 `setTurnPick({projectId,key,index})` 逐个调（只重切那一张），",
+  "    或 `resetTurnPicks({projectId,direction?'cw'|'ccw'})` 回到默认等分。八个方向同源，一致性最好。",
+  "    视频转得不对（转速不匀 / 动作太多 / 第一帧不是正面）时传 `runTurnVideo` 重做一次，别去调坐标。",
+  "  · `direct` **逐方向生图**（备选）：`runImages({projectId})` 按依赖顺序逐个生图，单张更清晰但八个方向容易不一致。",
+  "`setImageMode({projectId,mode:'turn'|'direct'})` 随时切换，两种方式的产物互不删除。",
+  "",
   "### 骨骼动画的自动摆位不准时：给「视觉先验」（重要）",
   "第 ② 步的自动定位是**纯几何匹配**，对「模型重画过的部件」（裙摆、袖子这类服装裁片）会失手：",
   "它在错误位置也可能拿到不低的分数。这时**你（agent）就是那个视觉模型**，去做一次语义对应：",
@@ -884,7 +946,8 @@ function intakeFor(module: ModuleKey, id: string, told: Set<string>, config: any
     known.默认每段抽帧数 = config?.frameCount;
     known.默认像素块 = config?.pixelSize;
     known.默认行序 = config?.rowOrder;
-    known.四个阶段 = "① 八方向绿幕图 → ② 行走动作视频 → ③ 提取序列帧 → ④ 抠绿幕合成整图";
+    known.阶段1两种生成方式 = "转圈截帧（默认）：一段「原地匀速转一整圈」的绿幕视频 → 按时间轴截出八个方向；逐方向生图（备选）：八个方向各自生图";
+    known.四个阶段 = "① 八方向绿幕图（转圈截帧 / 逐方向生图）→ ② 行走动作视频 → ③ 提取序列帧 → ④ 抠绿幕合成整图";
   }
   if (module === "image") {
     known.默认张数范围 = "1~8（Seedream 约 0.2 元/张）";
@@ -927,11 +990,23 @@ function intakeFor(module: ModuleKey, id: string, told: Set<string>, config: any
         "给我文件路径后我用 game_material_upload({module:'sprite', id, kind:'source', path}) 上传。"
       );
     }
+    // 阶段①有两条路，代价与产物形态完全不同，必须问清楚（默认转圈截帧）。
+    if (target?.imageMode !== undefined) {
+      known.阶段1生成方式 = target.imageMode === "turn" ? "转圈截帧（默认）" : "逐方向生图";
+    }
+    ask(
+      "generateMode",
+      "阶段①「八方向绿幕图」用哪种生成方式？默认是「转圈截帧」（先生成一段原地匀速转一整圈的绿幕视频，再按时间截出八个方向——八个方向同源、一致性最好，一次视频调用；位置可以在时间轴上拖）；也可以选「逐方向生图」（每个方向单独生图，单张更清晰，但八方向容易不一致，八次调用）。",
+      "这一步决定后面整条链路的产物形态与花费，先定下来再动手。",
+      "转圈截帧：setImageMode({projectId,mode:'turn'}) → runTurnVideo({projectId}) → game_material_wait（视频到手会自动抽帧切图）→ 需要时 setTurnPick({projectId,key,index}) 调位置；逐方向生图：setImageMode({projectId,mode:'direct'}) → runImages({projectId})。"
+    );
     if (target?.reviewMode) known.审核模式 = target.reviewMode;
     ask("suffix", "有没有跨方向都要遵守的统一要求？（例如「必须穿同一双靴子」「不要出现文字」；可留空）", "会追加到每一张生图提示词末尾，改一次八个方向全生效。", "用 game_material_call 的 savePrompts({projectId, suffix}) 保存。");
-    ask("scope", "八个方向全做，还是只做指定方向？", "只做部分方向能明显省钱省时间。", "开始生成时 runImage({projectId,key}) 做单个方向，runImages({projectId}) 做全部。");
+    if (target?.imageMode !== "turn") {
+      ask("scope", "八个方向全做，还是只做指定方向？", "只做部分方向能明显省钱省时间。", "开始生成时 runImage({projectId,key}) 做单个方向，runImages({projectId}) 做全部。");
+    }
     ask("tuning", "默认参数要改吗？（单格尺寸 / 每段抽帧数 / 像素块大小 / 行序 / 并发数；不改就用默认）", "这些决定了最终精灵图的规格。", "要改就用 saveSettings({projectId, settings})。");
-    ask("prompts", "每个方向的生图/视频提示词要用默认模板，还是你自己写？（默认模板已经把方位与可见部位写对了，建议先用默认）", "方位写错会导致八个方向看起来是抬头 / 低头而不是转身。", "要改就用 savePrompts。");
+    ask("prompts", "每个方向的生图/视频提示词要用默认模板，还是你自己写？（默认模板已经把方位与可见部位写对了，建议先用默认；转圈截帧对应的是「转圈视频提示词」）", "方位写错会导致八个方向看起来是抬头 / 低头而不是转身。", "要改就用 savePrompts。");
   }
 
   if (module === "image") {
@@ -1156,7 +1231,7 @@ function renderStatus(value: any): string {
   if (Array.isArray(value.projects)) {
     const lines = [
       `项目（${value.projects.length}）：`,
-      ...value.projects.map((p: any) => `  - ${p.id} ${p.name} — 图 ${p.imageReady}/8 · 视频 ${p.videoReady}/8 · 帧 ${p.framesReady}/8${p.sheetReady ? " · 整图✓" : ""}`),
+      ...value.projects.map((p: any) => `  - ${p.id} ${p.name} — 图 ${p.imageReady}/8 · 视频 ${p.videoReady}/8 · 帧 ${p.framesReady}/8${p.sheetReady ? " · 整图✓" : ""}${p.imageMode === "turn" ? " · 阶段①转圈截帧" : p.imageMode === "direct" ? " · 阶段①逐方向生图" : ""}`),
       `图片任务（${value.imageJobs.length}）：`,
       ...value.imageJobs.map((j: any) => `  - ${j.id} ${j.name} — ${j.ready}/${j.total} 张（抠像 ${j.keyed}）`),
       `序列帧任务（${value.sequenceJobs.length}）：`,
@@ -1175,6 +1250,25 @@ function renderStatus(value: any): string {
       lines.push(`  ${renderStageLine(stage)}`);
       // 骨骼动画：阶段名之后直接把产物 URL 贴上，否则用户点不到东西。
       for (const detail of renderRigStageDetail(stage)) lines.push(detail);
+    }
+  }
+  // 八方向图：阶段①的两种生成方式差异很大，状态里必须写明走的是哪条、
+  // 转圈视频与八个截帧位置各是什么——否则 agent 只能对着一张张方向图猜。
+  if (value.imageMode !== undefined && value.turn !== undefined) {
+    const turn = value.turn ?? {};
+    lines.push(`  阶段①生成方式：${value.imageMode === "turn" ? "转圈截帧（默认）" : "逐方向生图（备选）"}`);
+    if (value.imageMode === "turn") {
+      lines.push(
+        `  转圈视频：${turn.videoStatus ?? "empty"}${turn.remoteStatus ? `（${turn.remoteStatus}）` : ""}` +
+          `${turn.frameCount > 0 ? ` · 候选帧 ${turn.frameCount} 张 / 时长 ${Number(turn.duration ?? 0).toFixed(2)} 秒` : " · 还没有候选帧"}` +
+          `${turn.stale === true ? " · 候选帧已过期，需要重新抽帧" : ""}`
+      );
+      if (typeof turn.videoUrl === "string") lines.push(`  转圈视频地址：${turn.videoUrl}`);
+      if (typeof turn.stripUrl === "string") lines.push(`  整圈缩略条带：${turn.stripUrl}`);
+      const picks = value.turnPicks ?? {};
+      const pickKeys = Object.keys(picks);
+      if (pickKeys.length > 0) lines.push(`  八个截帧位置：${pickKeys.map((key) => `${key}=${picks[key]}`).join(" ")}`);
+      if (typeof turn.error === "string" && turn.error !== "") lines.push(`  转圈视频错误：${turn.error}`);
     }
   }
   if (Array.isArray(value.parts)) {
@@ -1269,11 +1363,35 @@ function spriteNextActions(snapshot: any, stage: string | undefined, direction: 
 
   const images = pick("images");
   if (images !== undefined && images.ready < images.total) {
-    actions.push(
-      snapshot.sourceFile === null
-        ? "还没有源图：先用 game_material_call({method:'uploadSource', payload:{projectId,name,data}}) 上传一张设定图"
-        : `绿幕图还差 ${images.total - images.ready} 张：game_material_call({method:'runImages', payload:{projectId}}) 然后 game_material_wait`
-    );
+    // 转圈截帧是默认路径，它的下一步与逐方向生图完全不同，提示必须分开写——
+    // 报错信息里点错方法，模型会照着 runImages 一路跑到「八个方向不一致」上去。
+    const turn = snapshot.turn ?? {};
+    if (snapshot.imageMode === "turn") {
+      if (turn.videoStatus !== "ready") {
+        actions.push(
+          snapshot.sourceFile === null
+            ? "还没有源图：先用 game_material_call({method:'uploadSource', payload:{projectId,name,data}}) 上传一张设定图"
+            : `转圈视频还没有：game_material_call({method:'runTurnVideo', payload:{projectId}}) 然后 game_material_wait（★花钱一次，约几分钟）；视频到手会自动抽候选帧并切出八个方向`
+        );
+      } else {
+        actions.push(
+          `转圈视频已就绪，还差 ${images.total - images.ready} 张方向图：game_material_call({method:'runTurnFrames', payload:{projectId}}) 然后 game_material_wait（本地免费）`
+        );
+      }
+      if (turn.frameCount > 0) {
+        actions.push(
+          `★ 先核对八个朝向：read_image 看 turn.stripUrl（整圈候选帧条带），确认每个方向落在第几帧——左侧脸/右侧脸反了就是转圈方向反了，` +
+            `用 resetTurnPicks({direction:'cw'|'ccw'}) 一键重排；模型起步/收尾减速（前几帧还停在正面）时用 ` +
+            `setTurnPicks({projectId, picks:{front:1, downRight:6, …}}) 整份写回（index 取 0…${Math.max(0, turn.frameCount - 1)}）`
+        );
+      }
+    } else {
+      actions.push(
+        snapshot.sourceFile === null
+          ? "还没有源图：先用 game_material_call({method:'uploadSource', payload:{projectId,name,data}}) 上传一张设定图"
+          : `绿幕图还差 ${images.total - images.ready} 张：game_material_call({method:'runImages', payload:{projectId}}) 然后 game_material_wait`
+      );
+    }
   }
   const videos = pick("videos");
   if (videos !== undefined && videos.ready < videos.total && (images === undefined || images.ready === images.total)) {

@@ -1,7 +1,8 @@
 /**
  * 端到端测试：用真实 API 跑完整条流水线。
  *
- *   node scripts/e2e-8dir.mjs --source /path/to/source.jpg          # 新建项目并生成八方向图
+ *   node scripts/e2e-8dir.mjs --source /path/to/source.jpg          # 新建项目并生成八方向图（逐方向生图）
+ *   node scripts/e2e-8dir.mjs --source /path/to/source.jpg --mode turn  # 走默认的「转圈截帧」：一段视频 → 截出八个方向
  *   node scripts/e2e-8dir.mjs --project <id> --from videos          # 从视频阶段续跑
  *   node scripts/e2e-8dir.mjs --project <id> --from frames          # 抽帧
  *   node scripts/e2e-8dir.mjs --project <id> --from sheet           # 合成整图
@@ -9,7 +10,13 @@
  * 分阶段是刻意的：图片阶段便宜且快，先看清像素风对不对，再决定要不要
  * 花掉八段视频的钱。项目数据写在真实 DSH_HOME 下，重启 DSH 后能直接在界面里看到。
  *
+ * 两种阶段①的跑法（--mode）：
+ *   direct（默认）八次 Seedream 生图，`--from images`；
+ *   turn   一次 MiniMax 转圈视频 + 本机截帧，`--from turn`。
+ * 转圈模式下「一张图都没生成」也能开跑——首帧直接用源图。
+ *
  * 用的是与线上完全相同的代码路径（真实 cordis Context 里挂载插件、调用远程服务）。
+ * 注意：这会真实计费（图片阶段约 0.2 元/张；视频阶段一段几分钟、按平台价格计费）。
  */
 
 import { readFile } from "node:fs/promises";
@@ -27,10 +34,16 @@ function arg(name, fallback) {
 }
 const SOURCE = arg("source", "/Users/kuangshensheng/Downloads/1104_S.jpg");
 const PROJECT = arg("project", "");
-const FROM = arg("from", "images");
+const MODE = arg("mode", "direct") === "turn" ? "turn" : "direct";
+const FROM = arg("from", MODE === "turn" ? "turn" : "images");
 const UNTIL = arg("until", "sheet");
-const ORDER = ["images", "videos", "frames", "sheet"];
-const shouldRun = (stage) => ORDER.indexOf(stage) >= ORDER.indexOf(FROM) && ORDER.indexOf(stage) <= ORDER.indexOf(UNTIL);
+const TURN_FRAMES = Number.parseInt(arg("turn-frames", "32"), 10);
+// 阶段①在两种模式下是不同的名字：images（逐方向生图）/ turn（转圈截帧）。
+// 两条路只跑一条——把用不上的那条留在顺序里会让默认的 direct 也顺手跑掉一次
+// 转圈视频（那是真花钱的一次调用）。
+const ORDER = MODE === "turn" ? ["turn", "videos", "frames", "sheet"] : ["images", "videos", "frames", "sheet"];
+const shouldRun = (stage) =>
+  ORDER.includes(stage) && ORDER.indexOf(stage) >= ORDER.indexOf(FROM) && ORDER.indexOf(stage) <= ORDER.indexOf(UNTIL);
 const CELL = Number.parseInt(arg("cell", "256"), 10);
 const FRAMES = Number.parseInt(arg("frames", "8"), 10);
 const DURATION = Number.parseInt(arg("duration", "5"), 10);
@@ -135,7 +148,11 @@ async function main() {
     });
     await studio.savePrompts({ projectId, images: directionalPrompts(), video: videoPrompt() });
     await studio.saveConfig({ minimaxResolution: RESOLUTION, minimaxDuration: DURATION, minimaxModel: "MiniMax-H3" });
+    // 阶段①的生成方式：新建项目默认就是 turn，这里显式写一次，让 --mode 名副其实。
+    await studio.setImageMode({ projectId, mode: MODE });
+    await studio.saveSettings({ projectId, settings: { turnFrameCount: TURN_FRAMES } });
     console.log(`参数：单格 ${CELL}×${CELL} / 每段 ${FRAMES} 帧 / 像素块 ${PIXEL}px / 视频 ${RESOLUTION} ${DURATION}s`);
+    console.log(`阶段①：${MODE === "turn" ? `转圈截帧（候选帧 ${TURN_FRAMES} 张）` : "逐方向生图"}`);
   }
   const effective = await studio.getConfig();
   if (PROJECT !== "" && RESET_PROMPTS) {
@@ -144,9 +161,46 @@ async function main() {
   }
   console.log(`\n项目 ${projectId}`);
   console.log(`视频实际配置   ${effective.minimaxModel} / ${effective.minimaxResolution} / ${effective.minimaxDuration}s`);
+  // 续跑已有项目时也要尊重 --mode：不写的话它会留在项目自己记录的那种方式上。
+  await studio.setImageMode({ projectId, mode: MODE });
+  console.log(`阶段①生成方式 ${MODE === "turn" ? "转圈截帧" : "逐方向生图"}`);
   console.log("方向对照：\n" + describeDirections());
 
-  // ── ① 八方向绿幕图 ────────────────────────────────────────────────────
+  // ── ①a 转圈截帧（默认生成方式）────────────────────────────────────────
+  if (shouldRun("turn")) {
+    console.log("\n① 转圈截帧：一段「原地匀速转一整圈」的绿幕视频 → 按时间截出八个方向");
+    const kicked = await studio.runTurnVideo({ projectId });
+    console.log(`  启动：${JSON.stringify(kicked)}`);
+    if (kicked.started !== true) throw new Error(`转圈视频未能启动：${kicked.reason}`);
+    // 视频落地后宿主会自动抽候选帧并切图，所以等到「没有任务在跑」为止。
+    const startedAt = Date.now();
+    let project = null;
+    for (;;) {
+      await sleep(8000);
+      project = await state(projectId);
+      const elapsed = Math.round((Date.now() - startedAt) / 1000);
+      console.log(
+        `  [turn] ${elapsed}s  视频 ${project.turn.video.status}${project.turn.video.remoteStatus ? `(${project.turn.video.remoteStatus})` : ""}` +
+          ` · 候选帧 ${project.turn.frames.frames.length}`
+      );
+      const busy = (project.jobs ?? []).length > 0 || project.turn.video.status === "running";
+      if (!busy && (project.turn.frames.status === "ready" || project.turn.frames.status === "error")) break;
+      if (Date.now() - startedAt > 40 * 60 * 1000) throw new Error("[turn] 等待超时");
+    }
+    if (project.turn.video.status === "error") throw new Error(`转圈视频失败：${project.turn.video.error}`);
+    if (project.turn.frames.status === "error") throw new Error(`截帧失败：${project.turn.frames.error}`);
+    project = await state(projectId);
+    console.log(`\n  候选帧 ${project.turn.frames.frames.length} 张 / 视频 ${Number(project.turn.frames.duration).toFixed(2)} 秒`);
+    for (const key of project.settings.rowOrder) {
+      const index = project.turn.frames.picks[key];
+      const node = project.images[key];
+      console.log(`    ${key.padEnd(10)} 第 ${String(index).padStart(2)}/${project.turn.frames.frames.length} 帧  ${node.status} ${node.file ?? ""}`);
+    }
+    console.log("  八个截帧位置不满意就用 setTurnPick / resetTurnPicks 调（本机重切，免费）");
+    console.log(`\n  产物目录：${config.dataRoot}/${projectId}/turn/`);
+  }
+
+  // ── ①b 八方向绿幕图（逐方向生图）──────────────────────────────────────
   if (shouldRun("images")) {
     console.log("\n① 生成八方向绿幕图（按依赖分层）");
     const kicked = await studio.runImages({ projectId });

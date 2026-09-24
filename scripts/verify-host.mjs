@@ -9,7 +9,8 @@
  * 这正是要验证的「错误能一路冒到节点状态里」。
  */
 
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:http";
@@ -63,7 +64,7 @@ async function main() {
   check("注册了一条 prefix 路由", captured.routes.length === 1 && captured.routes[0].kind === "prefix", JSON.stringify(captured.routes.map((r) => r.path)));
 
   const invocations = captured.manifest?.invocations ?? [];
-  check("manifest 方法数为 86", invocations.length === 86, `实际 ${invocations.length}`);
+  check("manifest 方法数为 93", invocations.length === 93, `实际 ${invocations.length}`);
   const ids = new Set(invocations.map((i) => i.id));
   check("方法 id 唯一", ids.size === invocations.length);
   check("所有方法都声明在 gameStudio 服务下", invocations.every((i) => i.service === "gameStudio" && i.namespace === "gameStudio"));
@@ -441,6 +442,21 @@ async function main() {
 
     const badId = await fetch(`${base}/../../../etc/hosts`);
     check("非法项目 id 被拒绝", badId.status === 400 || badId.status === 404, String(badId.status));
+
+    // 转圈截帧的候选帧与缩略条带同样走这条路由：白名单漏了 `turn/` 时，
+    // 轴上的八个圆圈会对着一条 403 的条带拖——界面只表现为「图裂了」，
+    // 不报任何错，所以这里必须真的取一次。
+    const { writeFile: writeProbe } = await import("node:fs/promises");
+    const { join: joinProbe } = await import("node:path");
+    await writeProbe(joinProbe(HOME, "game-material-master", "projects", projectId, "turn", "probe.png"), png);
+    const turnRes = await fetch(`${base}/${projectId}/turn/probe.png`);
+    check("转圈产物目录可访问（白名单含 turn/）", turnRes.status === 200, String(turnRes.status));
+    const nestedRes = await fetch(`${base}/${projectId}/turn/frames/probe.png`);
+    check(
+      "转圈候选帧的子目录也放行（只是文件不存在）",
+      nestedRes.status === 404,
+      `白名单要放行、文件不存在才是 404，实际 ${nestedRes.status}`
+    );
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
@@ -778,6 +794,240 @@ async function main() {
   } finally {
     await new Promise((resolve) => fakeGateway.close(resolve));
     await studio.saveConfig({ minimaxBaseUrl: "https://api.minimaxi.com", clearMinimaxApiKey: true });
+  }
+
+  // ── 9c. 阶段①的默认生成方式：转圈截帧 ─────────────────────────────────
+  //
+  // 与逐方向生图完全不同的链路：一段「原地匀速转一圈」的视频 → 匀抽候选帧 →
+  // 按八个截帧位置切出八张方向图。这里用本地合成的「转动」视频跑真实 ffmpeg，
+  // 不联网、不花钱，但把「位置改了要切出不同的帧」「下游要作废」全都测到。
+  console.log("9c) 转圈截帧（本地合成转圈视频，不调 API）");
+  {
+    const turnVideo = join(projectRoot, "videos", "turn.mp4");
+    // 一根竖条左右匀速扫动：不同时刻的画面不同，于是「不同截帧位置切出不同图」
+    // 可以被字节级断言（真实转圈视频当然也是每帧朝向不同）。
+    await ffmpeg([
+      "-hide_banner", "-loglevel", "error", "-y",
+      "-f", "lavfi", "-i", "color=c=0x00c040:s=160x160:d=2:r=12",
+      "-f", "lavfi", "-i", "color=c=0xff8800:s=24x90:d=2:r=12",
+      "-filter_complex", "[0][1]overlay=x='8+120*t/2':y='35'",
+      "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "ultrafast",
+      turnVideo
+    ]);
+    await patchProject(projectId, (project) => {
+      project.turn.video = { status: "ready", file: "videos/turn.mp4", approved: false, firstFrame: "source/hero.png" };
+    });
+
+    let turnState = await studio.getProject({ projectId });
+    check("新项目默认走转圈截帧", turnState.imageMode === "turn", String(turnState.imageMode));
+    check("转圈状态在项目里（视频 + 候选帧 + 八个位置）", turnState.turn?.frames?.picks?.front === 0, JSON.stringify(turnState.turn?.frames?.picks));
+
+    await expectThrow("没有转圈视频时拒绝抽候选帧", async () => {
+      await patchProject(projectId, (project) => {
+        project.turn.video = { status: "empty", approved: false };
+      });
+      return studio.runTurnFrames({ projectId });
+    }, "转圈视频");
+    await patchProject(projectId, (project) => {
+      project.turn.video = { status: "ready", file: "videos/turn.mp4", approved: false, firstFrame: "source/hero.png" };
+    });
+
+    const turnKick = await studio.runTurnFrames({ projectId, count: 16 });
+    check("抽转圈候选帧任务被接受", turnKick.started === true, JSON.stringify(turnKick));
+    const turnKicked = await studio.getProject({ projectId });
+    const turnJob = (turnKicked.jobs ?? []).find((job) => job.key === "turn:frames");
+    check("转圈抽帧任务公布了覆盖面", turnJob !== undefined, JSON.stringify(turnKicked.jobs));
+    check(
+      "覆盖面是八个方向（切完一个摘一个）",
+      Array.isArray(turnJob?.targets) && turnJob.targets.length === 8 && turnJob.targets.includes("front"),
+      JSON.stringify(turnJob?.targets)
+    );
+
+    let turnSettled = null;
+    for (let i = 0; i < 60; i++) {
+      await sleep(500);
+      const snapshot = await studio.getProject({ projectId });
+      const busy = (snapshot.jobs ?? []).some((job) => job.key === "turn:frames");
+      if (!busy && (snapshot.turn.frames.status === "ready" || snapshot.turn.frames.status === "error")) {
+        turnSettled = snapshot;
+        break;
+      }
+    }
+    check(
+      "候选帧抽取完成",
+      turnSettled?.turn.frames.status === "ready",
+      `${turnSettled?.turn.frames.status} ${turnSettled?.turn.frames.error ?? ""}`
+    );
+    check("候选帧张数 = 请求的 16", turnSettled?.turn.frames.rawFrameCount === 16, String(turnSettled?.turn.frames.rawFrameCount));
+    check("每张候选帧都有时间戳", turnSettled?.turn.frames.times.length === 16, String(turnSettled?.turn.frames.times.length));
+    check(
+      "时间戳按「第 i 帧 = i × 时长 / 张数」均匀分布",
+      Math.abs(turnSettled.turn.frames.times[1] - turnSettled.turn.frames.times[2] / 2) < 1e-6 &&
+        Math.abs(turnSettled.turn.frames.times[15] - (turnSettled.turn.frames.times[15] / 15) * 15) < 1e-6,
+      JSON.stringify(turnSettled?.turn.frames.times?.slice(0, 4))
+    );
+    // 默认转圈方向是 ccw（实测 MiniMax-H3 的转向），所以 45° 那一档先落在东南。
+    const expectedPicks = { front: 0, downRight: 2, right: 4, upRight: 6, back: 8, upLeft: 10, left: 12, downLeft: 14 };
+    check(
+      "八个位置按这次张数重新等分（不是按默认的 32 张算）",
+      Object.entries(expectedPicks).every(([key, value]) => turnSettled.turn.frames.picks[key] === value),
+      JSON.stringify(turnSettled.turn.frames.picks)
+    );
+    check(
+      "八个方向图都由截帧写出来",
+      Object.values(turnSettled.images).every((node) => node.status === "ready" && typeof node.file === "string"),
+      JSON.stringify(Object.fromEntries(Object.entries(turnSettled.images).map(([k, v]) => [k, v.status])))
+    );
+    check("候选帧条带落盘", turnSettled.turn.frames.strip === "turn/strip.png");
+    const stripBytes = await readFile(join(projectRoot, "turn", "strip.png"));
+    check("条带图非空", stripBytes.length > 100, `${stripBytes.length} 字节`);
+    check("抽帧完成写进日志", turnSettled.log.some((entry) => /候选帧抽取完成：16 张/.test(entry.message)));
+
+    // 不同朝向必须切到不同的帧——否则「八个圆圈」就是摆设。
+    const hashes = {};
+    for (const key of ["front", "back", "left", "right", "downLeft"]) {
+      hashes[key] = createHash("md5").update(await readFile(join(projectRoot, turnSettled.images[key].file))).digest("hex");
+    }
+    check("不同方向切到不同的帧", new Set(Object.values(hashes)).size === 5, Object.values(hashes).map((h) => h.slice(0, 6)).join(","));
+
+    // ── 拖动圆圈：只重切那一张，并把这一方向的下游作废 ────────────────────
+    await patchProject(projectId, (project) => {
+      project.videos.front = { status: "ready", file: "videos/front.mp4", approved: true };
+      project.frames.front = { status: "ready", frames: ["frames/front/f00.png"], keyed: [], approved: true, raw: "frames/front/raw.bin" };
+      project.sheet = { status: "ready", file: "out/sheet.png", approved: true };
+      project.images.front.approved = true;
+    });
+    const pickResult = await studio.setTurnPick({ projectId, key: "front", index: 5 });
+    check("拖动圆圈改位置成功", pickResult.changed === true && pickResult.index === 5, JSON.stringify(pickResult));
+    const afterPick = await studio.getProject({ projectId });
+    const frontHash = createHash("md5").update(await readFile(join(projectRoot, afterPick.images.front.file))).digest("hex");
+    check("正面图换成了新那一帧", frontHash !== hashes.front, `${frontHash.slice(0, 6)} vs ${hashes.front.slice(0, 6)}`);
+    check("只重切点名的方向（别的方向不动）", JSON.stringify(afterPick.turn.frames.picks.back) === "8", String(afterPick.turn.frames.picks.back));
+    check(
+      "这一方向的行走视频与序列帧被作废",
+      afterPick.videos.front.status === "empty" && afterPick.frames.front.status === "empty" && afterPick.frames.front.raw === undefined,
+      `${afterPick.videos.front.status} / ${afterPick.frames.front.status}`
+    );
+    check("整图被作废（避免混进旧朝向的帧）", afterPick.sheet.status === "empty", afterPick.sheet.status);
+    check("换过帧的方向要重新验收", afterPick.images.front.approved === false);
+    check(
+      "未点名的方向不受影响",
+      afterPick.videos.back.status === "ready" || afterPick.videos.back.status === "empty",
+      afterPick.videos.back.status
+    );
+
+    const noop = await studio.setTurnPick({ projectId, key: "front", index: 5 });
+    check("位置没变时不重复重切（也不作废下游）", noop.changed === false, JSON.stringify(noop));
+
+    const cutOne = await studio.cutTurnFrames({ projectId, keys: ["right"] });
+    check("可以只重切指定方向", cutOne.ok === true);
+
+    // 一次写多个位置（agent 看完整圈条带后整份写回）：只重切点名的方向，其余不动。
+    const bulk = await studio.setTurnPicks({ projectId, picks: { front: 1, downRight: 6 } });
+    check(
+      "可以一次写多个截帧位置",
+      bulk.picks.front === 1 && bulk.picks.downRight === 6 && bulk.picks.back === 8,
+      JSON.stringify(bulk.picks)
+    );
+    const afterBulk = await studio.getProject({ projectId });
+    check("整份写回只重切点名的方向", afterBulk.turn.frames.picks.front === 1 && afterBulk.videos.front.status === "empty");
+    await expectThrow("整份写回时未知方向被拒绝", () => studio.setTurnPicks({ projectId, picks: { nope: 1 } }), "未知方向");
+    await expectThrow("位置越界会被夹住（不是报错）", async () => {
+      const clamped = await studio.setTurnPick({ projectId, key: "front", index: 999 });
+      return clamped.index === 15 ? Promise.reject(new Error("__ok__")) : Promise.resolve(clamped);
+    }, "__ok__");
+    await expectThrow("未知方向拒绝", () => studio.setTurnPick({ projectId, key: "nope", index: 0 }), "未知方向");
+
+    // ── 转圈方向决定默认位置怎么排（顺时针/逆时针的左右斜向互换）────────────
+    await studio.resetTurnPicks({ projectId, direction: "ccw" });
+    const ccw = await studio.getProject({ projectId });
+    check(
+      "逆时针把东南/西南的位置互换",
+      ccw.turn.direction === "ccw" && ccw.turn.frames.picks.downLeft === 14 && ccw.turn.frames.picks.downRight === 2,
+      JSON.stringify(ccw.turn.frames.picks)
+    );
+    await studio.resetTurnPicks({ projectId, direction: "cw" });
+    const cw = await studio.getProject({ projectId });
+    check(
+      "顺时针换回来",
+      cw.turn.direction === "cw" && cw.turn.frames.picks.downLeft === 2 && cw.turn.frames.picks.downRight === 14,
+      JSON.stringify(cw.turn.frames.picks)
+    );
+
+    // ── 改候选帧数：位置按比例换算，而不是被压到最后一帧 ──────────────────
+    await studio.setTurnPick({ projectId, key: "front", index: 12 });
+    await studio.saveSettings({ projectId, settings: { turnFrameCount: 8 } });
+    let rescaled = null;
+    for (let i = 0; i < 60; i++) {
+      await sleep(500);
+      const snapshot = await studio.getProject({ projectId });
+      const busy = (snapshot.jobs ?? []).some((job) => job.key === "turn:frames");
+      if (!busy && snapshot.turn.frames.rawFrameCount === 8) {
+        rescaled = snapshot;
+        break;
+      }
+    }
+    check("改候选帧数后自动重抽", rescaled !== null, rescaled === null ? "超时未重抽" : "已重抽");
+    check("重抽后的张数生效", rescaled?.turn.frames.rawFrameCount === 8, String(rescaled?.turn.frames.rawFrameCount));
+    check(
+      "八个位置按比例换算（12/16 → 6/8）",
+      rescaled?.turn.frames.picks.front === 6,
+      JSON.stringify(rescaled?.turn.frames.picks)
+    );
+    check("工作尺寸类参数变化会把候选帧标成过期", (await studio.getProject({ projectId })).turn.frames.stale === false);
+
+    // ── 切换生成方式：产物一概不动 ────────────────────────────────────────
+    await studio.setImageMode({ projectId, mode: "direct" });
+    const switched = await studio.getProject({ projectId });
+    check("切到逐方向生图", switched.imageMode === "direct");
+    check("切换不删产物", Object.values(switched.images).every((node) => node.status === "ready"));
+    await expectThrow("未知生成方式被拒绝", () => studio.setImageMode({ projectId, mode: "nope" }), "未知生成方式");
+    await studio.setImageMode({ projectId, mode: "turn" });
+    check("切回转圈截帧", (await studio.getProject({ projectId })).imageMode === "turn");
+
+    // ── 转圈视频提交：错误要落到节点上（本地假网关，不联网）────────────────
+    const turnGateway = createServer((req, res) => {
+      req.resume();
+      res.writeHead(401, { "content-type": "application/json" });
+      res.end(JSON.stringify({ base_resp: { status_code: 1004, status_msg: "invalid api key (verify)" } }));
+    });
+    await new Promise((resolve) => turnGateway.listen(0, "127.0.0.1", resolve));
+    await studio.saveConfig({
+      minimaxApiKey: "fake-key-for-verification",
+      minimaxBaseUrl: `http://127.0.0.1:${turnGateway.address().port}`
+    });
+    try {
+      const videoKick = await studio.runTurnVideo({ projectId });
+      check("转圈视频提交被接受", videoKick.started === true, JSON.stringify(videoKick));
+      let videoSettled = null;
+      for (let i = 0; i < 40; i++) {
+        await sleep(500);
+        const snapshot = await studio.getProject({ projectId });
+        if (snapshot.turn.video.status === "error" || snapshot.turn.video.status === "ready") {
+          videoSettled = snapshot;
+          break;
+        }
+      }
+      check(
+        "假网关的 401 落到转圈视频节点上",
+        videoSettled?.turn.video.status === "error" && /提交视频任务失败/.test(videoSettled?.turn.video.error ?? ""),
+        `${videoSettled?.turn.video.status} ${videoSettled?.turn.video.error ?? ""}`.slice(0, 110)
+      );
+      // 转圈模式的输入是「一张图」：必须记下模型实际看到的是哪张。
+      check(
+        "记下了这一段视频用的首帧（优先已生成的正面绿幕图）",
+        videoSettled?.turn.video.firstFrame === "images/front.png",
+        String(videoSettled?.turn.video.firstFrame)
+      );
+      check("转圈视频的提示词用的是转圈模板", /旋转满一整圈/.test(videoSettled?.prompts.turn ?? ""), (videoSettled?.prompts.turn ?? "").slice(0, 60));
+      await studio.savePrompts({ projectId, turn: "自定义转圈提示词" });
+      check("转圈提示词可单独保存", (await studio.getProject({ projectId })).prompts.turn === "自定义转圈提示词");
+      await studio.savePrompts({ projectId, resetTurnToDefault: true });
+      check("转圈提示词可一键重置为默认", /旋转满一整圈/.test((await studio.getProject({ projectId })).prompts.turn));
+    } finally {
+      await new Promise((resolve) => turnGateway.close(resolve));
+      await studio.saveConfig({ minimaxBaseUrl: "https://api.minimaxi.com", clearMinimaxApiKey: true });
+    }
   }
 
   // ── 10. 图片生成模块（本地链路，不调 API）────────────────────────────

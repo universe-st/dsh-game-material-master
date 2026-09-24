@@ -157,6 +157,9 @@ const FEEDBACK_REQUIRED = {
   runFrames: "抽帧",
   rekey: "重跑抠像",
   compose: "合成整图",
+  runTurnVideo: "转圈视频",
+  runTurnFrames: "转圈候选帧抽取",
+  setTurnPick: "改截帧位置",
   runImageJob: "图片生成",
   keyImageJob: "图片抠像",
   runSequenceVideo: "序列帧：生视频",
@@ -299,6 +302,8 @@ for (const file of files) {
     continue;
   }
   checkRigContracts(text, label);
+  checkTurnContracts(text, label);
+  checkInputAndZoomContracts(text, label);
 
   const renderers = renderersIn(text);
   check(`${label}：找到阶段渲染函数`, renderers.size > 0, [...renderers.keys()].join("、"));
@@ -647,5 +652,79 @@ function checkRigContracts(text, label) {
       /runRigBones\s*\(/,
       /runRigAtlas\s*\(/
     ].every((pattern) => pattern.test(text))
+  );
+}
+
+/**
+ * 「转圈截帧」的文本契约（阶段①的默认生成方式）。
+ *
+ * 这一块坏了界面照样渲染，只是功能静默失效，所以逐条钉住：
+ *   - 方法名与宿主对不上 → 点了报 “api.xxx is not a function”；
+ *   - 轴上的圆圈不是可聚焦按钮 / 没有方向键微调 → 鼠标拖歪一次就没法精确调；
+ *   - 圆圈位置公式与宿主的截帧下标不是同一套 → 拖了看着对、切出来是别的帧。
+ */
+function checkTurnContracts(text, label) {
+  check(`${label}：有转圈截帧面板`, text.includes("function TurnImageStage"));
+  check(`${label}：有八圆圈时间轴`, text.includes("function TurnAxis") && text.includes("SPR_axisDot"));
+  check(
+    `${label}：轴上有八个可拖动的圆圈`,
+    /DIRECTION_KEYS\.map\(\(key\) => \{/.test(text) &&
+      text.includes("onPointerDown") &&
+      text.includes("onPointerMove") &&
+      text.includes("onPointerUp")
+  );
+  check(`${label}：圆圈支持方向键微调`, /event\.key !== "ArrowLeft" && event\.key !== "ArrowRight"/.test(text));
+  check(
+    `${label}：圆圈位置按「格心」换算（与宿主的下标一致）`,
+    /\(index \+ 0\.5\) \/ Math\.max\(1, total\)/.test(text) && /Math\.round\(fraction \* total - 0\.5\)/.test(text)
+  );
+  check(`${label}：轴上带整圈缩略条带`, text.includes("SPR_axisStrip"));
+  check(
+    `${label}：两种生成方式的切换在界面上`,
+    text.includes("function ImageModeBar") && text.includes("setImageMode") && text.includes("IMAGE_MODES")
+  );
+  check(
+    `${label}：抽帧期间八个方向都被盖住`,
+    /jobCovers\(hostFrames, key\)/.test(text) && text.includes('hostJob(project, "turn:frames")')
+  );
+  check(`${label}：候选帧数可调（8~64）`, text.includes("TURN_FRAME_MIN") && text.includes("TURN_FRAME_MAX"));
+  check(`${label}：转圈模式的产物仍写进 images/<方向>.png（下游不必知道）`, /stage: "images"/.test(text) && text.includes("turn-dot-"));
+}
+
+
+/**
+ * 三个实测问题的文本契约：
+ *   ① 数字输入框必须「失焦/回车才提交」（边打字边提交会被宿主 clamp 回写，数字乱跳）；
+ *   ② 序列帧缩略图双击要能看大图，大图窗口右上角有关闭按钮；
+ *   ③ 阶段④ 要说明「为什么第 3 步抠过一次、这里还抠」。
+ */
+function checkInputAndZoomContracts(text, label) {
+  check(
+    `${label}：数字框在失焦/回车时才提交`,
+    /onBlur:\s*\(\)\s*=>\s*\{\s*setFocused\(false\);\s*commit\(\);\s*\}/.test(text) &&
+      /if \(event\.key === "Enter"\)/.test(text)
+  );
+  check(
+    `${label}：数字框的输入值走本地草稿，不在 onChange 里直接提交`,
+    /const \[text, setText\] = React\.useState\(String\(value \?\? ""\)\)/.test(text) &&
+      /onChange: \(event\) => setText\(event\.target\.value\)/.test(text) &&
+      !/const next = Number\(event\.target\.value\)/.test(text)
+  );
+  check(`${label}：有双击看大图的组件`, text.includes("function ZoomableImage") && text.includes('title: "双击看大图"'));
+  check(
+    `${label}：大图窗口有关闭按钮 + Esc + 点背景关闭`,
+    /className: "SPR_zoomClose"/.test(text) &&
+      /event\.key === "Escape"/.test(text) &&
+      /className: "SPR_zoomMask"/.test(text) &&
+      /\.SPR_zoomMask\{[^}]*position:fixed/.test(text)
+  );
+  check(
+    `${label}：序列帧预览带可双击看大图`,
+    /className: "SPR_thumb",\s*\n?\s*src: assetUrl\(project, node\.strip/.test(text.replace(/\s+/g, " "))
+  );
+  check(`${label}：序列帧任务的逐帧缩略图也可双击放大`, /className: "SPR_frame"/.test(text) && /ZoomableImage/.test(text));
+  check(
+    `${label}：阶段④ 解释了两次抠像的分工`,
+    /两次读的是同一份帧缓存/.test(text) && /抠像在这里会\*\*再跑一次\*\*/.test(text)
   );
 }

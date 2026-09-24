@@ -31,13 +31,17 @@ const promptsSchema = z.object({
   projectId: z.string(),
   images: z.record(z.string(), z.string()).optional(),
   video: z.string().optional(),
+  /** 转圈模式的旋转视频提示词（整圈只有这一份）。 */
+  turn: z.string().optional(),
   videoPerDirection: z.record(z.string(), z.string()).optional(),
   /** 统一附加提示词：追加到每个方向的生图提示词末尾；空串表示关闭。 */
   suffix: z.string().optional(),
   /** 一键把八个方向的生图提示词重置为当前默认模板。 */
   resetImagesToDefault: z.boolean().optional(),
   /** 一键把视频提示词重置为当前默认模板。 */
-  resetVideoToDefault: z.boolean().optional()
+  resetVideoToDefault: z.boolean().optional(),
+  /** 一键把转圈视频提示词重置为当前默认模板。 */
+  resetTurnToDefault: z.boolean().optional()
 });
 const settingsSchema = z.object({ projectId: z.string(), settings: z.record(z.string(), z.unknown()) });
 const approvedSchema = z.object({
@@ -58,6 +62,34 @@ const setReviewModeSchema = z.object({
 });
 const runImageSchema = z.object({ projectId: z.string(), key: z.string(), prompt: z.string().optional() });
 const runImagesSchema = z.object({ projectId: z.string(), force: z.boolean().optional() });
+
+// ── 阶段①的另一种生成方式：转圈截帧 ────────────────────────────────────
+/** 生成方式：`turn` = 转一圈再按时间截帧（默认）；`direct` = 逐方向生图（备选）。 */
+const setImageModeSchema = z.object({ projectId: z.string(), mode: z.enum(["turn", "direct"]) });
+const runTurnFramesSchema = z.object({
+  projectId: z.string(),
+  /** 候选帧张数；不给就沿用项目里的 `settings.turnFrameCount`。 */
+  count: z.number().optional()
+});
+const setTurnPickSchema = z.object({
+  projectId: z.string(),
+  /** 方向 key（front / back / downLeft / …）。 */
+  key: z.string(),
+  /** 候选帧下标（0 起）。 */
+  index: z.number()
+});
+/** 一次写多个截帧位置（agent 看完整圈条带后整份写回）。 */
+const setTurnPicksSchema = z.object({
+  projectId: z.string(),
+  /** 方向 key → 候选帧下标。只给要改的方向。 */
+  picks: z.record(z.string(), z.number())
+});
+const resetTurnPicksSchema = z.object({
+  projectId: z.string(),
+  /** 转圈方向；不给就沿用当前值。 */
+  direction: z.enum(["cw", "ccw"]).optional()
+});
+const cutTurnFramesSchema = z.object({ projectId: z.string(), keys: z.array(z.string()).optional() });
 const runKeysSchema = z.object({ projectId: z.string(), keys: z.array(z.string()).optional() });
 const runVideosSchema = z.object({
   projectId: z.string(),
@@ -462,6 +494,13 @@ export const METHODS: MethodSpec[] = [
 
   { method: "runImage", payload: runImageSchema, result: startedSchema },
   { method: "runImages", payload: runImagesSchema, result: startedSchema },
+  { method: "setImageMode", payload: setImageModeSchema, result: okSchema },
+  { method: "runTurnVideo", payload: projectOnlySchema, result: startedSchema },
+  { method: "runTurnFrames", payload: runTurnFramesSchema, result: startedSchema },
+  { method: "setTurnPick", payload: setTurnPickSchema, result: jsonObject },
+  { method: "setTurnPicks", payload: setTurnPicksSchema, result: jsonObject },
+  { method: "resetTurnPicks", payload: resetTurnPicksSchema, result: jsonObject },
+  { method: "cutTurnFrames", payload: cutTurnFramesSchema, result: okSchema },
   { method: "runVideos", payload: runVideosSchema, result: startedSchema },
   { method: "pollVideos", payload: projectOnlySchema, result: okSchema },
   { method: "clearVideos", payload: runKeysSchema, result: okSchema },

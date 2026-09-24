@@ -33,6 +33,7 @@ DSH 插件「游戏素材大师」：从一张角色设定图出发批量产出�
 | **没有任何运行时依赖** | `zod` / `cordis` / dsh-typert-protocol 等一律从 DSH 自身安装树解析；`node_modules` 与 lock 文件不入库 |
 | `lib/` **入库**（不是构建产物目录） | 包直接以 `main: lib/index.js` 发布，`npm publish` 不触发构建 |
 | 生成类调用必须带 loading 反馈，批量任务要按 `job.targets` 盖住**还没轮到**的方向 | 不盖遮罩时界面看着完全正常，只是「点了没反应」，用户会反复点——每次点击都真实计费。`verify-client.mjs` / `verify-feedback.mjs` 会拦 |
+| 新增产物子目录时，`SERVABLE_DIRS`（`src/index.ts`）必须同步加一条 | 静态资源路由按**第一段路径**比对白名单，漏掉就 403。界面只表现为「图裂了」、不报错——转圈截帧的 `turn/` 就踩过 |
 
 ---
 
@@ -46,11 +47,11 @@ npm run typecheck    # 只做类型检查
 纯本地自检（不联网、不花钱），改完代码**至少跑这几个**：
 
 ```bash
-node scripts/verify-host.mjs       # 宿主全链路（237 项）
-node scripts/verify-client.mjs     # 浏览器半区契约（211 项）
-node scripts/verify-tools.mjs      # 对话调用面（93 项）
-node scripts/verify-pipeline.mjs   # 抽帧 / 抠像 / 合成（30 项）
-node scripts/verify-feedback.mjs   # 浏览器半区真渲染（87 项）
+node scripts/verify-host.mjs       # 宿主全链路（285 项）
+node scripts/verify-client.mjs     # 浏览器半区契约（299 项）
+node scripts/verify-tools.mjs      # 对话调用面（109 项）
+node scripts/verify-pipeline.mjs   # 抽帧 / 抠像 / 合成（40 项）
+node scripts/verify-feedback.mjs   # 浏览器半区真渲染（119 项）
 ```
 
 其余脚本（`verify-rig*.mjs`、`e2e-*.mjs` 等）的覆盖范围见 ENGINEERING.md 的「自检脚本」表。
