@@ -341,6 +341,138 @@ Key 只写入本机 `<DSH_HOME>/game-material-master/config.json`，回传界面
 
 ---
 
+## 模块五：地图地块生成
+
+把「等距地块」变成一张能直接用的地图。整条思路一句话：
+
+> **几何交给代码，内容交给 AI。**
+
+菱形模板由本机代码渲染（严格 2:1 等距），AI 只负责把菱形**内部**填成指定地貌；
+生成完再本地量一次、仿射对齐回标准菱形；最后本地按等距网格铺图。
+
+为什么不让模型自己画菱形：调研期实测，**提示词里几何约束写得越细，结果反而越差**——
+让模型自由生成「45° 俯视的等距菱形地块」，实测宽高比落在 **1.029 ~ 1.554**，
+离 2.0 很远；而「模板填充」（给一张洋红菱形参考图，只让它填内部）达标率 **100%**。
+一张图里塞多个地块也会失败（模型会画成一大块地面，比例 1.27）。
+
+详细调研见 `research/tile-isometric/tile-isometric-research-report.md`。
+
+### 五个阶段
+
+| 阶段 | 谁在算 | 花不花钱 |
+|---|---|---|
+| ① 模板 | 本地代码 | 免费 |
+| ② 生成地块 | Seedream | **每个变体一次调用** |
+| ③ 验收 | —— | 免费 |
+| ④ 拼成地图 | 本地代码 | 免费，可反复换种子 |
+| ⑤ 导出 | 本地代码 | 免费 |
+
+`raw/` 会**保留原始生成结果**：改了单元格尺寸之类的规整参数后，可以零成本重跑规整，
+不必重新花钱生成。
+
+### 单元格几何
+
+默认 `cellWidth = 64`、`cellHeight = 96`。菱形只占中部，上方留白给高出地面的装饰。
+
+```
+菱形顶点（64×96）        菱形高 = cellWidth / 2 = 32
+  top    (32, 32)        菱形中心 y = cellHeight/2 = 48
+  right  (64, 48)        装饰锚点 = round(cy + dh/2 - dh/4 - 2) = 54
+  bottom (32, 64)
+  left   (0, 48)
+```
+
+**网格步长是 `cellWidth/2` 与 `cellWidth/4`，不是 `cellHeight/4`。**
+
+```
+stepX = cellWidth / 2  = 32
+stepY = diamondHeight/2 = cellWidth / 4 = 16     ← 不是 cellHeight/4 = 24
+```
+
+这里踩过一次：用 `cellHeight/4` 会让地图被切成一块块白格（相邻菱形之间对不上）。
+
+`cellWidth` 必须能被 4 整除，且 `cellHeight > diamondHeight`（否则没地方放装饰），
+两条都由 `assertSettings` 在（含）建项目时挡住。
+
+### 三个几何函数各自负责什么
+
+| 函数 | 干什么 | 关键点 |
+|---|---|---|
+| `renderTemplate` | 渲染洋红菱形模板 | 4× 超采样后降采样，边缘才干净；可选 2×2 地基网格（给跨格建筑） |
+| `measureGroundDiamond` | 从**合成图**里量菱形 | 只量下半部分（装饰在上方，会把拟合带偏） |
+| `regularizeToCell` | 仿射对齐到标准菱形 | 量不准就回退模板几何，并记下 `fallbackReason` |
+
+#### 下顶点必须实测，不能取两条边的交点
+
+直觉做法是拟合左右两条下边、求交点当下顶点，实测**不可靠**：
+靠近下顶点的几行只有几个像素宽，斜率在那里最陡，会把拟合线拉偏，
+交点落到真正的顶点**下方**。合成图上实测 `halfHeight = 121`（真值 102），
+比例算成 **1.678**——而那张图本身是标准的 2:1。
+
+所以：斜率只用来**评估质量**（`residual`），顶点位置一律从掩码实测。
+
+#### 裁切遮罩要比数学菱形略大一点点
+
+2:1 菱形的上下尖端每行只有 0~1 个像素，像素中心几乎不会正好落在边界线上。
+用严格的 `d <= 1` 当遮罩，尖端那几行会被**整行切掉**——实测少 16~41 个像素，
+重新测量时比例变成 **1.9375**（真值 2.0）。
+
+所以判定边界外推 `DIAMOND_MASK_SLACK`：菱形主体 100% 不透明，再往外约 1px 线性淡出。
+
+> ⚠️ 这个常量的语义是「**从哪儿开始淡出**」，必须 ≈ 1（菱形边界）。
+> 一度写成 0.04（当成「小余量」），结果是把整个菱形内部都当成边界外，
+> 64×96 的地块只剩中心 **4 个像素**不透明。
+
+### 白边是怎么去掉的
+
+模块④ 的拆件也踩过同一个坑，做法一致，见「软 alpha 不能拿『离底色多远』当透明度」一节。
+这里的结论：
+
+1. **软 alpha 要有死区**（`lo=40` / `hi=190`）：没有死区时，JPEG 压缩噪声
+   （距离 2~10）会被判成 α≈0.03 的前景，边缘反而更脏。
+2. **不要用 un-matte**：`F=(C−(1−α)B)/α` 在 α 很小时会放大噪声。
+   改成「只用可信像素（`α ≥ 0.75`）的颜色」，再用 BFS 往外扩 4 圈填满。
+3. **颜色与 alpha 必须分开缩放**：把 RGBA 一起丢给普通双线性，alpha 会被
+   当成第四个颜色通道平均，于是边缘出现「不透明但接近白」的像素——那就是白边。
+
+自检 `verify-tile.mjs` 里有一条**反向验证**：把抠底换回「硬阈值」，
+它必须在交付尺寸上留下近白像素，否则那条断言本身是无效的。
+
+### 装饰与地面要分开生成
+
+树、巨石这类高出地面的东西**不能**和地面画在同一张图里——模型会把地面也重画一遍，
+而且锚点对不上。做法：
+
+- 装饰走「**白底单图** + 锚点摆放」，不与地面同图
+- 用纯白背景而不是请求透明：`background:"transparent"` 在火山方舟上要求
+  「必须带且只带一张输入图」，纯文生图传它会直接 **HTTP 400**
+  `transparent background requires requested exactly one input image`。白底反而更好抠——
+  边框众数色一定就是背景色
+- 摆放时把宽度归一到 `cellWidth × 5/8`，高度上限是锚点 y
+
+### 拼图为什么不用额外排序
+
+按 `(r+c)` 升序绘制即可：后面的格子自然盖住前面格子里的装饰，
+不需要再做 z 排序。同种子 + 同布局 = **逐像素一致**（`mulberry32`），
+所以可以放心地反复换种子试到满意。
+
+性能守卫：地图超过 64×64 或超过 64M 像素会被**明确拒绝**，而不是把进程 OOM 掉。
+
+### 数据目录
+
+```
+<DSH_HOME>/game-material-master/tile-jobs/<项目 id>/
+├── project.json            唯一状态文件
+├── template/               cell.png + grid2x2.png（洋红模板）
+├── raw/                    原始生成结果（保留）
+├── cell/                   规整后的单元格地块
+├── decor/                  独立装饰图层
+├── map/                    map.png + map.json
+└── export/                 导出包（tiles/ + map.png + map.json）
+```
+
+---
+
 ## 模块四：骨骼动画生成
 
 把一张角色整图变成**可用的 Spine 骨骼动画**：拆件 → 装配定位 → 推骨骼与动画 → 打包图集。
@@ -1007,10 +1139,17 @@ DSH 只把 `locale` 服务挂在**浏览器半区**（`ctx.provide("locale", …
 /dsh-game-material-master/image-assets/<任务 id>/<相对路径>
 /dsh-game-material-master/sequence-assets/<任务 id>/<相对路径>
 /dsh-game-material-master/rig-assets/<任务 id>/<相对路径>
+/dsh-game-material-master/tile-assets/<项目 id>/<相对路径>
 ```
 
-四个模块的 id 前缀不同（项目 `p…`、图片任务 `i…`、序列帧任务 `s…`、骨骼动画任务 `r…`），
-路由会校验前缀并挡住目录穿越。
+五个模块的 id 前缀不同（项目 `p…`、图片任务 `i…`、序列帧任务 `s…`、骨骼动画任务 `r…`、
+地图地块项目 `t…`），路由会校验前缀并挡住目录穿越。
+
+> ⚠️ **scope 白名单有两处，必须同步改：`AssetScope` 类型 + `handleAsset` 里的运行时判断。**
+> 只改类型不会报错（`scope` 是从 path 断言出来的），新 scope 会静默掉进 404，
+> 界面表现只是「图裂了」。`tile-assets` 就漏过一轮——模板图全 404。
+> 现在 `verify-host.mjs` 第 14 节会真起一台 server 走 HTTP 取一张模板图，
+> 取不到就红。
 
 ---
 
@@ -1079,10 +1218,14 @@ node scripts/dsh-web-cookie.mjs 127.0.0.1:43121 --json
 | `node scripts/make-rig-fixtures.mjs <目录>` | 生成**免费**的合成部件 PNG（`--full` 出完整 16 件），让除拆件以外的整条链可以零成本测试 |
 | `node scripts/probe-redraw.mjs <部件PNG> "<提示词>"` | **花钱**：直接调生图模型重绘一个部件并打印统计（与插件共用提示词构造器）。用于排查「是模型不行还是管线不行」 |
 | `node scripts/e2e-rig-live.mjs <角色整图>` | 模块四真实链路：**真的调一次生图模型**拆件，再跑完装配/骨骼/图集（约 0.2 元） |
-| `node scripts/verify-host.mjs` | 宿主半区全链路（**310 项**）：四个模块的本地链路、**阶段①的转圈截帧（合成一段「转动」视频跑真实 ffmpeg，覆盖截帧位置、按比例换算、下游作废、切换生成方式）**、资源路由（含 `turn/` 白名单）、预览页的 `text/html`、目录穿越与 id 前缀校验 |
+| `node scripts/verify-host.mjs` | 宿主半区全链路（**317 项**）：五个模块的本地链路、**阶段①的转圈截帧（合成一段「转动」视频跑真实 ffmpeg，覆盖截帧位置、按比例换算、下游作废、切换生成方式）**、**模块五的资源路由（真起一台 server 走 HTTP 取回 `tile-assets` 的模板图，并验证 403 与目录穿越）**、资源路由（含 `turn/` 白名单）、预览页的 `text/html`、目录穿越与 id 前缀校验 |
+| `node scripts/verify-tile.mjs` | 模块五几何内核（**109 项**）：模板比例严格 2:1、合成图菱形测量、规整后无缺口/无越界、装饰锚点与遮挡、拼图无洞与同种子逐像素一致、PNG 往返。含**两条反向验证**——把模板几何改回硬编码错误值必须产生透明缺口、把抠底换回硬阈值必须留下近白像素；修复一旦被回退，这两条会红 |
+| `node scripts/verify-tile-pipeline.mjs` | 模块五数据层与流水线（**65 项**）：项目 CRUD（含非法单元格尺寸被拒）、模板阶段产出与几何、用**研究期真实 2K 图**喂规整（不花钱）、拼图与导出的产物、同种子重拼逐像素一致、换种子结果不同、**失效传播**（作废 generate 要清空变体与地图；只作废 map 时已花钱的地块必须保住）、提示词构造、快照给界面是相对路径而给对话工具是绝对 URL |
+| `node scripts/verify-tile-client.mjs` | 模块五界面**真渲染**（**68 项**）：真加载 `lib/client.js` + 假 React 按槽位渲染 `TileModule`。五个阶段都不能白屏、空态、几何角标（量准显示比例、回退显示「模板几何」）、**任务在跑时遮罩必须出现**、未生成的格子显示「排队中」、空闲时一个遮罩都不能有、点击真的调到对应远程方法。它抓出过 `LoadingOverlay` 参数名写错导致遮罩永远不出现的 bug |
+| `node scripts/find-missing-i18n.mjs` | **工具**（不是断言）：列出所有还没进词条表的 `T("…")` 原文，直接输出可粘贴的条目 |
 | `node scripts/verify-i18n.mjs` | 中英词条表契约：**每个 `T()` 都有英文条目 / 没有死条目 / `{nN}` 占位符两侧一致 / 译文不残留汉字与全角标点 / `lib/client.js` 与 `src/client.ts` 的词条表一致（忘了 build 就发版会整体退回中文）** |
 | `node scripts/i18n-wrap.mjs` | 词法级 codemod：把 `src/client.ts` 里含中日韩字符的字面量包成 `T(...)`（模板字面量拆成 `{nN}` 占位符，幂等，`i18n-ignore-*` 区间不碰） |
-| `node scripts/verify-tools.mjs` / `verify-client.mjs` / `verify-pipeline.mjs` | 对话调用面（含四个模块 status/review 的文字渲染）、浏览器半区契约（含「每个远程方法都有 api 实现」与手动装配的四条回归）、抠像回归 |
+| `node scripts/verify-tools.mjs` / `verify-client.mjs` / `verify-pipeline.mjs` | 对话调用面（含五个模块 status/review 的文字渲染）、浏览器半区契约（含「每个远程方法都有 api 实现」与手动装配的四条回归）、抠像回归 |
 
 
 
@@ -1092,11 +1235,14 @@ npm run build          # tsc → lib/，并剥掉浏览器束结尾的 export {}
 # 纯本地测试（不联网、不花钱）
 node scripts/verify-minimax.mjs    # MiniMax 协议层（85 项，含请求体逐字段断言）
 node scripts/verify-pipeline.mjs   # 抽帧/抠像/合成链路（40 项，含回归用例）
-node scripts/verify-host.mjs       # 宿主冒烟（310 项，真实 cordis + 真实 HTTP；含内置默认提示词的语言切换）
+node scripts/verify-host.mjs       # 宿主冒烟（317 项，真实 cordis + 真实 HTTP；含内置默认提示词的语言切换、模块五资源路由）
 node scripts/verify-client.mjs     # 浏览器半区契约（319 项：阶段 ctx 键必须被转发、每个生成类调用点都带 loading 反馈、转圈时间轴与八圆圈、手动装配的四个坑、拆件质检 / IK 约束组件）
 node scripts/verify-feedback.mjs   # 浏览器半区渲染（119 项：真加载 lib/client.js，断言遮罩真的出现 / 空闲时真的不出现 / 转圈模式两种生成方式与八圆圈都在 / 深链接点击真的切面板）
-node scripts/verify-tools.mjs      # 对话调用面（109 项：工具 schema、方法覆盖、返回值无损 JSON 审计、固定流程（含阶段①生成方式必问）、审核模式、深链接契约、转圈模式的 status/review 渲染）
+node scripts/verify-tools.mjs      # 对话调用面（110 项：工具 schema、方法覆盖、**客户端清单的 payload 标记与宿主 manifest 逐条一致**、返回值无损 JSON 审计、固定流程（含阶段①生成方式必问）、审核模式、深链接契约、转圈模式的 status/review 渲染）
 node scripts/verify-i18n.mjs       # 中英词条表契约（9 项：覆盖 / 死条目 / 占位符 / 译文纯净度 / 产物同步）
+node scripts/verify-tile.mjs       # 模块五几何内核（109 项，含两条反向验证）
+node scripts/verify-tile-pipeline.mjs # 模块五数据层与流水线（65 项）
+node scripts/verify-tile-client.mjs   # 模块五界面真渲染（68 项，拦「遮罩没出现」这类静默问题）
 node scripts/verify-live-bundle.mjs # 运行中的宿主是否已在提供新束（走 /plugins/events 拿真实 graph，再按图里的 URL 取回）
 
 # 真实 API 端到端（会花钱）
