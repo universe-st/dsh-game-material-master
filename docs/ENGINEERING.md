@@ -848,6 +848,45 @@ node scripts/i18n-wrap.mjs src/client.ts --dump /tmp/keys.json   # 从已包好�
 （`·`、箭头、`▲▼`、`¥`、`≤` 这些故意保留的符号在白名单里）、**`lib/client.js` 与
 `src/client.ts` 的词条表一致**（忘了 `npm run build` 就发版，界面会整体退回中文）。
 
+---
+
+### 内置默认提示词也跟着语言走
+
+界面文案解决的是「用户看得懂按钮」，但**八方向生图 / 行走视频 / 转圈视频的默认提示词
+会真的发给 Seedream 与 MiniMax**。英文界面下继续发中文提示词，模型照样能画，可用户读不懂
+自己在调什么——所以它必须跟界面同语言。
+
+真源在宿主：`src/directions.ts` 的 `defaultPrompts(lang)` 返回
+`{ images, video, turn }`，中英各一份模板（`DEFAULT_*_PROMPT` 与 `DEFAULT_*_PROMPT_EN`），
+方向段落另有 `facing` / `facingEn`、`visibility` / `visibilityEn`。**两版必须逐行对应**，
+它们不是「翻译给界面看的」，是同一份提示词工程结论的两种语言写法。
+
+宿主拿不到 locale 服务，语言只能由浏览器半区带过去：
+
+| 调用 | 带 `lang` 干什么 |
+|---|---|
+| `getProject({ projectId, lang })` | 把**还是默认值**的提示词换成该语言的默认值，再返回 |
+| `savePrompts({ …, lang })` | 「重置为默认」重置成**当前语言**的默认值，而不是永远重置成中文 |
+
+「还是默认值」的判据是 `localizePrompts()`：**逐字等于另一语言的默认值**才算没改过。
+所以切语言时只有从没动过的条目会换，用户写过的一个字都不动，而且来回切是可逆的
+（英文默认值再切回中文，同样逐字匹配得上）。`videoPerDirection` 里的逐方向覆盖同理。
+
+**坑（实测）**：`lang` 写进了方法入参、客户端也确实发了，界面却毫无变化。
+原因是 typert 按 `src/wire.ts` 里声明的 `payload` schema 校验，**schema 里没写的键会被静默丢掉**——
+`getProject` 当时用的是 `projectIdSchema`（只有 `projectId`），于是宿主读到的 `lang` 永远是
+`undefined`，`localizePrompts` 一次都没跑过。现在拆出了 `getProjectSchema`，`promptsSchema`
+也补了 `lang`。**往宿主方法加字段时，schema 必须同步改**，否则就是这种「不报错、只是不生效」。
+
+验证走 `verify-host.mjs` 的 5b 段（14 项，真实 cordis 宿主）：默认值初始是中文 → 切英文后
+未改过的变英文、改过的原样保留 → 切回中文还原 → 英文下「重置为默认」得到英文模板 →
+`videoPerDirection` 的覆盖不受影响。
+
+因为这是**宿主半区**的改动，跑真实界面要重启宿主：用 `scripts/dev-overlay.yml` 起一个
+独立端口的测试宿主（见「开发时的宿主半区热重载」），并且**别用 `--profile desktop`**
+（那个 profile 归 Electron 应用独占，命令行起不来）；临时 profile 的 `locale.preference`
+也是独立的，不会动用户真正的语言设置。
+
 ### 没做的部分：宿主半区的文案
 
 DSH 只把 `locale` 服务挂在**浏览器半区**（`ctx.provide("locale", …)`），宿主半区拿不到，
@@ -1030,7 +1069,7 @@ node scripts/dsh-web-cookie.mjs 127.0.0.1:43121 --json
 | `node scripts/make-rig-fixtures.mjs <目录>` | 生成**免费**的合成部件 PNG（`--full` 出完整 16 件），让除拆件以外的整条链可以零成本测试 |
 | `node scripts/probe-redraw.mjs <部件PNG> "<提示词>"` | **花钱**：直接调生图模型重绘一个部件并打印统计（与插件共用提示词构造器）。用于排查「是模型不行还是管线不行」 |
 | `node scripts/e2e-rig-live.mjs <角色整图>` | 模块四真实链路：**真的调一次生图模型**拆件，再跑完装配/骨骼/图集（约 0.2 元） |
-| `node scripts/verify-host.mjs` | 宿主半区全链路（**285 项**）：四个模块的本地链路、**阶段①的转圈截帧（合成一段「转动」视频跑真实 ffmpeg，覆盖截帧位置、按比例换算、下游作废、切换生成方式）**、资源路由（含 `turn/` 白名单）、预览页的 `text/html`、目录穿越与 id 前缀校验 |
+| `node scripts/verify-host.mjs` | 宿主半区全链路（**310 项**）：四个模块的本地链路、**阶段①的转圈截帧（合成一段「转动」视频跑真实 ffmpeg，覆盖截帧位置、按比例换算、下游作废、切换生成方式）**、资源路由（含 `turn/` 白名单）、预览页的 `text/html`、目录穿越与 id 前缀校验 |
 | `node scripts/verify-i18n.mjs` | 中英词条表契约：**每个 `T()` 都有英文条目 / 没有死条目 / `{nN}` 占位符两侧一致 / 译文不残留汉字与全角标点 / `lib/client.js` 与 `src/client.ts` 的词条表一致（忘了 build 就发版会整体退回中文）** |
 | `node scripts/i18n-wrap.mjs` | 词法级 codemod：把 `src/client.ts` 里含中日韩字符的字面量包成 `T(...)`（模板字面量拆成 `{nN}` 占位符，幂等，`i18n-ignore-*` 区间不碰） |
 | `node scripts/verify-tools.mjs` / `verify-client.mjs` / `verify-pipeline.mjs` | 对话调用面（含四个模块 status/review 的文字渲染）、浏览器半区契约（含「每个远程方法都有 api 实现」与手动装配的四条回归）、抠像回归 |
@@ -1043,8 +1082,8 @@ npm run build          # tsc → lib/，并剥掉浏览器束结尾的 export {}
 # 纯本地测试（不联网、不花钱）
 node scripts/verify-minimax.mjs    # MiniMax 协议层（85 项，含请求体逐字段断言）
 node scripts/verify-pipeline.mjs   # 抽帧/抠像/合成链路（40 项，含回归用例）
-node scripts/verify-host.mjs       # 宿主冒烟（285 项，真实 cordis + 真实 HTTP）
-node scripts/verify-client.mjs     # 浏览器半区契约（299 项：阶段 ctx 键必须被转发、每个生成类调用点都带 loading 反馈、转圈时间轴与八圆圈、手动装配的四个坑、拆件质检 / IK 约束组件）
+node scripts/verify-host.mjs       # 宿主冒烟（310 项，真实 cordis + 真实 HTTP；含内置默认提示词的语言切换）
+node scripts/verify-client.mjs     # 浏览器半区契约（319 项：阶段 ctx 键必须被转发、每个生成类调用点都带 loading 反馈、转圈时间轴与八圆圈、手动装配的四个坑、拆件质检 / IK 约束组件）
 node scripts/verify-feedback.mjs   # 浏览器半区渲染（119 项：真加载 lib/client.js，断言遮罩真的出现 / 空闲时真的不出现 / 转圈模式两种生成方式与八圆圈都在 / 深链接点击真的切面板）
 node scripts/verify-tools.mjs      # 对话调用面（109 项：工具 schema、方法覆盖、返回值无损 JSON 审计、固定流程（含阶段①生成方式必问）、审核模式、深链接契约、转圈模式的 status/review 渲染）
 node scripts/verify-i18n.mjs       # 中英词条表契约（9 项：覆盖 / 死条目 / 占位符 / 译文纯净度 / 产物同步）

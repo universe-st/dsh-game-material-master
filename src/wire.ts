@@ -20,6 +20,15 @@ const saveConfigSchema = z.record(z.string(), z.unknown());
 
 const createProjectSchema = z.object({ name: z.string().optional() });
 const projectIdSchema = z.object({ projectId: z.string() });
+/**
+ * 读项目：比 `projectIdSchema` 多一个 `lang`。
+ *
+ * 内置默认提示词存在宿主侧，而宿主没有 locale 服务，所以界面语言只能由浏览器半区带过来。
+ * **这个字段必须写进 schema**：typert 会按声明校验 payload，schema 里没有的键会被丢掉，
+ * 方法里 `input.lang` 永远是 undefined——表现就是「切了英文提示词还是中文」，
+ * 而且不报任何错（实测踩过）。
+ */
+const getProjectSchema = z.object({ projectId: z.string(), lang: z.string().optional() });
 const renameSchema = z.object({ projectId: z.string(), name: z.string() });
 const uploadSchema = z.object({
   projectId: z.string(),
@@ -29,6 +38,8 @@ const uploadSchema = z.object({
 });
 const promptsSchema = z.object({
   projectId: z.string(),
+  /** 界面语言：「重置为默认」要重置成哪一国话的默认提示词（见 getProjectSchema）。 */
+  lang: z.string().optional(),
   images: z.record(z.string(), z.string()).optional(),
   video: z.string().optional(),
   /** 转圈模式的旋转视频提示词（整圈只有这一份）。 */
@@ -501,7 +512,7 @@ export const METHODS: MethodSpec[] = [
 
   { method: "listProjects", result: projectListSchema },
   { method: "createProject", payload: createProjectSchema, result: jsonObject },
-  { method: "getProject", payload: projectIdSchema, result: projectViewSchema },
+  { method: "getProject", payload: getProjectSchema, result: projectViewSchema },
   { method: "deleteProject", payload: projectIdSchema, result: okSchema },
   { method: "renameProject", payload: renameSchema, result: okSchema },
   { method: "uploadSource", payload: uploadSchema, result: okSchema },

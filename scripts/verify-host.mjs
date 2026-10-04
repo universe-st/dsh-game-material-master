@@ -299,6 +299,45 @@ async function main() {
   check("其它方向提示词未被覆盖", /向正北行走/.test(project.prompts.images.back) && /完全看不到脸/.test(project.prompts.images.back));
   check("视频提示词已保存", project.prompts.video === "自定义视频提示词");
 
+  // ── 5b. 内置默认提示词跟随语言 ─────────────────────────────────────────
+  // 默认提示词会真的发给生图 / 视频模型，所以英文界面下必须是英文版；
+  // 但**用户改过的那些一个字都不能动**——判据是「逐字等于另一语言的默认值」。
+  console.log("5b) 内置默认提示词跟随语言切换");
+  {
+    const zhBack = project.prompts.images.back;
+    const zhTurn = project.prompts.turn;
+    check("默认提示词初始是中文", /向正北行走/.test(zhBack) && /固定机位/.test(zhTurn));
+
+    project = await studio.getProject({ projectId, lang: "en" });
+    check("切英文后未改过的方向提示词变英文", /walks due north/.test(project.prompts.images.back), project.prompts.images.back.slice(0, 40));
+    check("切英文后转圈提示词变英文", /\[Static camera\]/.test(project.prompts.turn), project.prompts.turn.slice(0, 30));
+    check("用户改过的方向提示词原样保留", project.prompts.images.front === "自定义正面提示词", project.prompts.images.front);
+    check("用户改过的视频提示词原样保留", project.prompts.video === "自定义视频提示词", project.prompts.video);
+    check("英文方向提示词仍带英文朝向段", /\[Facing\] The character walks due north/.test(project.prompts.images.back));
+    check("英文方向提示词不含中文", !/[\u4e00-\u9fff]/u.test(project.prompts.images.back));
+
+    project = await studio.getProject({ projectId, lang: "zh" });
+    check("切回中文后默认提示词还原", project.prompts.images.back === zhBack && project.prompts.turn === zhTurn);
+    check("切回中文后用户改动仍在", project.prompts.images.front === "自定义正面提示词");
+
+    // 「重置为默认」要重置成**当前语言**的默认值，否则英文界面点一下会掉出中文。
+    await studio.savePrompts({ projectId, lang: "en", resetImagesToDefault: true, resetVideoToDefault: true, resetTurnToDefault: true });
+    project = await studio.getProject({ projectId, lang: "en" });
+    check("英文下「重置为默认」得到英文模板", /\[Camera\]/.test(project.prompts.images.front) && /\[Static shot\]/.test(project.prompts.video));
+    check("英文下重置后八个方向都是英文", ["front", "back", "left", "right"].every((key) => !/[\u4e00-\u9fff]/u.test(project.prompts.images[key])));
+
+    await studio.savePrompts({ projectId, lang: "zh", resetImagesToDefault: true, resetTurnToDefault: true });
+    project = await studio.getProject({ projectId });
+    check("中文下「重置为默认」得到中文模板", /【机位】/.test(project.prompts.images.front));
+    check("不带 lang 时按中文处理（老客户端兼容）", /【机位】/.test(project.prompts.images.front));
+
+    // 每个方向单独覆盖的视频提示词同样只换「没改过」的。
+    await studio.getProject({ projectId, lang: "en" });
+    await studio.savePrompts({ projectId, lang: "en", videoPerDirection: { front: "自定义单方向视频" } });
+    project = await studio.getProject({ projectId, lang: "zh" });
+    check("单方向视频覆盖不受语言切换影响", project.prompts.videoPerDirection.front === "自定义单方向视频", JSON.stringify(project.prompts.videoPerDirection).slice(0, 60));
+  }
+
   await studio.saveSettings({ projectId, settings: { cellWidth: 128, cellHeight: 192, frameCount: 6, despill: 0.9, rowOrder: ["back", "front"] } });
   project = await studio.getProject({ projectId });
   check("项目尺寸已保存", project.settings.cellWidth === 128 && project.settings.cellHeight === 192);

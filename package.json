@@ -32,6 +32,7 @@
   "files": [
     "lib",
     "README.md",
+    "README.en.md",
     "cordis.patch.yml"
   ],
   "scripts": {

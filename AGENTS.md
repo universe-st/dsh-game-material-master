@@ -36,6 +36,8 @@ DSH 插件「游戏素材大师」：从一张角色设定图出发批量产出�
 | 新增产物子目录时，`SERVABLE_DIRS`（`src/index.ts`）必须同步加一条 | 静态资源路由按**第一段路径**比对白名单，漏掉就 403。界面只表现为「图裂了」、不报错——转圈截帧的 `turn/` 就踩过 |
 | 界面文案一律写 `T("中文原文")`，并往 `src/client.ts` 的词条表补英文 | 中文原文就是 key；漏翻不会报错，只是那一条一直是中文。`verify-i18n.mjs` 会拦 |
 | **模块级**（工厂顶层）出现 `T()` 的文案表要同步加进 `staticTextRebuilders` | 模块顶层的 `T()` 在插件 load 时就求值了，那时 locale 服务还没挂上，此后永远停在中文。实测表现：切英文后方向名 / 模块页签不动。函数体内的 `T()` 不受影响 |
+| 浏览器半区往宿主加字段时，`src/wire.ts` 里那条方法的 `payload:` schema 必须同步加 | typert 按声明的 schema 校验 payload，**schema 里没有的键会被静默丢掉**。实测：给 `getProject` 带上 `lang` 却没进 schema，宿主永远读到 `undefined`，表现是「切了英文提示词还是中文」且不报任何错 |
+| 内置默认提示词（`src/directions.ts`）中英各一份，改一份必须改另一份 | 它会真的发给生图 / 视频模型，不是界面装饰。`verify-host.mjs` 的 5b 段按语言逐条比对两侧 |
 
 ---
 
@@ -49,8 +51,8 @@ npm run typecheck    # 只做类型检查
 纯本地自检（不联网、不花钱），改完代码**至少跑这几个**：
 
 ```bash
-node scripts/verify-host.mjs       # 宿主全链路（296 项）
-node scripts/verify-client.mjs     # 浏览器半区契约（311 项）
+node scripts/verify-host.mjs       # 宿主全链路（310 项）
+node scripts/verify-client.mjs     # 浏览器半区契约（319 项）
 node scripts/verify-tools.mjs      # 对话调用面（109 项）
 node scripts/verify-pipeline.mjs   # 抽帧 / 抠像 / 合成（40 项）
 node scripts/verify-feedback.mjs   # 浏览器半区真渲染（119 项）
@@ -136,8 +138,12 @@ npm view dsh-game-material-master dist-tags
   `docs/images/x.png` 在 GitHub 上正常、在 npm 包页面上是裂图。所以统一写
   `https://raw.githubusercontent.com/universe-st/dsh-game-material-master/main/docs/images/x.png`。
   代价是仓库内改图后要跟着改 URL，别写成相对路径「图方便」。
-- **截图不进 npm tarball。** `files` 白名单只有 `lib` / `README.md` / `cordis.patch.yml`，
-  `docs/` 不发布——这也是上一条必须用绝对 URL 的原因。tarball 约 341 kB / 31 个文件。
+- **截图不进 npm tarball。** `files` 白名单只有 `lib` / `README.md` / `README.en.md` /
+  `cordis.patch.yml`，`docs/` 不发布——这也是上一条必须用绝对 URL 的原因。
+  tarball 约 415 kB / 32 个文件。
+- **两份 README 要成对改。** `README.md` 是中文原文，`README.en.md` 是英文版，
+  两边顶部各有一条指向对方的**绝对**链接（npm 包页面解析不了相对路径，理由同上一条）。
+  改了结构或数字（自检项数、tarball 大小等）就两边一起改。
 - **`npm publish` 不触发构建。** 忘了 `npm run build` 就会把旧的 `lib/` 发出去。
   第 0 步的 `git status` 检查就是防这个。
 

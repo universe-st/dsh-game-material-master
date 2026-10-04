@@ -15,7 +15,17 @@ import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { TypertRemoteService } from "@deepseek-ai/dsh-typert-protocol";
 import { ARK_MODEL_PRESETS, DEFAULT_CONFIG, ROW_ORDER_VERSION, MINIMAX_HOST_PRESETS, MINIMAX_MODEL_PRESETS, loadConfig, maskConfig, migrateLegacyDataRoot, projectsRoot, saveConfig } from "./config.js";
-import { DEFAULT_ROW_ORDER, DEFAULT_TURN_PROMPT, DEFAULT_VIDEO_PROMPT, DIRECTION_KEYS, TURN_DIRECTION_DEFAULT, TURN_FRAME_COUNT_MAX, TURN_FRAME_COUNT_MIN, defaultImagePrompts, directionOf } from "./directions.js";
+import {
+  DEFAULT_ROW_ORDER,
+  DIRECTION_KEYS,
+  TURN_DIRECTION_DEFAULT,
+  TURN_FRAME_COUNT_MAX,
+  TURN_FRAME_COUNT_MIN,
+  defaultPrompts,
+  directionOf,
+  localizePrompts,
+  normalizePromptLang
+} from "./directions.js";
 import { checkFfmpeg } from "./media.js";
 import { testArk } from "./ark.js";
 import {
@@ -331,10 +341,20 @@ export class GameStudioGateway extends TypertRemoteService {
     return { projectId: project.id };
   }
   async getProject(payload) {
-    const projectId = asString(asRecord(payload).projectId);
-    const project = await readProject(projectId);
+    const input = asRecord(payload);
+    const projectId = asString(input.projectId);
+    // 界面语言由浏览器半区带过来（宿主没有 locale 服务）。带上它，内置默认提示词
+    // 才会跟着 DSH 的语言走——只有「从没被改过」的那些会被换成目标语言的默认值。
+    const lang = input.lang === undefined ? undefined : normalizePromptLang(input.lang);
+    let project = await readProject(projectId);
     if (project === undefined)
       throw new Error(`项目不存在：${projectId}`);
+    if (lang !== undefined && localizePrompts(project.prompts, lang)) {
+      project = await patchProject(projectId, (draft) => {
+        localizePrompts(draft.prompts, lang);
+        return draft;
+      });
+    }
     return {
       ...project,
       jobs: listJobs(projectId),
@@ -394,16 +414,18 @@ export class GameStudioGateway extends TypertRemoteService {
     const resetImages = input.resetImagesToDefault === true;
     const resetVideo = input.resetVideoToDefault === true;
     const resetTurn = input.resetTurnToDefault === true;
+    // 「重置为默认」要重置成**当前界面语言**的默认值，否则英文界面点一下会掉出中文提示词。
+    const defaults = defaultPrompts(normalizePromptLang(input.lang));
     await patchProject(projectId, (project) => {
       // 提示词模板升级后（例如这次把方位语义改对），老项目要能一键重新套用默认值。
       if (resetImages)
-        project.prompts.images = defaultImagePrompts();
+        project.prompts.images = defaults.images;
       if (resetVideo) {
-        project.prompts.video = DEFAULT_VIDEO_PROMPT;
+        project.prompts.video = defaults.video;
         project.prompts.videoPerDirection = {};
       }
       if (resetTurn)
-        project.prompts.turn = DEFAULT_TURN_PROMPT;
+        project.prompts.turn = defaults.turn;
       if (turn !== undefined && turn.trim() !== "")
         project.prompts.turn = turn;
       if (images !== undefined) {

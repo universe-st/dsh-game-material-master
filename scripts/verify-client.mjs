@@ -752,4 +752,24 @@ function checkInputAndZoomContracts(text, label) {
     `${label}：阶段④ 解释了两次抠像的分工`,
     /两次读的是同一份帧缓存/.test(text) && /抠像在这里会\*\*再跑一次\*\*/.test(text)
   );
+
+  // 内置默认提示词存在宿主侧，而宿主拿不到 locale 服务——语言必须由浏览器半区带过去，
+  // 否则切到英文后提示词还是中文。少一处就静默失效，只有真去切一次语言才看得出来。
+  check(
+    `${label}：读项目时把界面语言带给宿主`,
+    /getProject: \(projectId\) => call\("getProject", \{ projectId, lang: activeLang\(\) \}\)/.test(text)
+  );
+  check(
+    `${label}：保存/重置提示词时也带上界面语言`,
+    /savePrompts: \(payload\) => call\("savePrompts", \{ lang: activeLang\(\), \.\.\.payload \}\)/.test(text)
+  );
+  check(
+    `${label}：activeLang 认得出 en 并把其它语言算作 zh`,
+    // lib/ 是 tsc 的产物，类型标注（`: "zh" | "en"`）会被抹掉——两种写法都要认。
+    /function activeLang\(\s*\)?(?::\s*"zh"\s*\|\s*"en")?\s*\{/.test(text) && /startsWith\("en"\) \? "en" : "zh"/.test(text)
+  );
+  check(
+    `${label}：语言切换会重新拉一次项目（提示词才会跟着换）`,
+    /\}, \[projectId, loadProject, localeTick\]\);/.test(text) && /const localeTick = useLocaleTick\(\);/.test(text)
+  );
 }

@@ -959,8 +959,22 @@
     const ZH: Record<string, string> = Object.fromEntries(Object.keys(EN).map((key) => [key, key]));
     /** DSH locale 服务给的绑定翻译函数；服务还没挂载时是 null。 */
     let boundTranslate: ((key: string, params?: Record<string, unknown>) => string) | null = null;
+    /** locale 服务本身；宿主侧的默认提示词要靠它算出「该用哪国话」。 */
+    let localeService: any = null;
     /** 语言变化时要重渲染的订阅者（各模块顶层组件挂一个，子树跟着重渲染）。 */
     const localeListeners: Set<() => void> = new Set();
+
+    /**
+     * 当前界面语言，规整成宿主认识的两个值。
+     *
+     * 内置默认提示词（八方向生图 / 行走视频 / 转圈视频）存在宿主侧，
+     * 宿主没有 locale 服务，所以每次读写提示词都把它带过去。
+     * 服务不在时按中文算——那也正是界面当时的语言。
+     */
+    function activeLang(): "zh" | "en" {
+      const active = localeService?.getSnapshot?.()?.active;
+      return typeof active === "string" && active.trim().toLowerCase().startsWith("en") ? "en" : "zh";
+    }
 
     /** `{name}` 插值；与 locale 服务内部用的是同一条规则。 */
     function fill(text: string, params?: Record<string, unknown>): string {
@@ -985,6 +999,7 @@
       if (locale === undefined || locale === null) return false;
       try {
         ctx.effect(() => locale.register(I18N_NS, { zh: ZH, en: EN }), `${PACKAGE}: i18n dictionary`);
+        localeService = locale;
         boundTranslate = locale.bind(I18N_NS);
         // 模块级文案表是**模块加载时**求值的（那时还没有 locale 服务，全是中文原文），
         // 所以挂上服务的第一件事就是把它们按当前语言重算一遍。
@@ -2147,7 +2162,7 @@
 
     // ── 主体工作台 ───────────────────────────────────────────────────────
     function StudioPanel(props) {
-      useLocaleTick();
+      const localeTick = useLocaleTick();
       const api = props?.api;
       const [projects, setProjects] = React.useState([]);
       const [projectId, setProjectId] = React.useState(null);
@@ -2237,7 +2252,9 @@
           return;
         }
         void loadProject(projectId);
-      }, [projectId, loadProject]);
+        // `localeTick` 也在依赖里：内置默认提示词存在宿主侧，界面重渲染换不掉它们，
+        // 语言一变就得重新拉一次项目（宿主会把「从没改过」的提示词换成新语言的默认值）。
+      }, [projectId, loadProject, localeTick]);
 
       // 有任务在跑时轮询；跑完自动停。
       React.useEffect(() => {
@@ -9545,11 +9562,14 @@
         testMinimax: () => call("testMinimax"),
         listProjects: () => call("listProjects"),
         createProject: (payload) => call("createProject", payload),
-        getProject: (projectId) => call("getProject", { projectId }),
+        // 内置默认提示词存在宿主侧，所以「读」和「重置为默认」都要把当前界面语言带过去：
+        // getProject 借它把「从没改过」的提示词换成目标语言的默认值，
+        // savePrompts 借它决定「重置为默认」重置成哪国话（`...payload` 在后，显式传的优先）。
+        getProject: (projectId) => call("getProject", { projectId, lang: activeLang() }),
         deleteProject: (payload) => call("deleteProject", payload),
         renameProject: (payload) => call("renameProject", payload),
         uploadSource: (payload) => call("uploadSource", payload),
-        savePrompts: (payload) => call("savePrompts", payload),
+        savePrompts: (payload) => call("savePrompts", { lang: activeLang(), ...payload }),
         saveSettings: (payload) => call("saveSettings", payload),
         setApproved: (payload) => call("setApproved", payload),
         revealProject: (payload) => call("revealProject", payload),
