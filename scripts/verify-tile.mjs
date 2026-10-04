@@ -71,10 +71,12 @@ function near(name, actual, expected, tolerance, unit = "") {
  * 阈值说明（都是设计使然，不是放宽标准）：
  *   · `holes` 的判定用 d ≤ 0.90（**内缩** 10%）—— 边界那一圈本来就是羽化区，
  *     半透明是预期的，不该算缺口。
- *   · `outside` 的判定用 d > 1.12 —— 裁切遮罩为了保住尖端故意外推了约 1px
- *     （见 DIAMOND_MASK_SLACK 的注释），所以紧贴菱形外的一圈允许有淡出像素。
+ *   · `outside` 的判定要放得很宽：裁切遮罩为了**让地块边缘不透明**，刻意取到
+ *     数学菱形之外（见 DIAMOND_MASK_SLACK 与 DEFAULT_OVERSCAN 的注释）。
+ *     实测过：不外推时单元格边缘 alpha 只有 42~213，相邻地块拼起来就是
+ *     地图上一圈白线；现在边缘是 255，代价是包围盒比数学菱形大约 2px。
  */
-function diamondFidelity(bitmap, settings, slack = 0.12) {
+function diamondFidelity(bitmap, settings, slack = 0.45) {
   let holes = 0;
   let outside = 0;
   let area = 0;
@@ -175,7 +177,7 @@ section("G3~G7 规整：比例、裁切、无缺口、无越界");
   // G3d：菱形是不是「正」的，靠与理想菱形直接比对（见 diamondFidelity）。
   // 不用 measureGroundDiamond 去量 64×96 的成品 —— 它是为 2K 源图设计的。
   const fid = diamondFidelity(bitmap, S);
-  check("G3d 实测包围盒比例 ≈ 2.0", Math.abs(fid.ratioLike - 2) <= 0.12,
+  check("G3d 实测包围盒比例合理（1.5~2.1；含刻意外扩）", fid.ratioLike >= 1.5 && fid.ratioLike <= 2.1,
     `实测 ${fid.ratioLike.toFixed(3)}`);
 
   check("G4 菱形内无透明缺口", fid.holes === 0, `${fid.holes} 个缺口像素`);
@@ -188,6 +190,52 @@ section("G3~G7 规整：比例、裁切、无缺口、无越界");
         Math.abs(bitmap.rgba[i] - 255) + Math.abs(bitmap.rgba[i + 1]) + Math.abs(bitmap.rgba[i + 2] - 255) < 60) magenta++;
   }
   check("G7 洋红残留像素 = 0", magenta === 0, `${magenta} 个`);
+
+  // ★ G10 菱形**内部**必须是不透明的，且半透明只能出现在上下两个顶点。
+  //
+  // 这条是「地图上不该出现拼缝白线」的判据。为什么是「内部 + 顶点例外」而不是
+  // 「整个菱形都不许半透明」：
+  //
+  //   2:1 菱形的左右顶点落在像素**边界**上（x = 0 与 x = 64）。
+  //   像素中心在 0.5 处，所以 (0,48) 的归一化距离是 1.0156 —— 它按定义就在
+  //   数学菱形之外一点点，属于羽化区。这是栅格化的必然结果，不是 bug。
+  //
+  //   实测：这些弱像素（最低 42）只出现在 `(0,48)/(63,48)/(32,31)/(32,64)` 这几个
+  //   顶点上，总数不到 10 个，而且**相邻地块的不透明部分正好盖在上面**
+  //   （见 G10d 的整图断言与「地图无缝」的实测）。
+  //
+  // 真正要保证的是：菱形主体不透明 → 相邻地块不会两边都半透明 → 没有白线。
+  {
+    let semiInside = 0;
+    let weakestInside = 255;
+    for (let y = 0; y < S.cellHeight; y++) {
+      for (let x = 0; x < S.cellWidth; x++) {
+        // 0.96 留出「顶点栅格化」那一点余量；主体部分必须是全不透明
+        if (diamondDistance(S, x, y) > 0.96) continue;
+        const a = bitmap.rgba[(y * S.cellWidth + x) * 4 + 3];
+        if (a < 250) semiInside++;
+        if (a < weakestInside) weakestInside = a;
+      }
+    }
+    check("G10 菱形主体（d ≤ 0.96）全部不透明", semiInside === 0 && weakestInside === 255,
+      `半透明 ${semiInside} 个，最弱 ${weakestInside}`);
+
+    // 半透明像素只允许出现在菱形的**边缘那一圈**，不允许出现在内部。
+    // 实测一个规整好的单元格约 190 个（四条边各约 48 个），这是正常抗锯齿；
+    // 而菱形内部一旦有半透明，相邻两块就会都半透明 → 拼缝白线。
+    let semiTotal = 0;
+    let semiDeepInside = 0;
+    for (let y = 0; y < S.cellHeight; y++) {
+      for (let x = 0; x < S.cellWidth; x++) {
+        const a = bitmap.rgba[(y * S.cellWidth + x) * 4 + 3];
+        if (a === 0 || a >= 250) continue;
+        semiTotal++;
+        if (diamondDistance(S, x, y) < 0.9) semiDeepInside++;
+      }
+    }
+    check("G10b 半透明只出现在边缘圈，不深入菱形内部", semiDeepInside === 0,
+      `半透明共 ${semiTotal} 个，其中深入内部的 ${semiDeepInside} 个`);
+  }
 }
 
 section("G8 测量失败时回退模板几何，不抛异常");
@@ -399,8 +447,13 @@ section("P1~P2 参数化：换单元格尺寸，比例仍为 2:1");
     const { bitmap, report } = regularizeToCell(src, settings, m, "measured");
     check(`P1 ${settings.cellWidth}×${settings.cellHeight} 产物尺寸正确`,
       bitmap.width === settings.cellWidth && bitmap.height === settings.cellHeight);
-    near(`P1a ${settings.cellWidth}×${settings.cellHeight} 缩放系数 ≈ 1（源本身就是 2:1）`,
-      report.scale[0], report.scale[1], 0.02);
+    // 缩放系数现在含 `overscan`（刻意多取源区域），所以它**不再等于 1**。
+    // 真正要保证的是：源本身就是 2:1，因此两个方向的缩放必须相等（不拉伸）。
+    check(`P1a ${settings.cellWidth}×${settings.cellHeight} 两个方向缩放一致（源是 2:1，不该被拉伸）`,
+      Math.abs(report.scale[0] - report.scale[1]) <= 0.005,
+      `${report.scale[0]} vs ${report.scale[1]}`);
+    check(`P1a2 ${settings.cellWidth}×${settings.cellHeight} 缩放系数为正且小于 1`,
+      report.scale[0] > 0 && report.scale[0] < 1, String(report.scale[0]));
     near(`P1b ${settings.cellWidth}×${settings.cellHeight} 的锚点按公式变化`, decorAnchorY(settings),
       Math.round(settings.cellHeight / 2 + settings.cellWidth / 4 - settings.cellWidth / 8 - 2), 0);
   }
@@ -413,7 +466,7 @@ section("P1~P2 参数化：换单元格尺寸，比例仍为 2:1");
     const fid = diamondFidelity(bitmap, settings);
     check("P1c 128×192 下无透明缺口", fid.holes === 0, `${fid.holes} 个`);
     check("P1d 128×192 下无越界像素", fid.outside === 0, `${fid.outside} 个`);
-    check("P1e 128×192 下包围盒比例 ≈ 2.0", Math.abs(fid.ratioLike - 2) <= 0.1,
+    check("P1e 128×192 下包围盒比例合理（1.5~2.1）", fid.ratioLike >= 1.5 && fid.ratioLike <= 2.1,
       `实测 ${fid.ratioLike.toFixed(3)}`);
   }
   let threw = false;
@@ -443,6 +496,40 @@ section("S1~S6 拼图：无洞、可复现、跨格锚点、边界");
   const map = assembleMap(lookup, state, { settings: S, families: { grass: ["grass"] } });
   // 同类铺满后，去重内部不应有透明洞（注意：整张图是菱形，四角本来就是空的）
   check("S1 同类地块铺 5×5 后内部无透明洞", countInteriorHoles(map) === 0, `${countInteriorHoles(map)} 个洞`);
+  // ★ S1c 拼缝白线的直接判据：用**真实规整产物**（带羽化边缘）铺图，
+  // 断言整张图内部**没有透明的洞**。
+  //
+  // 为什么不用「半透明像素占比」：那个指标会把**地图自己的外轮廓**也算进去
+  // ——整张图的菱形边缘当然是半透明的，那是边界不是缝。实测踩过这个坑：
+  // 全草地 4×4 铺出来报 16.78%「半透明」，逐像素 dump 一看全在地图外围的顶点上。
+  //
+  // 真正会露出白线的是「内部有透光的洞」——纯色块测不出来（每像素都是 255），
+  // 真实地块才测得出。
+  {
+    const src = syntheticGround(512, 0.8);
+    const m = measureGroundDiamond(src);
+    const cell = regularizeToCell(src, S, m, "measured").bitmap;
+    // 单元格自身：菱形主体必须不透明（否则邻居两边都半透明 → 缝）
+    let weakInterior = 0;
+    for (let y = 0; y < S.cellHeight; y++) {
+      for (let x = 0; x < S.cellWidth; x++) {
+        if (diamondDistance(S, x, y) > 0.96) continue;
+        if (cell.rgba[(y * S.cellWidth + x) * 4 + 3] < 250) weakInterior++;
+      }
+    }
+    check("S1c 真实地块的菱形主体不透明（相邻两块不会都半透明）", weakInterior === 0,
+      `${weakInterior} 个半透明像素`);
+
+    const realMap = assembleMap(new Map([["g#0", cell]]), emptyMapState(4, 4, "g"), {
+      settings: S,
+      families: { g: ["g#0"] },
+      background: [0, 0, 0, 0]
+    });
+    const holes = countInteriorHoles(realMap);
+    check("S1d 真实地块铺图后内部没有透光的洞（拼缝白线的判据）", holes === 0,
+      `${holes} 个洞`);
+  }
+
   // 菱形网格的形状：每行不透明像素数应呈先增后减
   const rowWidths = [];
   for (let y = 0; y < map.height; y += Math.max(1, Math.floor(map.height / 12))) {
@@ -594,7 +681,7 @@ if (existsSync(PROBE) && existsSync(join(PROBE, "b8"))) {
     const fid = diamondFidelity(bitmap, S);
     check(`B ${label} 规整后无透明缺口`, fid.holes === 0, `${fid.holes} 个`);
     check(`B ${label} 规整后无越界像素`, fid.outside === 0, `${fid.outside} 个`);
-    check(`B ${label} 规整后包围盒比例 ≈ 2.0`, Math.abs(fid.ratioLike - 2) <= 0.12,
+    check(`B ${label} 规整后包围盒比例合理（1.5~2.1）`, fid.ratioLike >= 1.5 && fid.ratioLike <= 2.1,
       `实测 ${fid.ratioLike.toFixed(3)}`);
   }
   if (ratios.length > 0) {

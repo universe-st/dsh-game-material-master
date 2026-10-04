@@ -51,6 +51,29 @@ export const DIAMOND_RATIO = 2 as const;
  */
 export const DIAMOND_MASK_SLACK = 1.0;
 
+/**
+ * 规整时把目标菱形放大的**比例**（相对于单元格菱形的半宽/半高）。
+ *
+ * ## 为什么需要它（拼缝白线的真正原因）
+ *
+ * 源图里菱形的边是**抗锯齿**的：从实心到全透明只有约 3 个源像素。
+ * 而源图 2048、单元格只有 64 宽 —— 缩放系数约 0.03，也就是**每个输出像素
+ * 要平均约 30×60 个源像素**。在菱形边界上，采样核一半在菱形内、一半在外，
+ * 于是边界像素的 alpha 只到 ~213，往外一圈掉到 42。
+ *
+ * 后果：单元格菱形的整条边都是半透明的，相邻两块拼起来两边都半透明，
+ * 背景从缝里透出来 —— 地图上出现一圈白线（实测就是这个问题）。
+ *
+ * 修法：**取到源菱形内侧一点**。把目标菱形放大 12%，单元格边界对应的源坐标
+ * 就落到源菱形内部约 12% 半宽处 —— 那里采样核完全在实心区，alpha 是 255。
+ * 再让掩盖把菱形之外切掉，于是「边界不透明 + 不带出体外像素」同时成立。
+ *
+ * ⚠️ 必须是**比例**而不是固定像素数。曾经写成「多取 6px」，
+ * 在 32×48 的单元格上等于放大 37%，把地块横向拉伸了 27%（x/y 缩放比失衡）。
+ * 比例则天然按两个方向等比放大，不会变形 —— `verify-tile.mjs` 的 P1a 钉这条。
+ */
+export const OVERSCAN_RATIO = 0.12;
+
 /** 一个地块单元格的几何规格。 */
 export interface TileSettings {
   /** 单元格宽（像素）。必须能被 4 整除。 */
@@ -857,13 +880,29 @@ export interface TemplateGeometry {
  * 1. 把实测菱形仿射映射到目标菱形（上 (32,32) 右 (64,48) 下 (32,64) 左 (0,48)）；
  * 2. 按**数学菱形**裁 alpha（菱形外一律 0）；
  * 3. 剔洋红残留。
+ *
+ * ## 为什么要 `overscanRatio`（默认 12%）
+ *
+ * 源图里菱形的边是**抗锯齿**的，从实心到全透明只有约 3 个源像素。
+ * 而源图 2048、单元格只有 64 宽 —— 缩放系数约 0.03，即**每个输出像素平均
+ * 30×60 个源像素**。在菱形边界上采样核一半在内一半在外，边界像素的 alpha
+ * 只到 ~213，再往外一圈掉到 42。
+ *
+ * 后果：单元格菱形的**整条边**都是半透明的；相邻两块拼起来两边都半透明，
+ * 背景从缝里透出来 —— 地图上出现一圈白线。
+ *
+ * 修法不是「把半透明变不透明」（那会把锯齿变成硬边、白边又回来了），
+ * 而是**往源菱形内侧取一点**：把目标菱形按比例放大 12%，单元格边界对应的
+ * 源坐标就落在实心区里，采样核完全在内部，alpha 是 255。
+ * 再让遮罩把菱形之外切掉 —— 于是「边界不透明」与「不带出体外像素」同时成立。
  */
 export function regularizeToCell(
   src: Bitmap,
   settings: TileSettings,
   measure: GroundMeasure | TemplateGeometry,
   mode: "measured" | "template",
-  fallbackReason?: string
+  fallbackReason?: string,
+  overscanRatio = OVERSCAN_RATIO
 ): { bitmap: Bitmap; report: TileGeomReport } {
   assertSettings(settings);
   const target = diamondPoints(settings);
@@ -890,9 +929,14 @@ export function regularizeToCell(
     halfHeight = t.halfHeight;
   }
 
-  const sx = targetHalfW / halfWidth;
-  const sy = targetHalfH / halfHeight;
+  // 目标菱形按**比例**放大，让单元格边界对应的源坐标落在源菱形内侧。
+  // 两个方向各自按自己的半宽/半高取同样的比例，所以缩放比永远相等（不变形）。
+  const growW = Math.max(0, overscanRatio) * targetHalfW;
+  const growH = Math.max(0, overscanRatio) * targetHalfH;
+  const sx = (targetHalfW + growW) / halfWidth;
+  const sy = (targetHalfH + growH) / halfHeight;
   const bitmap = affineTransform(src, settings.cellWidth, settings.cellHeight, {
+    // 以目标菱形中心为基准缩放：srcX = centerX + (x - targetCx) / sx
     a: 1 / sx,
     b: 0,
     c: centerX - targetCx / sx,

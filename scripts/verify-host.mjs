@@ -176,7 +176,9 @@ async function main() {
   // ── 2. 配置 ────────────────────────────────────────────────────────────
   console.log("2) 配置读写与脱敏");
   const initial = await studio.getConfig();
-  check("默认使用 Seedream 4.0", initial.arkModel === "doubao-seedream-4-0-250828", initial.arkModel);
+  // 默认模型是 5.0 Flash。**不要改回 4.0**：实测 4.0 会把 2:1 等距菱形画成近正方形
+  // （比例 1.058）并且只输出 JPEG，地图地块模块依赖这个几何，用它必然量不出菱形。
+  check("默认使用 Seedream 5.0 Flash", initial.arkModel === "doubao-seedream-5-0-flash-260915", initial.arkModel);
   check("ffmpeg 探测通过", initial.ffmpeg?.ok === true, initial.ffmpeg?.version ?? initial.ffmpeg?.error);
   check("默认单格 256×256", initial.cellWidth === 256 && initial.cellHeight === 256);
   check("默认每段抽 8 帧", initial.frameCount === 8);
