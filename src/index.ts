@@ -14,6 +14,7 @@ import { basename, dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { TypertRemoteService } from "@deepseek-ai/dsh-typert-protocol";
+import { appendJobLog } from "./jsonio.js";
 import { ARK_MODEL_PRESETS, DEFAULT_CONFIG, ROW_ORDER_VERSION, MINIMAX_HOST_PRESETS, MINIMAX_MODEL_PRESETS, loadConfig, maskConfig, migrateLegacyDataRoot, projectsRoot, saveConfig } from "./config.js";
 import {
   DEFAULT_ROW_ORDER,
@@ -85,10 +86,15 @@ import { registerStudioTools } from "./tools.js";
  * 为什么要合并而不是直接覆盖：清单里带着 `variants`（那是花钱生成的产物），
  * 界面只提交 `key/label/content/variantCount/...`。直接覆盖会让用户
  * **改一个标签就丢掉整批已生成的图**，而且不会报错。
+ *
+ * 返回 `changed`：**提示词真的变了**的那些地块 key。调用方只能作废这些 ——
+ * 只改标签 / 只改变体数不该把别的（或自己的）产物废掉。
+ * 判断「提示词是否变化」看的是 `content` 与 `mode`，因为只有它们会进提示词。
  */
-function mergeTileItems(existing: any[], incoming: any[]): any[] {
+function mergeTileItems(existing: any[], incoming: any[]): { items: any[]; changed: string[] } {
   const byKey = new Map(existing.map((item) => [item.key, item]));
   const out: any[] = [];
+  const changed: string[] = [];
   for (const raw of incoming) {
     const key = typeof raw?.key === "string" ? raw.key : "";
     if (key === "") continue;
@@ -108,14 +114,16 @@ function mergeTileItems(existing: any[], incoming: any[]): any[] {
       variants: previous === undefined ? [] : previous.variants.slice(0, variantCount),
       approved: previous?.approved
     };
-    // 内容变了 → 已生成的变体失效（它们画的是旧内容）
+    // 内容或生成方式变了 → 这个地块已生成的变体失效（它们画的是旧内容）。
+    // **只作废这一个**，别连累别的。
     if (previous !== undefined && (previous.content !== next.content || previous.mode !== next.mode)) {
       next.variants = [];
       next.approved = undefined;
+      changed.push(key);
     }
     out.push(next);
   }
-  return out.length > 0 ? out : existing;
+  return { items: out.length > 0 ? out : existing, changed };
 }
 
 export const name = "dsh-game-material-master";
@@ -702,15 +710,20 @@ export class GameStudioGateway extends TypertRemoteService {
     if (typeof input.name === "string" && input.name.trim() !== "") project.name = input.name.trim();
     if (typeof input.style === "string" && input.style !== project.style) {
       project.style = input.style;
-      // 改画风 = 改整套提示词 → 已生成的地块全部作废（重新生成要花钱）
-      tilegen.invalidateFrom(project, "generate");
+      // 改画风 = 改**每一个**地块的提示词 → 全部产物作废（重新生成要花钱）
+      tilegen.invalidateItems(project);
     }
     if (input.resetItemsToDefault === true) {
       project.items = tilegen.defaultTileItems(lang);
-      tilegen.invalidateFrom(project, "generate");
+      tilegen.invalidateItems(project);
     } else if (Array.isArray(input.items)) {
-      project.items = mergeTileItems(project.items, input.items as any[]);
-      tilegen.invalidateFrom(project, "generate");
+      const merged = mergeTileItems(project.items, input.items as any[]);
+      project.items = merged.items;
+      // ⚠️ 只作废**提示词真的变了**的那些地块。
+      // 这里一度无脑调 `invalidateFrom(project, "generate")`，而它是全量销毁 ——
+      // 结果「只改一个标签」也会把全部（花钱生成的）产物清空。
+      // 真机验证时抓出来的：验收之后任何一次保存都会让产物消失。
+      if (merged.changed.length > 0) tilegen.invalidateItems(project, merged.changed);
     }
     if (input.settings !== undefined) {
       const settings = { ...project.settings, ...(input.settings as any) };
@@ -766,7 +779,11 @@ export class GameStudioGateway extends TypertRemoteService {
       const allApproved = project.items.every((item) =>
         item.variants.length > 0 && item.variants.every((v) => v.approved === true));
       project.stages.review = { status: allApproved ? "done" : "idle", at: new Date().toISOString() };
-      log(project as any, "info", `${approved ? "通过" : "取消通过"}：${key ?? "全部"}${variant !== undefined ? ` 第 ${variant + 1} 张` : ""}`);
+      // ⚠️ 日志要用 tile 项目自己的字段（`project.logs`），不能用模块一那个 `log()` ——
+      // 它写的是 `project.log`，对 tile 项目来说是 undefined，一调就抛
+      // `Cannot read properties of undefined (reading 'push')`。
+      // 实测：走网关验收一个地块就会直接崩（纯函数自检发现不了）。
+      appendJobLog(project.logs, "info", `${approved ? "通过" : "取消通过"}：${key ?? "全部"}${variant !== undefined ? ` 第 ${variant + 1} 张` : ""}`);
     });
     return { ok: true };
   }
