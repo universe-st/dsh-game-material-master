@@ -60,10 +60,24 @@ plugin.apply(ctx);
 const studio = ctx.get("gameStudio");
 check("网关实例可用", studio !== undefined && typeof studio.createTileProject === "function");
 
+/**
+ * 等作业真正跑完。
+ *
+ * ⚠️ 不能只看 `tileBusy`：`background()` 先把 `job.running` 置空、**之后**才写
+ * 那次收尾 patch（`stages[kind] = done`、`map.png` 之类）。只等 busy 会在
+ * 收尾 patch 落盘前就返回 —— 实测「拼图阶段 done」偶发看到 `running`、
+ * `map.png` 还是 undefined，后面「导出」直接报「还没拼图」。
+ * 所以还要等到阶段状态**不再是 running**。
+ */
 const waitIdle = async (id, ms = 60000) => {
   const t0 = Date.now();
   while (Date.now() - t0 < ms) {
-    if (!tilegen.tileBusy(id)) return true;
+    if (!tilegen.tileBusy(id)) {
+      const project = await tilegen.readTileProject(id).catch(() => undefined);
+      const running = project !== undefined &&
+        Object.values(project.stages ?? {}).some((stage) => stage?.status === "running");
+      if (!running) return true;
+    }
     await new Promise((r) => setTimeout(r, 100));
   }
   return false;
@@ -321,6 +335,68 @@ section("④ 拼图 / ⑤ 导出（走网关，免费）");
       const afterEmpty = await studio.getTileProject({ projectId: id });
       check("提交空 cells 不会把布局清空", afterEmpty.map.cells.length > 0,
         `${afterEmpty.map.cells.length} 行`);
+    }
+
+    // ── 建筑：布局里放一栋楼必须能拼出来，而且要真的画上去 ──────────────
+    {
+      // 造一个 2×2 建筑变体（借用地块的贴图，只为验证拼图管线）
+      const beforeBuilding = await studio.getTileProject({ projectId: id });
+      const grassRel = beforeBuilding.items.find((i) => i.variants.length > 0).variants[0].cell;
+      const grassBytes = await readFile(tilegen.tileAssetPath(id, grassRel));
+      await mkdir(join(tilegen.tileProjectDir(id), "cell"), { recursive: true });
+      await writeFile(join(tilegen.tileProjectDir(id), "cell", "building.v1.png"), grassBytes);
+      await tilegen.patchTileProject(id, (fresh) => {
+        const b = fresh.items.find((i) => i.key === "building");
+        if (b !== undefined) {
+          b.variants[0] = {
+            index: 0, cell: "cell/building.v1.png", approved: true,
+            report: { mode: "measured", scale: [1, 1], baseFraction: 0.75 }
+          };
+        }
+        const cells = Array.from({ length: 6 }, () => Array.from({ length: 6 }, () => "grass"));
+        for (const [r, c] of [[2, 2], [2, 3], [3, 2], [3, 3]]) cells[r][c] = "building";
+        fresh.map = {
+          ...fresh.map, rows: 6, cols: 6, seed: 7, cells, decor: {},
+          buildings: [], buildingGround: [], png: undefined, json: undefined, pixel: undefined
+        };
+      });
+      const bStart = await studio.runTileMap({ projectId: id, rows: 6, cols: 6, seed: 7, fill: "grass", decorDensity: 0 });
+      check("布局里有建筑时能拼图（不会被预校验拦下）", bStart.started === true, JSON.stringify(bStart));
+      await waitIdle(id);
+      const b1 = await studio.getTileProject({ projectId: id });
+      check("建筑被记进了 buildings", (b1.map.buildings ?? []).length === 1,
+        JSON.stringify(b1.map.buildings));
+      check("建筑的占格被清空（否则同一精灵会被当 1 格地面重复画）",
+        b1.map.cells[2][2] === "" && b1.map.cells[3][3] === "",
+        JSON.stringify(b1.map.cells[2]));
+      check("建筑底面记了垫底地面，且是**变体名**（lookup 的键就是它）",
+        (b1.map.buildingGround ?? []).length === 1 && String(b1.map.buildingGround[0][4]).includes("#"),
+        JSON.stringify(b1.map.buildingGround));
+
+      // ★ 重跑一次：建筑的键已经被自己清掉了，记录必须能沿用，否则楼会凭空消失
+      await studio.runTileMap({ projectId: id, rows: 6, cols: 6, seed: 7, fill: "grass", decorDensity: 0 });
+      await waitIdle(id);
+      const b2 = await studio.getTileProject({ projectId: id });
+      check("重跑拼图后建筑仍在（记录被沿用，没被自己清掉）", (b2.map.buildings ?? []).length === 1,
+        JSON.stringify(b2.map.buildings));
+      check("重跑后垫底地面还是变体名", String(b2.map.buildingGround?.[0]?.[4] ?? "").includes("#"),
+        JSON.stringify(b2.map.buildingGround));
+    }
+
+    // ★ 幽灵建筑：重新保存布局时，旧的 buildings / buildingGround 必须清掉。
+    // 它们是**由布局推导出来的**；留着的话用户把楼挪走之后，
+    // 拼图会在没有建筑的地方硬画一栋楼（实测地图上凭空多出一片屋顶）。
+    //
+    // 放在最后：`saveTileMapCells` 会作废地图，后面的导出测试还要用那张图。
+    {
+      await studio.saveTileMapCells({
+        projectId: id,
+        cells: Array.from({ length: 4 }, () => Array.from({ length: 4 }, () => "grass"))
+      });
+      const b3 = await studio.getTileProject({ projectId: id });
+      check("重新保存布局会清掉旧的建筑记录（避免幽灵建筑）",
+        (b3.map.buildings ?? []).length === 0 && (b3.map.buildingGround ?? []).length === 0,
+        JSON.stringify({ buildings: b3.map.buildings, ground: b3.map.buildingGround }));
     }
   }
 }

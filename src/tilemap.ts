@@ -34,6 +34,13 @@ export interface TileMapState {
   decor: Record<string, string>;
   /** 跨格建筑锚点：`[行, 列, key]`。 */
   buildings: Array<[number, number, string]>;
+  /**
+   * 建筑底面原来的地面地块：`[行, 列, 列数, 行数, 地面地块键]`。
+   *
+   * 建筑占掉的那几格会被清空（否则同一个精灵会被当 1 格地面重复画），
+   * 所以垫底需要单独记一份，否则建筑脚下会露出透明洞。
+   */
+  buildingGround?: Array<[number, number, number, number, string]>;
   /** 拼图产物（相对项目目录）。未拼图时无此字段。 */
   png?: string;
   json?: string;
@@ -141,6 +148,49 @@ export function tileOriginAt(layout: TileLayout, r: number, c: number): { x: num
   };
 }
 
+/**
+ * 在画布上填一个**实心菱形**（用于建筑底面的地面垫底）。
+ *
+ * 为什么需要：建筑贴图只覆盖它自己那块形状，底面菱形的四个角是透明的，
+ * 而它占掉的 2×2 格已经被清空（否则同一个精灵会被当 1 格地面再画 4 遍）。
+ * 不垫底的话地图上会露出一块**透明洞**（实测建筑脚下是白色菱形缺口）。
+ */
+function fillDiamondSolid(
+  dst: Buffer, dstW: number, dstH: number,
+  cx: number, cy: number, halfW: number, halfH: number,
+  color: [number, number, number], alpha: number
+): void {
+  const y0 = Math.max(0, Math.floor(cy - halfH));
+  const y1 = Math.min(dstH - 1, Math.ceil(cy + halfH));
+  for (let y = y0; y <= y1; y++) {
+    const dy = Math.abs(y + 0.5 - cy) / halfH;
+    if (dy > 1) continue;
+    const half = halfW * (1 - dy);
+    const x0 = Math.max(0, Math.ceil(cx - half));
+    const x1 = Math.min(dstW - 1, Math.floor(cx + half));
+    for (let x = x0; x <= x1; x++) {
+      const o = (y * dstW + x) * 4;
+      const a = alpha / 255;
+      dst[o] = Math.round(color[0] * a + dst[o] * (1 - a));
+      dst[o + 1] = Math.round(color[1] * a + dst[o + 1] * (1 - a));
+      dst[o + 2] = Math.round(color[2] * a + dst[o + 2] * (1 - a));
+      dst[o + 3] = Math.max(dst[o + 3], alpha);
+    }
+  }
+}
+
+/** 一张贴图里不透明像素的平均颜色（用作垫底色）。 */
+function averageColor(src: Bitmap): [number, number, number] {
+  let r = 0, g = 0, b = 0, n = 0;
+  for (let i = 0; i < src.width * src.height; i++) {
+    const o = i * 4;
+    if (src.rgba[o + 3] < 200) continue;
+    r += src.rgba[o]; g += src.rgba[o + 1]; b += src.rgba[o + 2]; n++;
+  }
+  if (n === 0) return [0, 0, 0];
+  return [r / n, g / n, b / n];
+}
+
 export function assembleMap(
   lookup: Map<string, Bitmap>,
   state: TileMapState,
@@ -152,6 +202,7 @@ export function assembleMap(
   if (state.rows > 64 || state.cols > 64) throw new Error(`地图最大 64×64，收到 ${state.cols}×${state.rows}`);
   const layout = tileLayout(settings, state.rows, state.cols);
   const { stepX, stepY, canvasW, canvasH } = layout;
+  const cellW = settings.cellWidth;
   const cellH = settings.cellHeight;
   // 画布尺寸守卫：不守卫的话 64×64 会尝试分配几百 MB 然后 OOM
   if (canvasW * canvasH > 64 * 1024 * 1024) {
@@ -168,6 +219,12 @@ export function assembleMap(
   }
 
   const at = (r: number, c: number) => tileOriginAt(layout, r, c);
+
+  // 建筑底面原来是哪种地面 —— 用来给它垫底（见 fillDiamondSolid 的注释）
+  const groundByBuilding = new Map<string, { key: string; fw: number; fh: number }>();
+  for (const entry of state.buildingGround ?? []) {
+    groundByBuilding.set(`${entry[0]},${entry[1]}`, { key: entry[4], fw: entry[2], fh: entry[3] });
+  }
 
   const rng = mulberry32(state.seed);
   const decorAt = new Map<string, string[]>();
@@ -200,13 +257,40 @@ export function assembleMap(
     }
   }
 
-  // 跨格建筑：贴图约定「大菱形下顶点」在 (w/2, h − 8·scaleFactor)，
-  // 这里按 cellHeight 折算：贴图自己已经留了底边距，所以锚到 2×2 区域的下顶点。
+  // 跨格建筑：贴图是「底面格块宽度、往上长高」的立体图。
+  //
+  // 摆放口径：底面菱形中心要对到锚点格的**几何中心**，也就是世界坐标
+  // `(originX + (c−r)·stepX + cellWidth/2, originY + (c+r)·stepY + cellHeight/2)`。
+  // 上半部分自然溢出到上面那些格子上，配合 (r+c) 递增的绘制顺序形成正确遮挡。
+  //
+  // ⚠️ 贴图**不是** 2 格高：它是按底面宽度等比缩放的，高度由模板宽高比决定，
+  // 所以底面在贴图里的位置要按 `baseFraction` 取，不能想当然用「贴图中心」。
   for (const [r, c, name] of state.buildings) {
     const sprite = lookup.get(name);
     if (sprite === undefined) continue;
-    const x = Math.round(layout.originX + (c - r) * stepX - sprite.width / 2);
-    const y = Math.round(layout.originY + (r + c + 2) * stepY - sprite.height + Math.round(cellH / 12));
+    const at2 = at(r, c);
+    // 先给底面垫一块实心地面菱形，避免建筑脚下露出透明洞。
+    //
+    // ⚠️ 菱形的尺寸要按**占格**算：`(fw+fh)/2 · cellWidth/2` 宽、
+    // 其一半为高（菱形高 = 宽/2）。曾经想当然写成 `cellW × cellH/2`，
+    // 结果垫底高度是正确值的 3 倍、横向又不够，洞照样露出来。
+    const groundInfo = groundByBuilding.get(`${r},${c}`);
+    const ground = groundInfo === undefined ? undefined : lookup.get(groundInfo.key);
+    if (groundInfo !== undefined && ground !== undefined) {
+      const footHalfW = ((groundInfo.fw + groundInfo.fh) / 2) * (cellW / 2);
+      const footHalfH = footHalfW / 2;
+      fillDiamondSolid(
+        out, canvasW, canvasH,
+        at2.x + cellW / 2, at2.y + cellH / 2,
+        footHalfW, footHalfH,
+        averageColor(ground), 255
+      );
+    }
+    const baseY = typeof sprite.baseFraction === "number"
+      ? sprite.baseFraction * sprite.height
+      : sprite.height - cellH / 2;
+    const x = Math.round(at2.x + cellW / 2 - sprite.width / 2);
+    const y = Math.round(at2.y + cellH / 2 - baseY);
     blit(out, canvasW, canvasH, sprite, x, y);
   }
 

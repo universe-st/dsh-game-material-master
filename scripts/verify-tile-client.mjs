@@ -354,7 +354,41 @@ function renderTile(project, options = {}) {
   ];
   HOOK.cursor = 0;
   const tree = TileModule({ api });
+  // ⚠️ **立刻物化**整棵树。
+  //
+  // 假 React 的树是惰性的：函数型节点的展开依赖共享的 `HOOK.slots`，而槽位在
+  // 下一次 renderTile 时就被改写了。于是「渲染 A、再渲染 B、回头读 A 的文字」
+  // 会读到 **B 的文案** —— 断言莫名其妙失败，而界面其实是对的。
+  // （`byClassPart` 之所以看起来正常：它在遍历时就顺手把函数节点展开了。）
+  // 物化一次就把每个节点的 children 固化成当时的渲染结果，之后怎么读都稳定。
+  materialize(tree);
   return { tree, hooks: HOOK.cursor };
+}
+
+/** 就地展开所有函数型节点，把惰性树固化成静态树。 */
+function materialize(node, seen = new Set()) {
+  if (node === null || node === undefined || typeof node !== "object") return node;
+  if (Array.isArray(node)) {
+    for (let i = 0; i < node.length; i++) node[i] = materialize(node[i], seen);
+    return node;
+  }
+  if (seen.has(node)) return node;
+  seen.add(node);
+  if (node.type === undefined) return node;
+  let children = Array.isArray(node.children) ? node.children : [];
+  if (typeof node.type === "function") {
+    const props = { ...(node.props ?? {}) };
+    const kids = children.filter((c) => c !== null && c !== undefined);
+    if (kids.length === 1) props.children = kids[0];
+    else if (kids.length > 1) props.children = kids;
+    const rendered = node.type(props);
+    node.type = rendered?.type ?? "div";
+    node.props = rendered?.props ?? {};
+    children = Array.isArray(rendered?.children) ? rendered.children : (rendered?.children === undefined ? [] : [rendered.children]);
+    node.children = children;
+  }
+  for (let i = 0; i < children.length; i++) children[i] = materialize(children[i], seen);
+  return node;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -423,13 +457,28 @@ section("② 生成阶段：几何角标与排队遮罩");
   const warnBadge = byClassPart(tree, "SPR_tileBadge-warn");
   check("回退的角标用 warn 样式", warnBadge.length >= 1, `${warnBadge.length} 个`);
 
-  // 难度最高的那条：任务在跑时，还没轮到的格子必须显示「排队中」+ 出现遮罩
+  // 任务在跑时必须有**看得见的进度**、且**不遮挡面板**。
+  //
+  // 这里刻意不再要求出现 `SPR_ovl`（绝对定位遮罩）：生成一轮几十秒，
+  // 盖住整块面板意味着用户既切不了阶段、也点不到「停止」，更去不了别的模块。
+  // 现在用行内进度条（`SPR_progress`），它跟着文档流走、不拦点击。
   const running = makeProject({ job: { projectId: "tabc123", kind: "generate", targets: ["grass#v1", "grass#v2"], done: [], running: "grass#v1", startedAt: Date.now() } });
   const busyTree = renderTile(running, { stage: "generate" }).tree;
-  check("有任务在跑时出现遮罩", overlays(busyTree).length >= 1, `${overlays(busyTree).length} 个`);
-  check("遮罩文案是「正在生成地块…」", overlayText(busyTree).includes("正在生成地块"), overlayText(busyTree));
-  check("显示正在生成哪一张", allText(busyTree).includes("grass#v1"), allText(busyTree).slice(0, 200));
-  check("在跑时给出「停止」按钮", allText(busyTree).includes("停止"));
+  // ⚠️ 先把文字**立即**取出来。假 React 的树是惰性的（节点持有的是
+  // 「按槽位取值」的函数），后面任何一次 renderTile 都会改写共享的 HOOK.slots，
+  // 再回头 allText(busyTree) 读到的就是**另一个项目的文案** ——
+  // 表现为断言莫名其妙地失败，而界面其实是对的。收集元素（byClassPart）
+  // 不受影响，因为它在遍历时就把函数展开成真节点了。
+  const busyText = allText(busyTree);
+  check("有任务在跑时出现行内进度条", byClassPart(busyTree, "SPR_progress").length === 1,
+    `${byClassPart(busyTree, "SPR_progress").length} 个`);
+  check("面板级遮罩**不能**出现（否则挡住了别的页签和停止按钮）", overlays(busyTree).length === 0,
+    `${overlays(busyTree).length} 个`);
+  check("进度条文案是「正在生成地块…」", busyText.includes("正在生成地块"), busyText.slice(0, 200));
+  check("进度条显示正在生成哪一张", busyText.includes("grass#v1"), busyText.slice(0, 200));
+  check("进度条显示完成进度 n/total", busyText.includes("0/2"), busyText.slice(0, 200));
+  check("进度条是纯展示、不拦点击", byClassPart(busyTree, "SPR_progress").every((n) => n.props.role === "status"));
+  check("在跑时给出「停止」按钮", busyText.includes("停止"));
 
   // 「排队中」要在地块**还没生成**且它的目标在本次作业里时才出现 ——
   // 上面那份数据两个变体都已经就绪，所以看不到排队态。这里专门造一份空的。
@@ -629,6 +678,104 @@ section("④ 拼图阶段：手动编辑布局");
     String(cellNodes[0]?.props.style?.clipPath));
   check("格子的类名带 SPR_mapCellLabel 子节点",
     cellNodes.every((node) => collect(node, (n) => n.props?.className === "SPR_mapCellLabel").length === 1));
+
+  // ★ 回归：模板生成完之后必须**立刻能看见**。
+  // 这里踩过两次：
+  //   · 模板图一律渲染，`onError` 时把图 `display:none` 掉 —— 进面板时模板还没生成、
+  //     必然先 404 一次，于是**永远不再显示**（浏览器不会重跑 onError）；
+  //   · 不按阶段状态 gate，生成完了也不一定重新渲染。
+  // 现在改成「按 stages.template.status 决定渲不渲染」，所以两条都要断言。
+  {
+    const notReady = renderTile(makeProject({ stages: { ...makeProject().stages, template: { status: "idle" } } }), { stage: "template" }).tree;
+    const notReadyText = allText(notReady);
+    check("模板没生成时不渲染模板图（避免一次 404 之后永久隐藏）",
+      collect(notReady, (n) => n.type === "img" && String(n.props?.alt ?? "").startsWith("cell")).length === 0);
+    check("模板没生成时给一句可操作的提示",
+      notReadyText.includes("还没有模板") && notReadyText.includes("生成模板"),
+      notReadyText.slice(0, 200));
+
+    const ready = renderTile(makeProject({ stages: { ...makeProject().stages, template: { status: "done" } } }), { stage: "template" }).tree;
+    const imgs = collect(ready, (n) => n.type === "img");
+    check("模板生成后渲染两张模板图", imgs.length === 2, `${imgs.length} 张`);
+    check("模板图的 src 指向 template/",
+      imgs.every((n) => String(n.props.src).includes("/template/")),
+      imgs.map((n) => n.props.src).join(" | "));
+    check("建筑模板那格写了「2×2 建筑模板」", allText(ready).includes("2×2 建筑模板"), allText(ready).slice(0, 200));
+    // ⚠️ 不能再有「把图永久隐藏」的 onError
+    const source = readFileSync(target, "utf8");
+    check("模板图的 onError 不再把图 display:none 掉",
+      !/template\/\$\{[^}]*\}[\s\S]{0,300}?style\.display\s*=\s*"none"/.test(source) &&
+      !source.includes('event.target.style.display = "none"'));
+  }
+
+  // ★ 即时预览：草稿里的每一格都要**立刻**贴出对应地块的图，不必先保存再铺。
+  // 没有它用户只能看见空的菱形格子，「拼的时候就能预览」就无从谈起。
+  {
+    const preview = renderTile(
+      makeProject({
+        map: { rows: 3, cols: 3, seed: 5, cells, decor: {}, buildings: [] },
+        preview: { cells: { grass: ["cell/grass.v1.png", "cell/grass.v2.png"], dirt: ["cell/dirt.v1.png"], rock: ["cell/rock.v1.png"] }, cellWidth: 64, cellHeight: 96 }
+      }),
+      { stage: "map", brushKey: "dirt", mapDraft: cells.map((row) => [...row]) }
+    ).tree;
+    const arts = byClassPart(preview, "SPR_mapArt");
+    // 草稿里有 8 个非空格（3×3 里去掉中间那个空）
+    check("预览按草稿贴出每一格的图", arts.length === 8, `${arts.length} 张`);
+    check("预览的图真的指向地块贴图",
+      arts.every((n) => /tile-assets\/[^?]*\/cell\//.test(String(n.props.src))),
+      String(arts[0]?.props.src));
+    check("预览层不接事件（点击交给可点格子）",
+      arts.every((n) => n.props.className === "SPR_mapArt"));
+    // 同一格每次渲染都应固定用同一张（不闪）
+    const again = renderTile(
+      makeProject({
+        map: { rows: 3, cols: 3, seed: 5, cells, decor: {}, buildings: [] },
+        preview: { cells: { grass: ["cell/grass.v1.png", "cell/grass.v2.png"], dirt: ["cell/dirt.v1.png"], rock: ["cell/rock.v1.png"] }, cellWidth: 64, cellHeight: 96 }
+      }),
+      { stage: "map", brushKey: "dirt", mapDraft: cells.map((row) => [...row]) }
+    ).tree;
+    const arts2 = byClassPart(again, "SPR_mapArt");
+    check("同一格两次渲染贴的是同一张（不会闪）",
+      arts.length === arts2.length && arts.every((n, i) => n.props.src === arts2[i].props.src));
+    // 空格子不贴图
+    check("空格子不贴图", !arts.some((n) => String(n.props.alt).includes("· 空格")));
+    // 没有 preview 素材时不能崩，只是没有预览层
+    const noPreview = renderTile(makeProject({ map: { rows: 3, cols: 3, seed: 5, cells, decor: {}, buildings: [] } }),
+      { stage: "map", brushKey: "dirt", mapDraft: cells.map((row) => [...row]) }).tree;
+    check("没有 preview 素材时不崩、只是没有预览层", byClassPart(noPreview, "SPR_mapArt").length === 0);
+
+    // ★ 缩放到容器宽度：14×14 的叠层有 1792px 宽，不缩放就只能看见左上角，
+    // 「一眼看见整张地图」就没了。
+    {
+      const cells14 = Array.from({ length: 14 }, () => Array.from({ length: 14 }, () => "grass"));
+      const big = renderTile(
+        makeProject({
+          map: { rows: 14, cols: 14, seed: 5, cells: cells14, decor: {}, buildings: [], png: "map/map.png", pixel: { width: 1792, height: 900, left: 0, top: 200, scale: 2 } },
+          preview: { cells: { grass: ["cell/grass.v1.png"] }, cellWidth: 64, cellHeight: 96 }
+        }),
+        { stage: "map", brushKey: "grass", mapDraft: cells14 }
+      ).tree;
+      const scaler = byClassPart(big, "SPR_mapEditorScaler")[0];
+      const fitBox = byClassPart(big, "SPR_mapEditorFit")[0];
+      check("大地图会被缩放（不是原尺寸溢出）",
+        scaler !== undefined && /scale\(0\.\d+\)/.test(String(scaler.props.style.transform)),
+        String(scaler?.props.style.transform));
+      check("缩放容器占的是缩放后的尺寸（不会留一大片空白）",
+        fitBox !== undefined && Number.parseFloat(fitBox.props.style.width) <= 900,
+        `${fitBox?.props.style.width} x ${fitBox?.props.style.height}`);
+      // 缩放不该放大（小地图保持 1:1）
+      const small = renderTile(
+        makeProject({
+          map: { rows: 3, cols: 3, seed: 5, cells, decor: {}, buildings: [], png: "map/map.png", pixel: { width: 320, height: 288, left: 0, top: 100, scale: 2 } },
+          preview: { cells: { grass: ["cell/grass.v1.png"] }, cellWidth: 64, cellHeight: 96 }
+        }),
+        { stage: "map", brushKey: "grass", mapDraft: cells }
+      ).tree;
+      check("小地图保持 1:1（不放大）",
+        String(byClassPart(small, "SPR_mapEditorScaler")[0]?.props.style.transform) === "scale(1)",
+        String(byClassPart(small, "SPR_mapEditorScaler")[0]?.props.style.transform));
+    }
+  }
 
   // ★ 叠层坐标必须与宿主 `tileOriginAt` **逐点一致**。
   // 这是「点到的格子 = 看到的格子」的唯一保证：浏览器半区不能 import 宿主代码，

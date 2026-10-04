@@ -234,6 +234,42 @@ section("④ 拼图阶段（本地，免费）");
   const map = await MEDIA.decodeFile(join(dir, "map", "map.png"));
   check("T31 地图比单元格大", map.width > 200 && map.height > 200, `${map.width}×${map.height}`);
 
+  // ★ 回归：类别 ≠ 地块键时不能误报「没有已生成的图」。
+  // 默认清单里 `dirt2` 的类别是 `dirt`，而预校验一度拿**类别**表去查**地块键**，
+  // 于是「拼成地图」直接报「这些类别还没有已生成的地块：dirt2」——
+  // 而 dirt2 明明已经生成好了，整个第 ④ 步不可用。
+  {
+    const dirt2 = G.defaultTileItems().find((i) => i.key === "dirt2");
+    check("T31g dirt2 的类别与键不同（回归前提成立）",
+      dirt2 !== undefined && dirt2.family !== dirt2.key,
+      JSON.stringify({ key: dirt2?.key, family: dirt2?.family }));
+  }
+
+  // ★ 建筑：模板必须是「地基 + 立体空间」，不能是一整块实心洋红菱形。
+  // 旧的实心模板会让模型把它理解成「把这块地面填满」，生成出一张平铺的菱形石板。
+  {
+    const tpl = GEOM.renderBuildingTemplate({ settings: project.settings, size: 512 });
+    check("T31h 建筑模板不是正方形（留出了向上生长的空间）",
+      tpl.bitmap.width > 0 && tpl.bitmap.height > 0 && tpl.bitmap.height !== tpl.bitmap.width,
+      `${tpl.bitmap.width}x${tpl.bitmap.height}`);
+    let wire = 0, magenta = 0, ground = 0;
+    for (let i = 0; i < tpl.bitmap.width * tpl.bitmap.height; i++) {
+      const o = i * 4;
+      if (tpl.bitmap.rgba[o + 3] < 128) continue;
+      const r = tpl.bitmap.rgba[o], g = tpl.bitmap.rgba[o + 1], b = tpl.bitmap.rgba[o + 2];
+      if (b > 200 && r < 170 && g > 150) wire++;
+      else if (r > 240 && g < 30 && b > 240) magenta++;
+      else if (r > 200 && g > 200 && b > 200) ground++;
+    }
+    check("T31i 建筑模板有蓝色立体线框（表示能长多高）", wire > 100, `${wire} 像素`);
+    check("T31j 建筑模板有洋红地基轮廓", magenta > 100, `${magenta} 像素`);
+    check("T31k 建筑模板有浅灰地面（地基是地不是墙）", ground > 100, `${ground} 像素`);
+    const layout = GEOM.buildingTemplateLayout(project.settings);
+    check("T31l 模板高度 = 地基 + 生长空间",
+      layout.boxH > 0 && layout.baseCenterY < layout.height,
+      JSON.stringify(layout));
+  }
+
   // ★ map.pixel：界面叠「可点格子」时要用它把等距坐标平移到裁剪后的画布上。
   // 少了它，叠层与预览图整体错位（地图看着对、点到的格子全错）。
   {
@@ -402,7 +438,14 @@ section("提示词构造");
   check("T47 地形提示词包含画风", p1.includes(project.style.slice(0, 10)));
   check("T48 装饰提示词用白底（不是透明）", p2.startsWith(G.DECOR_PREFIX) && p2.includes("纯白色背景"));
   check("T49 装饰提示词不含「透明」", !p2.includes("透明"));
-  check("T50 建筑提示词说明 2x2 地基", p3.includes("2x2") || p3.includes("2×2"));
+  // 建筑提示词必须说清「底面 = 浅灰地基、往上长高」，并**明确禁止**把地基
+  // 涂成一块平铺地面 —— 旧的实心洋红菱形模板就是这么让模型画出一张菱形石板的。
+  check("T50 建筑提示词说明底面地基与向上长高",
+    p3.includes("地基") && p3.includes("向上") && p3.includes("屋顶") &&
+    (p3.includes("平铺") || p3.includes("有高度")),
+    p3.slice(0, 140));
+  check("T50b 建筑提示词不再用「在这个范围内画一栋建筑」这种含糊说法",
+    !p3.includes("请在这个范围内画一栋建筑"));
   check("T51 中文默认文案是中文", G.defaultTileStyle().includes("像素画"));
   check("T52 英文默认文案是英文", G.defaultTileStyle("en").includes("pixel-art"));
   check("T53 中英清单条目数一致",

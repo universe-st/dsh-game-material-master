@@ -38,8 +38,10 @@ import {
   diamondHeight,
   measureGroundDiamond,
   measurementLooksSane,
+  regularizeBuilding,
   regularizeDecorSprite,
   regularizeToCell,
+  renderBuildingTemplate,
   renderTemplate,
   upscale,
   type GroundMeasure,
@@ -60,6 +62,13 @@ export type TileItemMode = "template" | "plain" | "grid2x2";
 export type TileGeomReportView = TileGeomReport & {
   /** 这一张是不是自动重跑过一次。 */
   retried?: boolean;
+  /**
+   * 只有跨格建筑会带：底面菱形中心在贴图高度上的比例（0~1）。
+   *
+   * 必须持久化 —— 拼图阶段是从磁盘重新解码贴图的，那时候挂在 bitmap 上的
+   * 属性已经丢了。少了它拼图只能靠「贴图底边」猜，建筑就会整体错位。
+   */
+  baseFraction?: number;
 };
 
 export interface TileVariant {
@@ -373,8 +382,14 @@ export const DECOR_PREFIX =
   "正方形画布，装饰物居中，纯白色背景，画面里只有这一个东西：";
 
 export const BUILDING_PREFIX = [
-  "参考图里由洋红色外框圈出的等距菱形区域，是一栋大型建筑占用的 2x2 共 4 格地块。",
-  "请在这个范围内画一栋建筑。"
+  "参考图是一张斜45度等轴测（isometric）的建筑施工参考图。",
+  "图中：浅灰色的菱形是建筑的**地基**，洋红色线是地基的边界，",
+  "蓝色的线框是从地基四个角**垂直向上**拉出来的立方体，表示这栋建筑可以占据的空间。",
+  "请画一栋**立体的建筑**：",
+  "· 底面（建筑与地面的接触面）必须与浅灰色菱形地基完全重合，四个角对准洋红线，不要超出也不要缩小；",
+  "· 墙体从底面**垂直向上**立起来，屋顶盖在最上面，整体高度填满蓝色立方体线框（约为地基菱形高度的 1.5 倍）；",
+  "· 能看见屋顶的两个斜面和朝向观众的两面墙 —— 这是等轴测视角，不是俯视图；",
+  "· 绝对不要把地基菱形涂成一块平铺的地面或地砖 —— 建筑要**有高度、有墙、有屋顶**。"
 ].join("\n");
 
 /** 组装一个地块的提示词。 */
@@ -387,11 +402,10 @@ export function buildTilePrompt(item: TileItem, style: string): string {
     return [
       BUILDING_PREFIX,
       item.content,
-      "视角是斜45度等轴测俯视（观察者从画面下方看），能看到屋顶的两个斜面和朝向观众的两面墙。",
-      "建筑的底面必须与参考图里的菱形地面完全贴合，底面的四个角不要超出洋红色外框，也不要小于外框；",
-      "建筑可以往画面上方长高，高度约为外框菱形高度的 1.4 倍。",
-      "请把参考图里的洋红色外框与红色网格线完全去掉，不要保留任何参考线条。外框之外完全透明。",
-      "像素画风，色彩明快饱和，干净色块，无文字、无数字、无边框、无阴影。"
+      "再次强调：底面 = 浅灰菱形地基，建筑往上长高，不要把它画成平铺的地面。",
+      "请把参考图里的洋红线、蓝线、浅灰地基**全部覆盖掉**，成品里不要保留任何参考线条。",
+      "线框之外的区域完全透明。",
+      "像素画风，色彩明快饱和，干净色块，无文字、无数字、无边框、无投影。"
     ].join("\n");
   }
   return `${TERRAIN_PREFIX}\n\n内容：${item.content}${tail}`;
@@ -447,8 +461,10 @@ export async function runTemplateStage(projectId: string): Promise<{ started: bo
     await writeFile(join(dir, "template", "cell.png"), encodeBitmap(single.bitmap));
     job.done.push("cell");
     await report();
-    // 2×2 地基网格（给大型建筑用）
-    const grid = renderTemplate({ size: 2048, cols: 2, rows: 2, grid: true });
+    // 2×2 建筑模板：洋红**轮廓**画底面 + 蓝色线框画「能长多高」。
+    // 不能用那份实心洋红菱形 —— 模型会把它当「把这块地填满」，
+    // 实测生成出来是一张平铺的菱形石板地面（没有墙和屋顶）。
+    const grid = renderBuildingTemplate({ settings: project.settings, size: 2048 });
     await writeFile(join(dir, "template", "grid2x2.png"), encodeBitmap(grid.bitmap));
     job.done.push("grid2x2");
     await report();
@@ -604,8 +620,25 @@ async function generateOne(
     return variant;
   }
 
-  // 地形 / 建筑：测量 → 规整（不可信就回退模板几何）
-  const templateFile = item.mode === "grid2x2" ? ctx.templateGrid : ctx.templateCell;
+  // 建筑：底面占 2×2 格、往上长高 —— 用专门的落位算法，不能走地形的「压进 1 格」
+  if (item.kind === "building" || item.mode === "grid2x2") {
+    const { bitmap, report } = regularizeBuilding(decoded, project.settings, {
+      cols: item.footprint[0],
+      rows: item.footprint[1],
+      mode: "measured"
+    });
+    const cellRelative = `cell/${item.key}.v${variantIndex + 1}.png`;
+    await writeFile(tileAssetPath(project.id, cellRelative), encodeBitmap(bitmap));
+    variant.cell = cellRelative;
+    // ⚠️ `baseFraction` 必须写进 variant —— 拼图阶段是**从磁盘重新读**贴图的，
+    // 那时候 `bitmap` 上挂的属性已经没了。少了它拼图会退化成「靠贴图底边猜」，
+    // 建筑就会整体错位（实测偏了一大截）。
+    variant.report = { ...report, baseFraction: bitmap.baseFraction, retried: ctx.retried };
+    return variant;
+  }
+
+  // 地形：测量 → 规整（不可信就回退模板几何）
+  const templateFile = ctx.templateCell;
   const templateGeom = await templateGeometry(templateFile);
   let measure: GroundMeasure | undefined;
   let fallback: string | undefined;
@@ -693,15 +726,25 @@ export async function runMapStage(projectId: string, options: MapOptions = {}): 
 
   const lookup = new Map<string, Bitmap>();
   const families: Record<string, string[]> = {};
+  /** 每个**格子键**（`cells` 里写的那个）有哪些可用变体。 */
+  const byCellKey: Record<string, string[]> = {};
   for (const item of project.items) {
     const candidates: string[] = [];
     for (const variant of item.variants) {
       if (variant.cell === undefined) continue;
       const bitmap = await decodeFile(tileAssetPath(projectId, variant.cell));
+      // 建筑贴图的底面位置是**量出来的**，存在 report 里。这里把磁盘读回来的
+      // 位图重新挂上它，拼图才知道该对齐哪里（见 generateOne 里的注释）。
+      if (typeof variant.report?.baseFraction === "number") {
+        bitmap.baseFraction = variant.report.baseFraction;
+      }
       lookup.set(`${item.key}#${variant.index}`, bitmap);
       candidates.push(`${item.key}#${variant.index}`);
     }
-    if (candidates.length > 0) families[item.family] = [...(families[item.family] ?? []), ...candidates];
+    if (candidates.length > 0) {
+      families[item.family] = [...(families[item.family] ?? []), ...candidates];
+      byCellKey[item.key] = [...(byCellKey[item.key] ?? []), ...candidates];
+    }
   }
   if (lookup.size === 0) throw new Error("还没有已通过的地块，请先在第 ③ 步生成并验收");
 
@@ -738,25 +781,46 @@ export async function runMapStage(projectId: string, options: MapOptions = {}): 
     ? { ...project.map, rows, cols, seed, cells: resizeCells(saved, rows, cols, fill) }
     : emptyMapState(rows, cols, fill, seed);
 
-  // 预校验：地图里引用的类别必须真的有已生成的变体。
-  // 不校验的话会静默产出一张**缺了那些格子**的图，用户只看到「怎么空了」。
+  // 先定下「到底铺哪张图」：装饰与建筑都在这步决定（含它们占掉的格子）。
+  // 建筑会把占格的键**清空**，所以预校验必须查**这份**状态 —— 查原始 state
+  // 会看到建筑键（如 `building`）而去 `byCellKey` 里找它，但建筑根本没有
+  // 「按类别铺的地块」，于是误报「这些地块还没有已生成的图：building」。
+  // 实测：布局里放一栋建筑就再也拼不出图。
+  //
+  // 垫底用的地面：优先取布局里第一个真的存在的地面地块，退化到任意地形地块。
+  //
+  // ⚠️ 这里要的是**变体名**（`grass#0`）而不是地块键（`grass`）——
+  // `lookup` / `families` 里的键都是 `key#vN`。传裸键进去 `lookup.get()` 会是
+  // undefined，垫底静默不画（实测建筑脚下还是一块透明洞），而且不报任何错。
+  const groundItemKey = (byCellKey[fill] ?? []).length > 0
+    ? fill
+    : (Object.keys(byCellKey).find((k) => project.items.find((it) => it.key === k)?.kind === "terrain") ?? "");
+  const groundKey = groundItemKey === "" ? "" : (byCellKey[groundItemKey] ?? [])[0] ?? "";
+  const decorated = decorateState(state, families, options.decorDensity ?? 0, project.items, groundKey);
+
+  // 预校验：地图里引用的**格子键**必须真的有已生成的变体。
+  //
+  // ⚠️ 这里必须查 `byCellKey` 而不是 `families`。`families` 是按**类别**聚合的，
+  // 而 `cells` 里存的是**地块键** —— 两者只在这两套名字恰好相同时才一样。
+  // 实测踩过：`dirt2` 的类别是 `dirt`，查 `families["dirt2"]` 得 undefined，
+  // 于是「拼成地图」直接报「这些类别还没有已生成的地块：dirt2」，
+  // 而 `dirt2` 明明已经生成好了 —— 整个第 ④ 步直接不可用。
   const missing = new Set<string>();
-  for (const row of state.cells) {
+  for (const row of decorated.cells) {
     for (const key of row) {
       if (key === "" || key === undefined) continue;
-      if ((families[key] ?? []).length === 0) missing.add(key);
+      if ((byCellKey[key] ?? []).length === 0) missing.add(key);
     }
   }
   if (missing.size > 0) {
-    throw new Error(`这些类别还没有已生成的地块：${[...missing].join("、")}。请先在第 ③ 步生成并验收，或把它换成已有的类别。`);
+    const available = Object.keys(byCellKey).join("、");
+    throw new Error(`这些地块还没有已生成的图：${[...missing].join("、")}。请先在第 ③ 步生成，或把它换成已有的地块（${available}）。`);
   }
 
   void background(projectId, "map", ["map"], async (job, report) => {
     const dir = tileProjectDir(projectId);
     await mkdir(join(dir, "map"), { recursive: true });
 
-    // 先算出每格用哪个变体（写进 map.json，供界面与导出复用）
-    const decorated = decorateState(state, families, options.decorDensity ?? 0);
     job.running = "map";
     await report();
 
@@ -823,14 +887,104 @@ function resizeCells(cells: string[][], rows: number, cols: number, fill: string
   return out;
 }
 
-/** 按装饰密度随机撒装饰、放置建筑 —— 用确定性 PRNG，保证同种子可复现。 */
-function decorateState(state: TileMapState, families: Record<string, string[]>, density: number): TileMapState {
+/**
+ * 按装饰密度随机撒装饰、放置建筑 —— 用确定性 PRNG，保证同种子可复现。
+ *
+ * **建筑**：布局里写了某个建筑地块的键（例如 `building`）时，就把它的
+ * 占格（如 2×2）铺在那个位置，并登记进 `out.buildings` 让拼图把立体贴图画上去。
+ * 以前这里只撒装饰、从不放建筑 —— `buildings` 永远是空的，所以**建筑根本不会出现在地图上**。
+ */
+function decorateState(
+  state: TileMapState,
+  families: Record<string, string[]>,
+  density: number,
+  items: TileItem[] = [],
+  groundKey = ""
+): TileMapState {
   const out: TileMapState = {
     ...state,
     cells: state.cells.map((row) => [...row]),
     decor: { ...state.decor },
-    buildings: [...state.buildings]
+    buildings: []
   };
+
+  // ── 建筑：按布局里出现的键放置 ──────────────────────────────────────────
+  const buildingByKey = new Map(items.filter((it) => it.kind === "building" || it.mode === "grid2x2").map((it) => [it.key, it]));
+  /** 被建筑占掉的格子（不再撒装饰）。 */
+  const occupied = new Set<string>();
+
+  /**
+   * 放置一栋建筑。
+   *
+   * ⚠️ 放完必须把占格的键**清空** —— 留着的话 `assembleMap` 会把这些格子当成
+   * 「地面地块」，再拿同一个建筑贴图当 1 格地面画 4 次，地图上多出一大块残影。
+   *
+   * ⚠️ 清空之后**布局里就再也看不到这栋楼了**（键没了）。所以 `buildings` 与
+   * `buildingGround` 必须作为「已放置」的记录一起存回去，重跑时先沿用它们；
+   * 只看 `cells` 的话，第二次拼图时建筑的键已经被自己清掉了 —— 楼会凭空消失。
+   *
+   * `ground` 存的是**变体名**（`grass#0`）—— `lookup` 的键就是这个形状。
+   */
+  const place = (r: number, c: number, item: TileItem, fw: number, fh: number, ground: string) => {
+    const name = (families[item.family] ?? [])[0];
+    if (name === undefined) return;
+    // 同一个位置别放两次
+    if (out.buildings.some((b) => b[0] === r && b[1] === c)) return;
+    out.buildings.push([r, c, name]);
+    (out.buildingGround ??= []).push([r, c, fw, fh, ground]);
+    for (let dr = 0; dr < fh; dr++) {
+      for (let dc = 0; dc < fw; dc++) {
+        occupied.add(`${r + dr},${c + dc}`);
+        out.cells[r + dr][c + dc] = "";
+      }
+    }
+  };
+
+  /** 把存下来的垫底键规整成变体名；规整不出来就退回 `groundKey`（调用方已解析好）。 */
+  const asVariantName = (ground: string): string => {
+    if (ground === "") return groundKey;
+    if (ground.includes("#")) return ground;
+    return (families[ground] ?? [])[0] ?? groundKey;
+  };
+
+  // 1) 沿用上一轮已经放好的建筑（它们的键已经从 cells 里清掉了）
+  //    先照抄记录，再由下面的 place() 去重
+  const carried = (state.buildingGround ?? []).slice();
+  const carriedBuildings = (state.buildings ?? []).slice();
+  out.buildings = [];
+  out.buildingGround = [];
+  for (const [r, c, name] of carriedBuildings) {
+    const entry = carried.find((g) => g[0] === r && g[1] === c);
+    if (entry === undefined) continue;
+    const item = items.find((it) => it.kind === "building" && (families[it.family] ?? [])[0] === name)
+      ?? items.find((it) => it.kind === "building");
+    if (item === undefined) continue;
+    place(r, c, item, entry[2], entry[3], asVariantName(entry[4]));
+  }
+
+  // 2) 再从布局里找新放置的建筑（键还在 cells 里的那些）
+  for (let r = 0; r < out.rows; r++) {
+    for (let c = 0; c < out.cols; c++) {
+      const key = out.cells[r]?.[c];
+      if (key === undefined || key === "") continue;
+      const item = buildingByKey.get(key);
+      if (item === undefined) continue;
+      const [fw, fh] = item.footprint;
+      // 占格必须完整落在图内
+      if (r + fh > out.rows || c + fw > out.cols) continue;
+      // 底下的格子引用同一个键时说明这是同一栋楼（避免重复放置）
+      let sameBuilding = true;
+      for (let dr = 0; dr < fh; dr++) {
+        for (let dc = 0; dc < fw; dc++) {
+          if (out.cells[r + dr]?.[c + dc] !== key) { sameBuilding = false; break; }
+        }
+        if (!sameBuilding) break;
+      }
+      if (!sameBuilding) continue;
+      place(r, c, item, fw, fh, groundKey);
+    }
+  }
+
   if (density <= 0) return out;
   const decorKeys = Object.keys(families).filter((key) => key === "tree" || key === "boulder");
   if (decorKeys.length === 0) return out;
@@ -845,6 +999,7 @@ function decorateState(state: TileMapState, families: Record<string, string[]>, 
   };
   for (let r = 0; r < out.rows; r++) {
     for (let c = 0; c < out.cols; c++) {
+      if (occupied.has(`${r},${c}`)) continue;
       if (rand() > density) continue;
       const family = decorKeys[Math.floor(rand() * decorKeys.length)];
       const candidates = families[family] ?? [];
@@ -1010,6 +1165,13 @@ export interface TileProjectView extends TileProject {
   assetBase: string;
   /** 进度汇总。界面头部显示「已生成 n / m，已验收 k」。 */
   progress: { generated: number; expected: number; approved: number };
+  /**
+   * 手动编辑布局时做**即时预览**的素材表（地块键 → 变体贴图相对路径）。
+   *
+   * 不给的话界面只能画空的菱形格子，用户涂完要先「保存布局 → 铺成地图」
+   * 才看得见效果 —— 那就谈不上预览了。
+   */
+  preview: { cells: Record<string, string[]>; cellWidth: number; cellHeight: number };
 }
 
 export function tileView(project: TileProject): TileProjectView {
@@ -1023,8 +1185,34 @@ export function tileView(project: TileProject): TileProjectView {
     ...project,
     job: jobs.get(project.id),
     assetBase: `/dsh-game-material-master/tile-assets/${project.id}/`,
-    progress: tileProgress(project)
+    progress: tileProgress(project),
+    // 界面「手动编辑布局」要用的即时预览素材：每个地块有哪些变体贴图。
+    // 不给的话界面只能画出空的菱形格子 —— 用户看不见自己涂的是什么，
+    // 得先「保存布局 → 铺成地图」才能看到效果，那就谈不上预览了。
+    preview: tilePreview(project)
   };
+}
+
+/**
+ * 给界面做**即时预览**用的素材表。
+ *
+ * 只给「地块键 → 可用变体的相对路径」，界面自己拼 assetBase 就能贴图。
+ * 刻意不把贴图数据传过去（那是几十 KB/张），也不含任何像素计算 ——
+ * 预览是纯前端的定位 + 贴图，零成本、随点随变。
+ */
+export function tilePreview(project: TileProject): {
+  cells: Record<string, string[]>;
+  cellWidth: number;
+  cellHeight: number;
+} {
+  const cells: Record<string, string[]> = {};
+  for (const item of project.items) {
+    const urls = item.variants
+      .filter((v) => v.cell !== undefined)
+      .map((v) => v.cell as string);
+    if (urls.length > 0) cells[item.key] = urls;
+  }
+  return { cells, cellWidth: project.settings.cellWidth, cellHeight: project.settings.cellHeight };
 }
 
 /** 生成 / 期望 / 已验收三件套（界面与工具共用一份算法）。 */
