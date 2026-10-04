@@ -41,6 +41,7 @@ async function waitIdle(id, timeoutMs = 30000) {
 const G = await import("../lib/tilegen.js");
 const GEOM = await import("../lib/tilegeom.js");
 const MEDIA = await import("../lib/tilemedia.js");
+const TILEMAP = await import("../lib/tilemap.js");
 const { tileJobsRoot } = await import("../lib/config.js");
 
 // 隔离：用一个临时项目，跑完删掉（不污染用户真实的 tile-jobs/）
@@ -233,6 +234,64 @@ section("④ 拼图阶段（本地，免费）");
   const map = await MEDIA.decodeFile(join(dir, "map", "map.png"));
   check("T31 地图比单元格大", map.width > 200 && map.height > 200, `${map.width}×${map.height}`);
 
+  // ★ map.pixel：界面叠「可点格子」时要用它把等距坐标平移到裁剪后的画布上。
+  // 少了它，叠层与预览图整体错位（地图看着对、点到的格子全错）。
+  {
+    // ⚠️ 先重置成一份干净的 6×6 满铺布局再测：后面几节会把 cells 改成带空格的小布局，
+    // 那些状态（空的格子 + 旧的 pixel）会让 PNG 的裁剪包围盒与「满铺 6×6」的理论值对不上。
+    await G.patchTileProject(project.id, (fresh) => {
+      fresh.map = { ...fresh.map, rows: 6, cols: 6, seed: 7, cells: [], decor: {}, buildings: [], png: undefined, json: undefined, pixel: undefined };
+    });
+    await G.runMapStage(project.id, { rows: 6, cols: 6, seed: 7, fill: "grass" });
+    await waitIdle(project.id);
+    const clean = await G.readTileProject(project.id);
+    const cleanMap = await MEDIA.decodeFile(join(dir, "map", "map.png"));
+    const layout = TILEMAP.tileLayout(clean.settings, 6, 6, 2);
+    const pixel = clean.map.pixel;
+    check("T31b 项目里记下了 map.pixel", pixel !== undefined, JSON.stringify(pixel));
+    check("T31c map.pixel 的尺寸 = 实际 PNG 尺寸",
+      pixel.width === cleanMap.width && pixel.height === cleanMap.height,
+      `pixel ${pixel?.width}×${pixel?.height} vs PNG ${cleanMap.width}×${cleanMap.height}`);
+    check("T31d map.pixel 的尺寸不超过未裁画布",
+      pixel.width <= layout.canvasW && pixel.height <= layout.canvasH,
+      `pixel ${pixel.width}×${pixel.height} vs layout ${layout.canvasW}×${layout.canvasH}`);
+    check("T31e 叠层坐标（未裁 − 偏移）都落在 PNG 范围内",
+      pixel.left >= 0 && pixel.top >= 0, JSON.stringify(pixel));
+    // 逐格验证：叠层用的「未裁坐标 − 偏移」必须**落在成品图范围内**。
+    //
+    // 坐标系（实测确认，别弄混）：
+    //   · `tileLayout(..., scale=2)` 与 `tileOriginAt` 给的是**放大后（2×）**的坐标；
+    //   · `map.pixel.left/top` 也是 2× 的裁剪偏移；
+    //   · 菱形在 64×96 贴图里位于 (0,31)-(63,64)，中心是**1× 的**局部 (32,48)。
+    // 把 1× 的 (32,48) 直接加到 2× 的原点上就会错半个格子（实测 1 格假越界）。
+    let outside = 0;
+    let firstBad = "";
+    const scale = pixel.scale ?? 2;
+    const halfW = (clean.settings.cellWidth / 2) * scale;
+    const halfH = (clean.settings.cellWidth / 4) * scale;
+    for (let r = 0; r < 6; r++) {
+      for (let c = 0; c < 6; c++) {
+        const at = TILEMAP.tileOriginAt(layout, r, c);
+        const cx = at.x + 32 * scale - pixel.left;
+        const cy = at.y + 48 * scale - pixel.top;
+        const bad = (cx - halfW < -1 || cx + halfW > cleanMap.width + 1 || cy - halfH < -1 || cy + halfH > cleanMap.height + 1);
+        if (bad) {
+          outside++;
+          if (firstBad === "") {
+            firstBad = `(${r},${c}) 中心(${cx},${cy}) span x ${cx - halfW}..${cx + halfW} y ${cy - halfH}..${cy + halfH}` +
+              `，容器 ${cleanMap.width}×${cleanMap.height}`;
+          }
+        }
+      }
+    }
+    check("T31f 所有格子的菱形平移后都落在成品图内", outside === 0, `${outside} 格越界；首个：${firstBad}`);
+
+    // 把状态放回 T25~T29 留下的那份，免得后面的可复现性断言读到别的布局。
+    // （原样重铺一次即可 —— 同种子同参数就是那份图。）
+    await G.runMapStage(project.id, { rows: 6, cols: 6, seed: 7, fill: "grass", decorDensity: 0.15 });
+    await waitIdle(project.id);
+  }
+
   // 可复现性：同种子重拼必须逐像素一致
   const first = readFileSync(join(dir, "map", "map.png"));
   await G.runMapStage(project.id, { rows: 6, cols: 6, seed: 7, fill: "grass", decorDensity: 0.15 });
@@ -240,11 +299,50 @@ section("④ 拼图阶段（本地，免费）");
   const second = readFileSync(join(dir, "map", "map.png"));
   check("T32 同种子重拼 → 逐像素一致", first.equals(second));
 
-  // 换种子必须不同
+  // 换种子**在「沿用已存布局」这条路径上不一定改变像素**：
+  // 布局里每格用哪个类别是存下来的，若每个类别只有 1 个变体，换种子也抽不出别的图。
+  // 所以这里分两种情况断言：
+  //   · 先清掉布局（回到「按 fill 铺满」）—— 换种子必然改抽到的变体 / 装饰
+  //   · 再验证「有存布局时，同种子仍然逐像素一致」（那才是可复现性的真正含义）
+  await G.patchTileProject(project.id, (fresh) => {
+    fresh.map = { ...fresh.map, cells: [] };
+  });
   await G.runMapStage(project.id, { rows: 6, cols: 6, seed: 99, fill: "grass" });
   await waitIdle(project.id);
   const third = readFileSync(join(dir, "map", "map.png"));
-  check("T33 换种子 → 结果不同", !first.equals(third));
+  check("T33 换种子 → 结果不同（无存布局时）", !first.equals(third));
+
+  // 有了存布局之后：同种子必须仍然逐像素一致（手改布局不影响可复现性）
+  {
+    // 只用这个测试项目里真的有产物的类别：grass（地形）、tree（装饰）、building（建筑）
+    const layout = [
+      ["grass", "grass", "grass", "grass", "grass", "grass"],
+      ["grass", "tree", "grass", "grass", "tree", "grass"],
+      ["grass", "grass", "grass", "grass", "grass", "grass"],
+      ["grass", "grass", "grass", "building", "grass", "grass"],
+      ["grass", "tree", "grass", "grass", "grass", "grass"],
+      ["grass", "grass", "grass", "grass", "tree", "grass"]
+    ];
+    await G.patchTileProject(project.id, (fresh) => {
+      fresh.map = { ...fresh.map, cells: layout, rows: 6, cols: 6 };
+    });
+    await G.runMapStage(project.id, { rows: 6, cols: 6, seed: 7, fill: "grass", decorDensity: 0.1 });
+    await waitIdle(project.id);
+    const a = readFileSync(join(dir, "map", "map.png"));
+    await G.runMapStage(project.id, { rows: 6, cols: 6, seed: 7, fill: "grass", decorDensity: 0.1 });
+    await waitIdle(project.id);
+    const b = readFileSync(join(dir, "map", "map.png"));
+    check("T33b 有手改布局时同种子仍逐像素一致", a.equals(b));
+
+    // ★ 最关键的一条：传了覆盖参数（界面永远会传 decorDensity）也不能丢掉手改布局
+    const mappedJson = JSON.parse(readFileSync(join(dir, "map", "map.json"), "utf8"));
+    check("T33c 传覆盖参数时手改布局被保留（不会被 fill 覆盖掉）",
+      JSON.stringify(mappedJson.cells) === JSON.stringify(layout),
+      JSON.stringify(mappedJson.cells?.[0] ?? null));
+    const afterLayout = await G.readTileProject(project.id);
+    check("T33d 项目里存的布局也还是手改的那份",
+      JSON.stringify(afterLayout.map.cells) === JSON.stringify(layout));
+  }
 
   // 没有已生成地块时必须明确报错，而不是产出一张空图
   let threw = false;

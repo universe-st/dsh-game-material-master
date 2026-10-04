@@ -945,7 +945,6 @@
       "重跑": "Re-run",
       "逐项看成品与几何报告。几何正常的地块拼起来不会有缝；标「模板几何」说明这张没量准，建议重跑。": "Check each result and its geometry report. Tiles with correct geometry will not show seams; a 'template geometry' badge means the measurement failed, so re-running is recommended.",
       "验收": "Review",
-      "铺图全在本地：按等距网格铺、按类别随机抽变体、按 (r+c) 顺序遮挡。同种子 + 同布局 = 逐像素一致，可以反复试到满意为止。": "Assembly is entirely local: laid on the isometric grid, variants picked per family, painted in (r+c) order. Same seed + same layout = pixel-identical, so you can re-roll until you like it.",
       "行": "Rows",
       "列": "Cols",
       "种子": "Seed",
@@ -960,7 +959,64 @@
       "导出": "Export",
       "导出到 export/": "Export to export/",
       "打开产物目录": "Open output folder",
-      "正在生成地块…": "Generating tiles…"
+      "正在生成地块…": "Generating tiles…",
+
+      // ── 地图地块：地块清单编辑 ──
+      "已保存「{n0}」——提示词变了，这个地块的产物已作废，需要重跑": "Saved '{n0}' — the prompt changed, so this tile's output was discarded and needs a re-run",
+      "已保存「{n0}」——提示词没变，产物保住了": "Saved '{n0}' — the prompt is unchanged, so its output was kept",
+      "至少要留一个地块": "Keep at least one tile",
+      "已删除「{n0}」": "Deleted '{n0}'",
+      "地块标识只能用英文小写字母开头，后接小写字母 / 数字 / 下划线（2~24 位）——它会当文件名用":
+        "A tile id must start with a lowercase letter followed by lowercase letters, digits or underscores (2-24 chars) — it is used as a file name",
+      "已经有同名地块了：{n0}": "A tile with that id already exists: {n0}",
+      "已新增地块「{n0}」": "Added tile '{n0}'",
+      "已恢复默认地块清单（已生成的地块会作废）": "Restored the default tile list (generated tiles are discarded)",
+      "标识（key，只读）": "Id (key, read-only)",
+      "用途": "Role",
+      "地形（占 1 格）": "Terrain (1 cell)",
+      "装饰（占 1 格、按锚点摆放）": "Decor (1 cell, placed on an anchor)",
+      "建筑（跨格）": "Building (spans cells)",
+      "模板填充（地形）": "Template filling (terrain)",
+      "白底单图（装饰）": "White-background single image (decor)",
+      "2×2 地基网格（建筑）": "2x2 foundation grid (building)",
+      "变体数（每个变体一次计费调用）": "Variants (one billed call each)",
+      "类别（铺图时按它随机抽变体）": "Family (variants are drawn from it at random when assembling)",
+      "占格 列 × 行": "Footprint cols x rows",
+      "生成提示词（只描述「菱形里面是什么」；形状 / 角度 / 透视由代码保证，不要写）":
+        "Prompt (describe only what is inside the diamond; shape, angle and perspective are guaranteed by code, do not write them)",
+      "提示词与生成方式有改动 —— 保存后这个地块的已生成产物会作废（重跑要花钱）":
+        "The prompt or generation mode changed — saving discards this tile's existing output (re-running costs money)",
+      "只改名称 / 类别 / 变体数不会作废产物": "Changing only the name, family or variant count keeps existing output",
+      "看最终提示词": "Show the final prompt",
+      "保存地块": "Save tile",
+      "保存": "Save",
+      "移除地块": "Remove tile",
+      "删除这个地块": "Delete this tile",
+      "＋ 新增地块": "+ Add tile",
+      "恢复默认清单": "Restore defaults",
+      "标识（英文小写，会当文件名）": "Id (lowercase, used as a file name)",
+      "灰色岩壁": "Grey cliff",
+      "生成提示词（只描述「菱形里面是什么」）": "Prompt (describe only what is inside the diamond)",
+      "新增地块": "Add tile",
+      "新增": "Add",
+      "编辑": "Edit",
+      // ── 地图地块：手动编辑布局 ──      "布局已保存。点「铺成地图」重新出图。": "Layout saved. Click 'Assemble map' to render it again.",
+      "布局已保存。点「铺成地图」重新出图。": "Layout saved. Click 'Assemble map' to render it again.",
+      "空格": "empty",
+      "铺图全在本地：按等距网格铺、按类别随机抽变体、按 (r+c) 顺序遮挡。同种子 + 同布局 = 逐像素一致。也可以手动改：挑一个地块当笔刷，点格子涂上去。":
+        "Assembly is entirely local: laid on the isometric grid, variants drawn per family, painted in (r+c) order. Same seed + same layout = pixel-identical. You can also edit by hand: pick a tile as a brush and click cells to paint.",
+      "笔刷（点格子刷上去）": "Brush (click cells to paint)",
+      "橡皮擦": "Eraser",
+      "已取出当前布局，开始涂改（改完点「保存布局」）": "Loaded the current layout — start painting, then click 'Save layout'",
+      "开始编辑布局": "Start editing the layout",
+      "全刷成当前笔刷": "Fill all with the brush",
+      "全部清空": "Clear all",
+      "保存布局": "Save layout",
+      "放弃修改": "Discard changes",
+      "共 {n0} 行 × {n1} 列": "{n0} rows x {n1} cols",
+      "正在编辑 {n0} · 当前是「{n1}」": "Editing {n0} · currently '{n1}'",
+      "涂改只改草稿，点「保存布局」才写回项目；之后再点「铺成地图」出图。手动改布局不会作废已生成的地块。":
+        "Painting only changes a draft; click 'Save layout' to write it back, then 'Assemble map' to render. Editing the layout never discards generated tiles."
     };
 /* i18n-ignore-end */
 
@@ -1584,6 +1640,24 @@
 .SPR_tileProgress{font-size:12px;color:var(--dsw-alias-label-secondary);padding:6px 10px;border-radius:8px;background:var(--dsw-alias-bg-layer-3)}
 .SPR_tileAsset{display:flex;flex-direction:column;gap:4px;align-items:center;width:140px}
 .SPR_tileMap{max-width:100%;border-radius:10px;border:1px solid var(--dsw-alias-border-l2);background-color:var(--dsw-alias-bg-layer-3)}
+/* 地块清单编辑器：一行放几个字段，窄屏自动换行 */
+.SPR_tileEditor{border:1px dashed var(--dsw-alias-border-l2);border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:8px;background:var(--dsw-alias-bg-layer-1)}
+.SPR_tileEditorRow{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+.SPR_tileEditorRow .SPR_field{flex:1;min-width:130px}
+.SPR_tilePrompt{width:100%;font:inherit;line-height:1.5;resize:vertical;box-sizing:border-box}
+.SPR_tilePromptPreview summary{font-size:11px;color:var(--dsw-alias-label-tertiary);cursor:pointer}
+.SPR_tilePromptPreview pre{white-space:pre-wrap;word-break:break-word;font-size:11px;line-height:1.55;margin:6px 0 0;padding:8px;border-radius:8px;background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-secondary);max-height:220px;overflow:auto}
+.SPR_tileCard-editing{grid-column:1/-1}
+/* 地图布局编辑器：等距叠层，每个格子裁成菱形，只有菱形那部分能点 */
+.SPR_mapBrush{display:flex;gap:6px;flex-wrap:wrap}
+.SPR_mapEditorWrap{overflow:auto;max-height:420px;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;background:var(--dsw-alias-bg-layer-3);padding:8px}
+.SPR_mapEditorCanvas{position:relative;margin:0 auto}
+.SPR_mapCell{position:absolute;padding:0;margin:0;border:none;background:rgba(90,150,60,.34);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:10px;line-height:1;color:transparent;transition:background .08s}
+.SPR_mapCell:hover{background:rgba(255,196,0,.55)}
+.SPR_mapCell-active{background:rgba(255,120,0,.6);outline:1px solid rgba(255,120,0,.9)}
+.SPR_mapCell-empty{background:rgba(150,150,150,.16)}
+.SPR_mapCellLabel{pointer-events:none;font-size:10px;color:var(--dsw-alias-label-secondary);opacity:0}
+.SPR_mapCell:hover .SPR_mapCellLabel{opacity:1}
 .SPR_step-active{color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-state-business-primary)}
 .SPR_step-done .SPR_stepMark{color:var(--dsw-alias-state-success-primary,#2e7d32)}
 .SPR_step-error .SPR_stepMark{color:var(--dsw-alias-state-error-primary,#c62828)}
@@ -4834,6 +4908,18 @@
       const [mapSeed, setMapSeed] = React.useState(20261004);
       const [decorDensity, setDecorDensity] = React.useState(0.08);
       const [creating, setCreating] = React.useState(false);
+      /** 正在编辑哪个地块（key）；null = 没有在编辑。 */
+      const [editingKey, setEditingKey] = React.useState(null);
+      /** 该地块的草稿（点「保存」才提交，避免每敲一个字就作废产物）。 */
+      const [itemDraft, setItemDraft] = React.useState(null);
+      /** 新增地块的草稿；non-null 时显示新增表单。 */
+      const [newItem, setNewItem] = React.useState(null);
+      /** 地图笔刷：选中的地块 key（点格子就刷它）。 */
+      const [brushKey, setBrushKey] = React.useState(null);
+      /** 正在编辑的地图格子（"r,c"）与其草稿。 */
+      const [cellKey, setCellKey] = React.useState(null);
+      /** 地图布局草稿（点格子/擦除都只改它，点「保存布局」才提交）。 */
+      const [mapDraft, setMapDraft] = React.useState(null);
       const tasks = usePendingTasks();
       const intent = useStudioIntent();
 
@@ -4856,30 +4942,56 @@
         }
       }, [api]);
 
-      const load = React.useCallback(async (id) => {
+      /**
+       * 重新读项目。
+       *
+       * ⚠️ 这个函数会被**轮询**调用（有任务在跑时每 1.5 秒一次），所以它**绝不能**
+       * 重置编辑草稿 —— 否则用户正在涂的地图布局、正在改的提示词会被定时器冲掉。
+       * 实测踩过：拼完图 `load()` 一跑，界面上的可点格子就整片消失了。
+       * 「切项目时清草稿」由下面的 effect 按 projectId 变化来做。
+       */
+      const reload = React.useCallback(async (id) => {
         if (id === null) return;
         try {
           const next = await api.getTileProject(id);
           setProject(next);
-          setStyleDraft(next.style ?? "");
-          setNameDraft(next.name ?? "");
+          setStyleDraft((current) => (current === "" ? (next.style ?? "") : current));
           setMapRows(next.map?.rows ?? 14);
           setMapCols(next.map?.cols ?? 14);
           setMapSeed(next.map?.seed ?? 20261004);
+          setBrushKey((current) => {
+            const keys = (next.items ?? []).map((item) => item.key);
+            if (current === "__erase__") return current;
+            return current !== null && keys.includes(current) ? current : (keys[0] ?? null);
+          });
         } catch (error) {
           setNotice({ kind: "error", text: msg(error) });
         }
       }, [api]);
 
+      /** 切项目时把草稿清干净，免得把 A 项目的编辑存到 B 项目。 */
+      const load = React.useCallback(async (id) => {
+        setEditingKey(null);
+        setItemDraft(null);
+        setNewItem(null);
+        setCellKey(null);
+        setMapDraft(null);
+        setNameDraft("");
+        setStyleDraft("");
+        await reload(id);
+      }, [reload]);
+
       React.useEffect(() => { void refreshProjects(); }, [refreshProjects]);
       React.useEffect(() => { void load(projectId); }, [projectId, load]);
 
-      // 有任务在跑时轮询：进度要能自己往前走，不能等用户手动刷新
+      // 有任务在跑时轮询：进度要能自己往前走，不能等用户手动刷新。
+      // ⚠️ 这里必须用 `reload`（不动草稿）而不是 `load`（清草稿）——
+      // 用 load 的话每 1.5 秒就会把用户正在涂的地图布局冲掉。
       React.useEffect(() => {
         if (!busy) return undefined;
-        const timer = setInterval(() => { void load(projectId); }, 1500);
+        const timer = setInterval(() => { void reload(projectId); }, 1500);
         return () => clearInterval(timer);
-      }, [busy, projectId, load]);
+      }, [busy, projectId, reload]);
 
       const run = React.useCallback(async (label, fn) => {
         setNotice(null);
@@ -4888,12 +5000,13 @@
           if (result !== undefined && result !== null && typeof result === "object" && "started" in result && result.started === false) {
             setNotice({ kind: "error", text: result.reason ?? T("任务没有启动") });
           }
-          await load(projectId);
+          // 用 reload（不清草稿）：保存一个地块之后，用户可能还在涂地图布局
+          await reload(projectId);
           await refreshProjects();
         } catch (error) {
           setNotice({ kind: "error", text: msg(error) });
         }
-      }, [tasks, load, projectId, refreshProjects]);
+      }, [tasks, reload, projectId, refreshProjects]);
 
       const createProject = React.useCallback(async () => {
         setCreating(true);
@@ -4998,6 +5111,247 @@
         )
       );
 
+      // ── 地块清单的增 / 删 / 改 ────────────────────────────────────────
+      //
+      // 全部通过 `saveTileProject({items})` 提交，宿主侧 `mergeTileItems` 负责
+      // 「保留已生成的变体、只作废提示词真的变了的那些」。所以这里只管把
+      // 完整的 items 列表拼出来 —— **必须带上 `variants`**，否则宿主认为
+      // 这是个没有产物的新条目（早期版本就是这么把已生成的图弄丢的）。
+
+      /** 把界面上的 items 整理成宿主能合并的形状（保留产物与不在编辑中的字段）。 */
+      const itemsForSave = (overrides = {}) =>
+        project.items.map((item) => {
+          const source = overrides[item.key] ?? item;
+          return {
+            key: source.key,
+            label: source.label,
+            kind: source.kind,
+            family: source.family,
+            footprint: source.footprint,
+            content: source.content,
+            mode: source.mode,
+            variantCount: source.variantCount,
+            variants: item.variants
+          };
+        });
+
+      const startEdit = (item) => {
+        setEditingKey(item.key);
+        setNewItem(null);
+        setItemDraft({
+          key: item.key,
+          label: item.label ?? "",
+          kind: item.kind ?? "terrain",
+          family: item.family ?? item.key,
+          footprint: [...(item.footprint ?? [1, 1])],
+          content: item.content ?? "",
+          mode: item.mode ?? "template",
+          variantCount: Math.max(1, item.variantCount ?? 1)
+        });
+      };
+
+      /**
+       * 保存一个地块的编辑。
+       * ⚠️ 改 `key` 等于**换了个地块**：旧 key 的产物不能直接搬过去（宿主按 key 合并），
+       * 所以这里把 key 做成只读展示，要改 key 就删掉重建。
+       */
+      const saveItem = async () => {
+        if (itemDraft === null) return;
+        const next = itemsForSave({ [itemDraft.key]: itemDraft });
+        const promptChanged = itemDraft.content !== project.items.find((i) => i.key === itemDraft.key)?.content
+          || itemDraft.mode !== project.items.find((i) => i.key === itemDraft.key)?.mode;
+        await api.saveTileProject({ projectId: project.id, items: next });
+        setNotice({
+          kind: "info",
+          text: promptChanged
+            ? T("已保存「{n0}」——提示词变了，这个地块的产物已作废，需要重跑", { n0: itemDraft.label || itemDraft.key })
+            : T("已保存「{n0}」——提示词没变，产物保住了", { n0: itemDraft.label || itemDraft.key })
+        });
+        setEditingKey(null);
+        setItemDraft(null);
+      };
+
+      const deleteItem = async (item) => {
+        const next = project.items
+          .filter((entry) => entry.key !== item.key)
+          .map((entry) => ({
+            key: entry.key, label: entry.label, kind: entry.kind, family: entry.family,
+            footprint: entry.footprint, content: entry.content, mode: entry.mode,
+            variantCount: entry.variantCount, variants: entry.variants
+          }));
+        if (next.length === 0) {
+          setNotice({ kind: "error", text: T("至少要留一个地块") });
+          return;
+        }
+        await api.saveTileProject({ projectId: project.id, items: next });
+        if (editingKey === item.key) { setEditingKey(null); setItemDraft(null); }
+        setNotice({ kind: "info", text: T("已删除「{n0}」", { n0: item.label }) });
+      };
+
+      /** 新增地块：key 必须唯一且是「英文小写 / 数字 / 下划线」，它会被当文件名用。 */
+      const addItem = async () => {
+        if (newItem === null) return;
+        const key = String(newItem.key ?? "").trim();
+        if (!/^[a-z][a-z0-9_]{1,23}$/.test(key)) {
+          setNotice({ kind: "error", text: T("地块标识只能用英文小写字母开头，后接小写字母 / 数字 / 下划线（2~24 位）——它会当文件名用") });
+          return;
+        }
+        if (project.items.some((item) => item.key === key)) {
+          setNotice({ kind: "error", text: T("已经有同名地块了：{n0}", { n0: key }) });
+          return;
+        }
+        const next = [
+          ...project.items.map((entry) => ({
+            key: entry.key, label: entry.label, kind: entry.kind, family: entry.family,
+            footprint: entry.footprint, content: entry.content, mode: entry.mode,
+            variantCount: entry.variantCount, variants: entry.variants
+          })),
+          {
+            key,
+            label: newItem.label?.trim() === "" ? key : newItem.label,
+            kind: newItem.kind,
+            family: newItem.family?.trim() === "" ? key : newItem.family,
+            footprint: newItem.footprint,
+            content: newItem.content ?? "",
+            mode: newItem.mode,
+            variantCount: Math.max(1, newItem.variantCount ?? 1),
+            variants: []
+          }
+        ];
+        await api.saveTileProject({ projectId: project.id, items: next });
+        setNewItem(null);
+        setNotice({ kind: "info", text: T("已新增地块「{n0}」", { n0: key }) });
+      };
+
+      const resetItems = async () => {
+        await api.saveTileProject({ projectId: project.id, resetItemsToDefault: true });
+        setEditingKey(null);
+        setItemDraft(null);
+        setNewItem(null);
+        setNotice({ kind: "info", text: T("已恢复默认地块清单（已生成的地块会作废）") });
+      };
+
+      /** 一个地块卡片的可编辑表单。 */
+      const itemEditor = () => {
+        if (itemDraft === null) return null;
+        const set = (patch) => setItemDraft((draft) => ({ ...draft, ...patch }));
+        const original = project.items.find((item) => item.key === itemDraft.key);
+        const promptChanged = original !== undefined &&
+          (original.content !== itemDraft.content || original.mode !== itemDraft.mode);
+        return h("div", { className: "SPR_tileEditor" },
+          h("div", { className: "SPR_tileEditorRow" },
+            h("label", { className: "SPR_field" },
+              h("span", { className: "SPR_fieldLabel" }, T("标识（key，只读）")),
+              h("input", { className: "SPR_input", value: itemDraft.key, readOnly: true, disabled: true })
+            ),
+            h("label", { className: "SPR_field" },
+              h("span", { className: "SPR_fieldLabel" }, T("名称")),
+              h("input", {
+                className: "SPR_input",
+                value: itemDraft.label,
+                onChange: (event) => set({ label: event.target.value })
+              })
+            ),
+            h("label", { className: "SPR_field" },
+              h("span", { className: "SPR_fieldLabel" }, T("用途")),
+              h("select", {
+                className: "SPR_input",
+                value: itemDraft.kind,
+                onChange: (event) => {
+                  const kind = event.target.value;
+                  // 换用途时把生成方式也带到一个合理默认，省得用户自己配错
+                  set({ kind, mode: kind === "decor" ? "plain" : kind === "building" ? "grid2x2" : "template" });
+                }
+              },
+                h("option", { value: "terrain" }, T("地形（占 1 格）")),
+                h("option", { value: "decor" }, T("装饰（占 1 格、按锚点摆放）")),
+                h("option", { value: "building" }, T("建筑（跨格）"))
+              )
+            ),
+            h("label", { className: "SPR_field" },
+              h("span", { className: "SPR_fieldLabel" }, T("生成方式")),
+              h("select", {
+                className: "SPR_input",
+                value: itemDraft.mode,
+                onChange: (event) => set({ mode: event.target.value })
+              },
+                h("option", { value: "template" }, T("模板填充（地形）")),
+                h("option", { value: "plain" }, T("白底单图（装饰）")),
+                h("option", { value: "grid2x2" }, T("2×2 地基网格（建筑）"))
+              )
+            )
+          ),
+          h("div", { className: "SPR_tileEditorRow" },
+            h("label", { className: "SPR_field" },
+              h("span", { className: "SPR_fieldLabel" }, T("变体数（每个变体一次计费调用）")),
+              h(NumField, {
+                className: "SPR_input SPR_input-num",
+                value: itemDraft.variantCount, min: 1, max: 6, step: 1,
+                onCommit: (next) => set({ variantCount: Math.max(1, Math.min(6, next)) })
+              })
+            ),
+            h("label", { className: "SPR_field" },
+              h("span", { className: "SPR_fieldLabel" }, T("类别（铺图时按它随机抽变体）")),
+              h("input", {
+                className: "SPR_input",
+                value: itemDraft.family,
+                onChange: (event) => set({ family: event.target.value })
+              })
+            ),
+            h("label", { className: "SPR_field" },
+              h("span", { className: "SPR_fieldLabel" }, T("占格 列 × 行")),
+              h("div", { className: "SPR_row" },
+                h(NumField, {
+                  className: "SPR_input SPR_input-num",
+                  value: itemDraft.footprint[0], min: 1, max: 4, step: 1,
+                  onCommit: (next) => set({ footprint: [Math.max(1, Math.min(4, next)), itemDraft.footprint[1]] })
+                }),
+                h(NumField, {
+                  className: "SPR_input SPR_input-num",
+                  value: itemDraft.footprint[1], min: 1, max: 4, step: 1,
+                  onCommit: (next) => set({ footprint: [itemDraft.footprint[0], Math.max(1, Math.min(4, next))] })
+                })
+              )
+            )
+          ),
+          h("label", { className: "SPR_field" },
+            h("span", { className: "SPR_fieldLabel" }, T("生成提示词（只描述「菱形里面是什么」；形状 / 角度 / 透视由代码保证，不要写）")),
+            h("textarea", {
+              className: "SPR_input SPR_tilePrompt",
+              rows: 4,
+              value: itemDraft.content,
+              onChange: (event) => set({ content: event.target.value })
+            })
+          ),
+          promptChanged
+            ? h("div", { className: "SPR_tileBadge SPR_tileBadge-warn" },
+                T("提示词与生成方式有改动 —— 保存后这个地块的已生成产物会作废（重跑要花钱）"))
+            : h("div", { className: "SPR_muted" }, T("只改名称 / 类别 / 变体数不会作废产物")),
+          // 实时预览最终会发给模型的提示词：用户能看见「统一画风」被追加在末尾
+          h("details", { className: "SPR_tilePromptPreview" },
+            h("summary", null, T("看最终提示词")),
+            h("pre", null, buildTilePromptPreview(itemDraft, styleDraft))
+          ),
+          h("div", { className: "SPR_row" },
+            h("button", {
+              type: "button",
+              className: "SPR_btn SPR_btn-primary",
+              onClick: () => void run(T("保存地块"), saveItem)
+            }, T("保存")),
+            h("button", {
+              type: "button",
+              className: "SPR_btn",
+              onClick: () => { setEditingKey(null); setItemDraft(null); }
+            }, T("取消")),
+            h("button", {
+              type: "button",
+              className: "SPR_btn",
+              onClick: () => void run(T("移除地块"), () => deleteItem(original ?? { key: itemDraft.key, label: itemDraft.label }))
+            }, T("删除这个地块"))
+          )
+        );
+      };
+
       // ── ② 生成 ────────────────────────────────────────────────────────
       const geomBadge = (variant) => {
         const report = variant.report;
@@ -5009,6 +5363,32 @@
         const off = Math.abs(ratio - 2);
         const cls = off <= 0.02 ? "SPR_tileBadge-ok" : off <= 0.05 ? "SPR_tileBadge" : "SPR_tileBadge-warn";
         return h("span", { className: `SPR_tileBadge ${cls}` }, `2:1 · ${ratio.toFixed(3)}`);
+      };
+
+      /**
+       * 实时预览「最终会发给模型的提示词」。
+       *
+       * 刻意在客户端复刻一份 `buildTilePrompt`（`src/tilegen.ts`）的形状：
+       * 浏览器半区是经典脚本，不能 import 宿主代码。两边的一致性由
+       * `verify-tile-client.mjs` 断言（它比对同一份 items + style 下两侧的前缀）。
+       * 前缀文案不要求逐字相同（那会把界面和宿主焊死），但**结构**必须一致：
+       * 地形 = 固定前缀 + 内容 + 画风；装饰 = 白底单图前缀；建筑 = 地基说明。
+       */
+      const buildTilePromptPreview = (draft, style) => {
+        const tail = String(style ?? "").trim() === "" ? "" : ` ${String(style).trim()}`;
+        if (draft.kind === "decor" || draft.mode === "plain") {
+          return `画一个斜45度等轴测（isometric）视角的游戏装饰物贴图，正交投影，观察者从画面下方看。` +
+            `正方形画布，装饰物居中，纯白色背景，画面里只有这一个东西：${draft.content}${tail}`;
+        }
+        if (draft.kind === "building" || draft.mode === "grid2x2") {
+          return `参考图里由洋红色外框圈出的等距菱形区域，是一栋大型建筑占用的 2x2 共 4 格地块。` +
+            `请在这个范围内画一栋建筑。\n${draft.content}\n` +
+            `视角是斜45度等轴测俯视（观察者从画面下方看）……\n` +
+            `像素画风，色彩明快饱和，干净色块，无文字、无数字、无边框、无阴影。`;
+        }
+        return `参考图里那个洋红色菱形就是地块的确切形状与位置。请只把菱形内部填成下面的内容。\n` +
+          `硬性要求：菱形的四个顶点、四条边、大小、位置必须与参考图完全一致；……\n\n` +
+          `内容：${draft.content}${tail}`;
       };
 
       const generateStage = h("div", { className: "SPR_tileStage" },
@@ -5044,11 +5424,84 @@
               return api.runTileItems({ projectId: project.id, keys: missing });
             })
           }, T("只补没生成的")),
+          h("button", {
+            type: "button",
+            className: "SPR_btn",
+            onClick: () => {
+              setNewItem({
+                key: "", label: "", kind: "terrain", family: "",
+                footprint: [1, 1], content: "", mode: "template", variantCount: 1
+              });
+              setEditingKey(null);
+              setItemDraft(null);
+            }
+          }, T("＋ 新增地块")),
+          h(BusyBtn, {
+            busy: busy,
+            className: "SPR_btn",
+            onClick: () => void run(T("恢复默认清单"), resetItems)
+          }, T("恢复默认清单")),
           busy ? h(BusyBtn, {
             busy: false,
             className: "SPR_btn",
             onClick: () => void run(T("停止"), () => api.cancelTileJob({ projectId: project.id }))
           }, T("停止")) : null
+        ),
+
+        // 新增地块表单
+        newItem === null ? null : h("div", { className: "SPR_tileEditor" },
+          h("div", { className: "SPR_tileEditorRow" },
+            h("label", { className: "SPR_field" },
+              h("span", { className: "SPR_fieldLabel" }, T("标识（英文小写，会当文件名）")),
+              h("input", {
+                className: "SPR_input",
+                placeholder: "rock3",
+                value: newItem.key,
+                onChange: (event) => setNewItem({ ...newItem, key: event.target.value })
+              })
+            ),
+            h("label", { className: "SPR_field" },
+              h("span", { className: "SPR_fieldLabel" }, T("名称")),
+              h("input", {
+                className: "SPR_input",
+                placeholder: T("灰色岩壁"),
+                value: newItem.label,
+                onChange: (event) => setNewItem({ ...newItem, label: event.target.value })
+              })
+            ),
+            h("label", { className: "SPR_field" },
+              h("span", { className: "SPR_fieldLabel" }, T("用途")),
+              h("select", {
+                className: "SPR_input",
+                value: newItem.kind,
+                onChange: (event) => {
+                  const kind = event.target.value;
+                  setNewItem({ ...newItem, kind, mode: kind === "decor" ? "plain" : kind === "building" ? "grid2x2" : "template" });
+                }
+              },
+                h("option", { value: "terrain" }, T("地形（占 1 格）")),
+                h("option", { value: "decor" }, T("装饰（占 1 格、按锚点摆放）")),
+                h("option", { value: "building" }, T("建筑（跨格）"))
+              )
+            )
+          ),
+          h("label", { className: "SPR_field" },
+            h("span", { className: "SPR_fieldLabel" }, T("生成提示词（只描述「菱形里面是什么」）")),
+            h("textarea", {
+              className: "SPR_input SPR_tilePrompt",
+              rows: 3,
+              value: newItem.content,
+              onChange: (event) => setNewItem({ ...newItem, content: event.target.value })
+            })
+          ),
+          h("div", { className: "SPR_row" },
+            h("button", {
+              type: "button",
+              className: "SPR_btn SPR_btn-primary",
+              onClick: () => void run(T("新增地块"), addItem)
+            }, T("新增")),
+            h("button", { type: "button", className: "SPR_btn", onClick: () => setNewItem(null) }, T("取消"))
+          )
         ),
         busy && project.job !== null && project.job !== undefined
           ? h("div", { className: "SPR_tileProgress" },
@@ -5061,12 +5514,27 @@
         h("div", { className: "SPR_tileGrid" },
           project.items.map((item) => h("div", {
             key: item.key,
-            className: "SPR_tileCard"
+            className: `SPR_tileCard${editingKey === item.key ? " SPR_tileCard-editing" : ""}`
           },
             h("div", { className: "SPR_tileCardHead" },
               h("span", { className: "SPR_tileCardTitle" }, item.label),
-              h("span", { className: "SPR_muted" }, `${item.kind} · ${item.variantCount} 张`)
+              h("span", { className: "SPR_muted" }, `${item.kind} · ${item.variantCount} 张 · ${item.family}`)
             ),
+            // 编辑态：整张卡片换成表单（缩略图仍在上面的验收阶段可看）
+            editingKey === item.key
+              ? itemEditor()
+              : h("div", { className: "SPR_row" },
+                  h("button", {
+                    type: "button",
+                    className: "SPR_btn SPR_btn-mini",
+                    onClick: () => startEdit(item)
+                  }, T("编辑")),
+                  h("button", {
+                    type: "button",
+                    className: "SPR_btn SPR_btn-mini",
+                    onClick: () => void run(T("删除"), () => deleteItem(item))
+                  }, T("删除"))
+                ),
             h("div", { className: "SPR_tileThumbs" },
               Array.from({ length: Math.max(1, item.variantCount) }).map((_, index) => {
                 const variant = item.variants[index];
@@ -5143,11 +5611,135 @@
           h(NumField, { className: "SPR_input SPR_input-num", value, min, max, step, onCommit: (next) => setValue(next) })
         );
 
+      /**
+       * 地图布局草稿：`cells[r][c]` 是地块 key。
+       *
+       * 为什么要有草稿：宿主每次 `saveTileMapCells` 都会作废下游（拼出来的图）。
+       * 用户连续涂十几格如果每次都提交，就变成十几次往返 + 十几次作废。
+       * 所以涂改只改草稿，点「保存布局」才提交一次。
+       */
+      const ensureMapDraft = () => {
+        if (mapDraft !== null) return mapDraft;
+        const rows = Math.max(1, mapRows);
+        const cols = Math.max(1, mapCols);
+        const draft = [];
+        for (let r = 0; r < rows; r++) {
+          const row = [];
+          for (let c = 0; c < cols; c++) row.push(project.map?.cells?.[r]?.[c] ?? "");
+          draft.push(row);
+        }
+        setMapDraft(draft);
+        return draft;
+      };
+
+      const draftRows = mapDraft?.length ?? 0;
+      const draftCols = mapDraft?.[0]?.length ?? 0;
+
+      const paint = (r, c, key) => {
+        const draft = ensureMapDraft().map((row) => [...row]);
+        if (draft[r] === undefined || draft[r][c] === undefined) return;
+        draft[r][c] = key;
+        setMapDraft(draft);
+        setCellKey(`${r},${c}`);
+      };
+
+      /** 按草稿尺寸重建空布局（改行列时用）。 */
+      const resizeDraft = (rows, cols) => {
+        const previous = mapDraft ?? project.map?.cells ?? [];
+        const draft = [];
+        for (let r = 0; r < rows; r++) {
+          const row = [];
+          for (let c = 0; c < cols; c++) row.push(previous[r]?.[c] ?? "");
+          draft.push(row);
+        }
+        setMapDraft(draft);
+      };
+
+      const saveMapDraft = async () => {
+        const draft = mapDraft;
+        if (draft === null) return;
+        await api.saveTileMapCells({
+          projectId: project.id,
+          cells: draft,
+          seed: mapSeed,
+          decor: project.map?.decor ?? {}
+        });
+        setNotice({ kind: "info", text: T("布局已保存。点「铺成地图」重新出图。") });
+      };
+
+      /** 把草稿里所有非空格子换成指定类别（「刷满」）。 */
+      const fillDraft = (key) => {
+        const rows = Math.max(1, mapRows);
+        const cols = Math.max(1, mapCols);
+        const draft = [];
+        for (let r = 0; r < rows; r++) {
+          const row = [];
+          for (let c = 0; c < cols; c++) row.push(key);
+          draft.push(row);
+        }
+        setMapDraft(draft);
+      };
+
+      /** 预览里叠一层可点的格子。用 CSS 等距定位，跟拼图用的是同一套步长。 */
+      const mapCellGrid = () => {
+        if (mapDraft === null) return null;
+        const cw = project.settings?.cellWidth ?? 64;
+        const ch = project.settings?.cellHeight ?? 96;
+        const rows = mapDraft.length;
+        const cols = mapDraft[0]?.length ?? 0;
+        // 拼图放大 2 倍交付（见宿主 runMapStage 的 upscale），预览图也是放大后的，
+        // 所以叠层也要 ×2。这里的公式与宿主 `tileLayout` / `tileOriginAt`
+        // （src/tilemap.ts）**逐字对应** —— 浏览器半区不能 import 宿主代码，
+        // 一致性由 verify-tile-client.mjs 断言（它拿宿主的 tileOriginAt 比对同一组坐标）。
+        const scale = 2;
+        const stepX = (cw / 2) * scale;
+        const stepY = (cw / 4) * scale;   // 菱形高 / 2 = cellWidth / 4，不是 cellHeight / 4
+        const originX = (rows - 1) * stepX;
+        const originY = ch * scale;        // 最上面那格的上方留一个单元格高
+        // ⚠️ 预览图是**裁过边**的（宿主 trimTransparent），而上面算的是未裁坐标 ——
+        // 必须减去裁剪偏移，否则叠层与预览图整体错位（地图看着对、点到的格子全错）。
+        // 偏移由宿主在 `map.pixel` 里给出；没有它（老项目）就按未裁对齐。
+        const trimLeft = typeof project.map?.pixel?.left === "number" ? project.map.pixel.left : 0;
+        const trimTop = typeof project.map?.pixel?.top === "number" ? project.map.pixel.top : 0;
+        const canvasW = typeof project.map?.pixel?.width === "number"
+          ? project.map.pixel.width
+          : Math.ceil((cols + rows) * stepX + cw * scale);
+        const canvasH = typeof project.map?.pixel?.height === "number"
+          ? project.map.pixel.height
+          : Math.ceil((rows + cols) * stepY + ch * 2 * scale);
+        const cells = [];
+        for (let r = 0; r < rows; r++) {
+          for (let c = 0; c < cols; c++) {
+            const key = mapDraft[r][c];
+            const x = Math.round(originX + (c - r) * stepX) - trimLeft;
+            const y = Math.round(originY + (c + r) * stepY) - trimTop;
+            cells.push(h("button", {
+              key: `${r},${c}`,
+              type: "button",
+              className: `SPR_mapCell${key === "" ? " SPR_mapCell-empty" : ""}${cellKey === `${r},${c}` ? " SPR_mapCell-active" : ""}`,
+              style: {
+                left: `${x}px`, top: `${y}px`,
+                width: `${cw * scale}px`, height: `${ch * scale}px`,
+                // 只让菱形那部分可点：菱形在单元格里位于 y ∈ [1/3, 2/3]
+                clipPath: "polygon(50% 33.3%, 100% 50%, 50% 66.7%, 0% 50%)"
+              },
+              title: `${r},${c} · ${key === "" ? T("空格") : key}`,
+              onClick: () => paint(r, c, brushKey === "__erase__" ? "" : (brushKey ?? ""))
+            }, h("span", { className: "SPR_mapCellLabel" }, key === "" ? "" : key.slice(0, 4))));
+          }
+        }
+        return h("div", { className: "SPR_mapEditorWrap" },
+          h("div", { className: "SPR_mapEditorCanvas", style: { width: `${canvasW}px`, height: `${canvasH}px` } },
+            cells
+          )
+        );
+      };
+
       const mapStage = h("div", { className: "SPR_tileStage" },
-        h("p", { className: "SPR_hint" }, T("铺图全在本地：按等距网格铺、按类别随机抽变体、按 (r+c) 顺序遮挡。同种子 + 同布局 = 逐像素一致，可以反复试到满意为止。")),
+        h("p", { className: "SPR_hint" }, T("铺图全在本地：按等距网格铺、按类别随机抽变体、按 (r+c) 顺序遮挡。同种子 + 同布局 = 逐像素一致。也可以手动改：挑一个地块当笔刷，点格子涂上去。")),
         h("div", { className: "SPR_row" },
-          numberField(T("行"), mapRows, setMapRows, 1, 64, 1),
-          numberField(T("列"), mapCols, setMapCols, 1, 64, 1),
+          numberField(T("行"), mapRows, (next) => { setMapRows(next); resizeDraft(next, mapCols); }, 1, 64, 1),
+          numberField(T("列"), mapCols, (next) => { setMapCols(next); resizeDraft(mapRows, next); }, 1, 64, 1),
           numberField(T("种子"), mapSeed, setMapSeed, 0, 999999999, 1),
           numberField(T("装饰密度"), decorDensity, setDecorDensity, 0, 1, 0.01)
         ),
@@ -5156,7 +5748,8 @@
             busy: busy,
             className: "SPR_btn SPR_btn-primary",
             onClick: () => void run(T("拼图"), () => api.runTileMap({
-              projectId: project.id, rows: mapRows, cols: mapCols, seed: mapSeed, fill: "grass", decorDensity
+              projectId: project.id, rows: mapRows, cols: mapCols, seed: mapSeed,
+              fill: project.items[0]?.key ?? "grass", decorDensity
             }))
           }, T("铺成地图（免费）")),
           h(BusyBtn, {
@@ -5164,9 +5757,50 @@
             className: "SPR_btn",
             onClick: () => void run(T("换种子"), () => api.runTileMap({
               projectId: project.id, rows: mapRows, cols: mapCols,
-              seed: Math.floor(Math.random() * 1000000), fill: "grass", decorDensity
+              seed: Math.floor(Math.random() * 1000000),
+              fill: project.items[0]?.key ?? "grass", decorDensity
             }))
           }, T("换个种子重铺"))
+        ),
+
+        // ── 手动编辑布局 ────────────────────────────────────────────────
+        h("div", { className: "SPR_tileEditor" },
+          h("div", { className: "SPR_tileEditorRow" },
+            h("span", { className: "SPR_fieldLabel" }, T("笔刷（点格子刷上去）")),
+            h("div", { className: "SPR_mapBrush" },
+              ...project.items.map((item) => h("button", {
+                key: item.key,
+                type: "button",
+                className: `SPR_btn SPR_btn-mini${brushKey === item.key ? " SPR_btn-on" : ""}`,
+                onClick: () => setBrushKey(item.key),
+                title: `${item.key} · ${item.family}`
+              }, item.label)),
+              h("button", {
+                type: "button",
+                className: `SPR_btn SPR_btn-mini${brushKey === "__erase__" ? " SPR_btn-on" : ""}`,
+                onClick: () => setBrushKey("__erase__")
+              }, T("橡皮擦"))
+            )
+          ),
+          mapDraft === null
+            ? h("div", { className: "SPR_row" },
+                h("button", { type: "button", className: "SPR_btn", onClick: () => { ensureMapDraft(); setNotice({ kind: "info", text: T("已取出当前布局，开始涂改（改完点「保存布局」）") }); } },
+                  T("开始编辑布局"))
+              )
+            : h("div", { className: "SPR_tileEditorRow" },
+                h("button", { type: "button", className: "SPR_btn", onClick: () => fillDraft(brushKey === "__erase__" ? "" : (brushKey ?? "")) },
+                  T("全刷成当前笔刷")),
+                h("button", { type: "button", className: "SPR_btn", onClick: () => fillDraft("") }, T("全部清空")),
+                h("button", { type: "button", className: "SPR_btn SPR_btn-primary", onClick: () => void run(T("保存布局"), saveMapDraft) },
+                  T("保存布局")),
+                h("button", { type: "button", className: "SPR_btn", onClick: () => { setMapDraft(null); setCellKey(null); } }, T("放弃修改")),
+                h("span", { className: "SPR_muted" },
+                  cellKey === null ? T("共 {n0} 行 × {n1} 列", { n0: draftRows, n1: draftCols })
+                    : T("正在编辑 {n0} · 当前是「{n1}」", { n0: cellKey, n1: (mapDraft[Number(cellKey.split(",")[0])]?.[Number(cellKey.split(",")[1])] || T("空格")) }))
+              ),
+          mapDraft === null ? null : mapCellGrid(),
+          h("p", { className: "SPR_muted" },
+            T("涂改只改草稿，点「保存布局」才写回项目；之后再点「铺成地图」出图。手动改布局不会作废已生成的地块。"))
         ),
         // ⚠️ 判据是 `map.png`（宿主真实给的字段），**不是** `map.ready`。
         // 宿主从来没算过 `ready`，所以写成 `map.ready === true` 时**拼好的地图

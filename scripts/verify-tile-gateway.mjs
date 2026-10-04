@@ -169,6 +169,87 @@ section("saveTileProject：改内容会作废产物，改名字不会");
   const restyled = await studio.getTileProject({ projectId: id });
   check("改画风时产物被作废", restyled.items[0].variants.length === 0);
   check("画风写回去了", restyled.style === "完全不同的画风");
+
+  // ── 新增地块（GUI 的「＋ 新增地块」走这条路）──────────────────────────
+  {
+    const current = await studio.getTileProject({ projectId: id });
+    const added = [
+      ...current.items.map((i) => ({
+        key: i.key, label: i.label, kind: i.kind, family: i.family,
+        content: i.content, mode: i.mode, variantCount: i.variantCount, variants: i.variants
+      })),
+      {
+        key: "rock3", label: "灰色岩壁", kind: "terrain", family: "rock",
+        footprint: [1, 1], content: "灰色岩壁，垂直节理明显。", mode: "template",
+        variantCount: 2, variants: []
+      }
+    ];
+    await studio.saveTileProject({ projectId: id, items: added });
+    const afterAdd = await studio.getTileProject({ projectId: id });
+    const created = afterAdd.items.find((i) => i.key === "rock3");
+    check("新增的地块出现了", created !== undefined, afterAdd.items.map((i) => i.key).join(","));
+    check("新增地块的字段都写对了",
+      created?.label === "灰色岩壁" && created?.family === "rock" && created?.variantCount === 2,
+      JSON.stringify({ label: created?.label, family: created?.family, variantCount: created?.variantCount }));
+    check("新增地块没有产物", created?.variants.length === 0);
+    check("新增地块计入 progress.expected", afterAdd.progress.expected === current.progress.expected + 2,
+      `${current.progress.expected} → ${afterAdd.progress.expected}`);
+
+    // 改家族 / 用途 / 占格 / 变体数（都不该动产物）
+    const withVariants = afterAdd.items.map((i) => ({
+      key: i.key, label: i.label, kind: i.kind, family: i.family,
+      content: i.content, mode: i.mode, variantCount: i.variantCount, variants: i.variants
+    }));
+    const target = withVariants.find((i) => i.key === "rock3");
+    target.label = "岩壁";
+    target.kind = "decor";
+    target.mode = "plain";
+    target.family = "boulder";
+    target.footprint = [2, 2];
+    target.variantCount = 4;
+    await studio.saveTileProject({ projectId: id, items: withVariants });
+    const afterEdit = await studio.getTileProject({ projectId: id });
+    const edited = afterEdit.items.find((i) => i.key === "rock3");
+    check("改用途 / 生成方式 / 家族 / 占格 / 变体数都生效",
+      edited?.kind === "decor" && edited?.mode === "plain" && edited?.family === "boulder" &&
+      edited?.footprint?.join(",") === "2,2" && edited?.variantCount === 4,
+      JSON.stringify({ kind: edited?.kind, mode: edited?.mode, family: edited?.family, fp: edited?.footprint, vc: edited?.variantCount }));
+
+    // ── 删除地块（GUI 的「删除」走这条路）────────────────────────────────
+    const without = afterEdit.items
+      .filter((i) => i.key !== "rock3")
+      .map((i) => ({
+        key: i.key, label: i.label, kind: i.kind, family: i.family,
+        content: i.content, mode: i.mode, variantCount: i.variantCount, variants: i.variants
+      }));
+    await studio.saveTileProject({ projectId: id, items: without });
+    const afterDelete = await studio.getTileProject({ projectId: id });
+    check("删除的地块没了", !afterDelete.items.some((i) => i.key === "rock3"));
+    check("删掉后剩余地块数正确", afterDelete.items.length === afterEdit.items.length - 1,
+      `${afterEdit.items.length} → ${afterDelete.items.length}`);
+
+    // 删空必须被挡住（否则地图无图可铺，而且界面会白屏）
+    let threw = false;
+    try {
+      await studio.saveTileProject({ projectId: id, items: [] });
+    } catch {
+      threw = true;
+    }
+    const afterEmpty = await studio.getTileProject({ projectId: id });
+    check("提交空清单不会把项目清空", afterEmpty.items.length > 0, `${afterEmpty.items.length} 项`);
+    void threw;
+  }
+
+  // ── resetItemsToDefault ──────────────────────────────────────────────
+  {
+    const r = await studio.saveTileProject({ projectId: id, resetItemsToDefault: true, lang: "zh" });
+    check("恢复默认清单后是 14 项", r.items.length === 14, String(r.items.length));
+    check("恢复默认清单后第一项是草地", r.items[0]?.key === "grass", String(r.items[0]?.key));
+    const rEn = await studio.saveTileProject({ projectId: id, resetItemsToDefault: true, lang: "en" });
+    check("lang=en 时恢复成英文默认清单", rEn.items[0]?.label === "Grass", String(rEn.items[0]?.label));
+    // 复原成中文，后面的拼图测试要用 grass
+    await studio.saveTileProject({ projectId: id, resetItemsToDefault: true, lang: "zh" });
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -209,6 +290,38 @@ section("④ 拼图 / ⑤ 导出（走网关，免费）");
     check("导出产物齐备",
       existsSync(join(tilegen.tileProjectDir(id), "export", "map.png")) &&
       existsSync(join(tilegen.tileProjectDir(id), "export", "map.json")));
+
+    // ── saveTileMapCells：GUI 的手动布局编辑走这条路 ────────────────────
+    {
+      const layout = [
+        ["grass", "grass", ""],
+        ["", "grass", "grass"],
+        ["grass", "", "grass"]
+      ];
+      await studio.saveTileMapCells({ projectId: id, cells: layout, seed: 42 });
+      const edited = await studio.getTileProject({ projectId: id });
+      check("手动布局写回项目", JSON.stringify(edited.map.cells) === JSON.stringify(layout),
+        JSON.stringify(edited.map.cells));
+      check("手动布局同步了 rows / cols", edited.map.rows === 3 && edited.map.cols === 3,
+        `${edited.map.rows}×${edited.map.cols}`);
+      check("手动布局同步了 seed", edited.map.seed === 42, String(edited.map.seed));
+      check("手动改布局不作废已生成的地块", edited.items[0].variants.length === 1,
+        `${edited.items[0].variants.length} 个变体`);
+      check("手动改布局会作废下游地图（需要重铺）", edited.map.png === undefined, String(edited.map.png));
+
+      // 重新铺一次，确认空单元格被正确跳过而不是崩
+      await studio.runTileMap({ projectId: id, rows: 3, cols: 3, seed: 42, fill: "grass", decorDensity: 0 });
+      await waitIdle(id);
+      const remapped = await studio.getTileProject({ projectId: id });
+      check("带空单元格的布局能重新铺出来", remapped.map.png === "map/map.png");
+      check("重新铺图后阶段回到 done", remapped.stages.map.status === "done", remapped.stages.map.status);
+
+      // 空清单不能把地图清没
+      await studio.saveTileMapCells({ projectId: id, cells: [] });
+      const afterEmpty = await studio.getTileProject({ projectId: id });
+      check("提交空 cells 不会把布局清空", afterEmpty.map.cells.length > 0,
+        `${afterEmpty.map.cells.length} 行`);
+    }
   }
 }
 

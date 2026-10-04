@@ -37,6 +37,21 @@ export interface TileMapState {
   /** 拼图产物（相对项目目录）。未拼图时无此字段。 */
   png?: string;
   json?: string;
+  /**
+   * 成品的像素信息（交付尺寸，已放大、已裁边）。
+   *
+   * 界面叠「可点格子」时必须用 `left/top` 把等距坐标平移到裁剪后的画布上，
+   * 否则叠层与预览图错位（地图看着对、点到的格子却全错）。
+   */
+  pixel?: {
+    width: number;
+    height: number;
+    /** 相对**未裁剪**画布的偏移。 */
+    left: number;
+    top: number;
+    /** 交付放大倍数（当前固定 2）。 */
+    scale: number;
+  };
 }
 
 export function emptyMapState(rows = 14, cols = 14, fill = "grass", seed = 20261004): TileMapState {
@@ -81,22 +96,64 @@ export interface AssembleOptions {
  * `cells` 里给的是**地形类别**，具体用哪个变体由种子随机抽 ——
  * 这是打散网格重复感唯一的杠杆（实测只有 1 个变体时能看出明显的 2×2 重复）。
  */
+/**
+ * 一个格子的**像素几何**（画布左上角为原点）。
+ *
+ * 这是等距布局的**唯一真源**：`assembleMap` 用它铺图，界面用它叠可点的格子。
+ * 两边各写一份必然会错位 —— 实测界面那份把 `originY` 写成 `cellH/2*scale`，
+ * 而宿主是 `cellH`，叠层整整偏了半个格子（点到的格子和看到的格子对不上）。
+ *
+ * `scale` 是交付放大倍数：`runMapStage` 把成品放大 2 倍再落盘，
+ * 所以界面要在**放大后**的预览图上叠层。
+ */
+export interface TileLayout {
+  stepX: number;
+  stepY: number;
+  originX: number;
+  originY: number;
+  canvasW: number;
+  canvasH: number;
+}
+
+export function tileLayout(settings: TileSettings, rows: number, cols: number, scale = 1): TileLayout {
+  const stepX = (settings.cellWidth / 2) * scale;
+  // stepY 来自**菱形高**（= cellWidth/2）的一半，不是 cellHeight/4。
+  // 写成 cellHeight/4 会得到 24（正确 16），整张图就裂了。
+  const stepY = (diamondHeight(settings) / 2) * scale;
+  const cellW = settings.cellWidth * scale;
+  const cellH = settings.cellHeight * scale;
+  return {
+    stepX,
+    stepY,
+    originX: (rows - 1) * stepX,
+    // 最上面那格的上方留一个单元格高，给高出地面的装饰留空间
+    originY: cellH,
+    canvasW: Math.ceil((cols + rows) * stepX + cellW),
+    canvasH: Math.ceil((rows + cols) * stepY + cellH * 2)
+  };
+}
+
+/** 第 (r, c) 格贴图的左上角像素位置。 */
+export function tileOriginAt(layout: TileLayout, r: number, c: number): { x: number; y: number } {
+  return {
+    x: Math.round(layout.originX + (c - r) * layout.stepX),
+    y: Math.round(layout.originY + (c + r) * layout.stepY)
+  };
+}
+
 export function assembleMap(
   lookup: Map<string, Bitmap>,
   state: TileMapState,
   options: AssembleOptions
 ): Bitmap {
   const { settings } = options;
-  const stepX = settings.cellWidth / 2;
-  const stepY = diamondHeight(settings) / 2;
-  const cellW = settings.cellWidth;
-  const cellH = settings.cellHeight;
 
   if (state.rows < 1 || state.cols < 1) throw new Error("地图至少要有 1 行 1 列");
   if (state.rows > 64 || state.cols > 64) throw new Error(`地图最大 64×64，收到 ${state.cols}×${state.rows}`);
+  const layout = tileLayout(settings, state.rows, state.cols);
+  const { stepX, stepY, canvasW, canvasH } = layout;
+  const cellH = settings.cellHeight;
   // 画布尺寸守卫：不守卫的话 64×64 会尝试分配几百 MB 然后 OOM
-  const canvasW = Math.ceil((state.cols + state.rows) * stepX + cellW);
-  const canvasH = Math.ceil((state.rows + state.cols) * stepY + cellH * 2);
   if (canvasW * canvasH > 64 * 1024 * 1024) {
     throw new Error(`地图画布过大（${canvasW}×${canvasH}）`);
   }
@@ -110,12 +167,7 @@ export function assembleMap(
     out[i * 4 + 3] = bg[3];
   }
 
-  const originX = (state.rows - 1) * stepX;
-  const originY = cellH;
-  const at = (r: number, c: number) => ({
-    x: Math.round(originX + (c - r) * stepX),
-    y: Math.round(originY + (c + r) * stepY)
-  });
+  const at = (r: number, c: number) => tileOriginAt(layout, r, c);
 
   const rng = mulberry32(state.seed);
   const decorAt = new Map<string, string[]>();
@@ -153,8 +205,8 @@ export function assembleMap(
   for (const [r, c, name] of state.buildings) {
     const sprite = lookup.get(name);
     if (sprite === undefined) continue;
-    const x = Math.round(originX + (c - r) * stepX - sprite.width / 2);
-    const y = Math.round(originY + (r + c + 2) * stepY - sprite.height + Math.round(cellH / 12));
+    const x = Math.round(layout.originX + (c - r) * stepX - sprite.width / 2);
+    const y = Math.round(layout.originY + (r + c + 2) * stepY - sprite.height + Math.round(cellH / 12));
     blit(out, canvasW, canvasH, sprite, x, y);
   }
 
@@ -193,7 +245,7 @@ function blit(dst: Buffer, dstW: number, dstH: number, src: Bitmap, dx: number, 
   }
 }
 
-/** 裁掉四周全透明的边（地图留白太多时用）。 */
+/** 裁掉四周全透明的边（地图留白太多时用）。返回裁掉的偏移，调用方要拿它对齐叠层。 */
 export function trimTransparent(src: Bitmap, alphaThreshold = 8): Bitmap {
   let left = src.width;
   let top = src.height;
@@ -208,14 +260,18 @@ export function trimTransparent(src: Bitmap, alphaThreshold = 8): Bitmap {
       if (y > bottom) bottom = y;
     }
   }
-  if (right < 0) return src;
+  if (right < 0) {
+    return Object.assign(src, { left: 0, top: 0 }) as Bitmap & { left: number; top: number };
+  }
   const w = right - left + 1;
   const h = bottom - top + 1;
   const rgba = Buffer.alloc(w * h * 4);
   for (let y = 0; y < h; y++) {
     src.rgba.copy(rgba, y * w * 4, ((y + top) * src.width + left) * 4, ((y + top) * src.width + left + w) * 4);
   }
-  return { width: w, height: h, rgba };
+  // ⚠️ `left/top` 要带出去：成品是裁过的，而界面叠可点格子时用的是**未裁**坐标。
+  // 少了这两个值，叠层整体偏移（实测：地图看着对、但点到的格子全错一格）。
+  return Object.assign({ width: w, height: h, rgba }, { left, top }) as Bitmap & { left: number; top: number };
 }
 
 /**

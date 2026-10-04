@@ -19,6 +19,14 @@ export interface Bitmap {
   width: number;
   height: number;
   rgba: Buffer;
+  /**
+   * 裁剪前的偏移（只有 `trimTransparent` 的返回值会带这两个字段）。
+   *
+   * 成品图是裁过边的，而等距布局算出来的是**未裁**坐标；界面要把可点的格子
+   * 叠在裁剪后的预览图上，就必须先减掉这个偏移，否则叠层整体错位。
+   */
+  left?: number;
+  top?: number;
 }
 
 /** PNG 头里的尺寸（不解码像素，用来做廉价校验）。 */

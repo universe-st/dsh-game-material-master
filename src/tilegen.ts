@@ -710,12 +710,33 @@ export async function runMapStage(projectId: string, options: MapOptions = {}): 
   const seed = Number.isFinite(options.seed) ? Math.trunc(options.seed as number) : project.map.seed;
   const fill = options.fill ?? "grass";
 
-  // 要先定下「到底铺哪张图」，才能校验它引用的类别 —— 校验的是**即将组装的那份**状态，
-  // 而不是 project.json 里存的那份（两者在「传了 fill/rows 覆盖参数」时并不相同）。
-  const state: TileMapState = options.rows !== undefined || options.cols !== undefined ||
-      options.seed !== undefined || options.fill !== undefined
-    ? emptyMapState(rows, cols, fill, seed)
-    : { ...project.map, rows, cols, seed };
+  // 显式要的 fill 必须先校验存在：现在有「沿用已存布局」这条路径，
+  // 光靠后面按 cells 校验会漏掉「fill 本身就不存在」的情况
+  //（那种情况下用户以为会铺满 fill，实际铺的是旧布局）。
+  if (options.fill !== undefined && (families[options.fill] ?? []).length === 0) {
+    throw new Error(`没有可用的地块类别「${options.fill}」。可选：${Object.keys(families).filter((k) => families[k].length > 0).join("、")}`);
+  }
+
+  /**
+   * 要铺的那份状态。
+   *
+   * ⚠️ **必须优先沿用项目里存着的布局**（那是用户在「手动编辑布局」里一格一格涂出来的）。
+   * 之前只要传了任意一个覆盖参数（界面永远会传 `decorDensity`）就走
+   * `emptyMapState(rows, cols, fill)` —— **整份手改布局被丢掉**，重新铺出一张
+   * 纯 fill 的规则地图，而且不报任何错。
+   *
+   * ⚠️ 但 `hasSaved` 不能只看「网格非空」：新建项目的 `emptyMapState(14,14,"")`
+   * 就是一张 14×14 的**空字符串**网格，那也是「非空」。把它当成有布局，
+   * 就会去渲染一张 14×14 的空地图 —— 画布按 14×14 撑到 896×768、
+   * 实际一个像素都没画（实测：第一次铺图得到 896×768 的全透明图，
+   * 而 `map.pixel` 还是 (0,0)，界面的可点格子与预览图完全对不上）。
+   * 判据必须是「**至少有一格填了东西**」。
+   */
+  const saved = project.map.cells;
+  const hasSaved = Array.isArray(saved) && saved.some((row) => Array.isArray(row) && row.some((cell) => cell !== "" && cell !== undefined));
+  const state: TileMapState = hasSaved
+    ? { ...project.map, rows, cols, seed, cells: resizeCells(saved, rows, cols, fill) }
+    : emptyMapState(rows, cols, fill, seed);
 
   // 预校验：地图里引用的类别必须真的有已生成的变体。
   // 不校验的话会静默产出一张**缺了那些格子**的图，用户只看到「怎么空了」。
@@ -763,13 +784,43 @@ export async function runMapStage(projectId: string, options: MapOptions = {}): 
     job.running = null;
     await report();
     await patchTileProject(projectId, (fresh) => {
-      fresh.map = { ...decorated, png: "map/map.png", json: "map/map.json" };
+      fresh.map = {
+        ...decorated,
+        png: "map/map.png",
+        json: "map/map.json",
+        // 记下成品的像素信息：界面叠可点格子时要用 left/top 对齐裁剪后的画布
+        pixel: {
+          width: big.width,
+          height: big.height,
+          left: trimmed.left * 2,
+          top: trimmed.top * 2,
+          scale: 2
+        }
+      };
       fresh.stages.map = { status: "done", at: new Date().toISOString() };
       invalidateFrom(fresh, "export");
       appendJobLog(fresh.logs, "info", `已拼图：${decorated.cols}×${decorated.rows}（本地计算，免费）`);
     });
   });
   return { started: true };
+}
+
+/**
+ * 把存下来的布局裁剪 / 扩展到目标行列。
+ *
+ * 扩出来的格子用 `fill` 铺（用户改大行列时不会得到一片空格），
+ * 裁掉的部分直接丢。这样做是为了「改行 / 列」不要连带丢掉整份手改布局。
+ */
+function resizeCells(cells: string[][], rows: number, cols: number, fill: string): string[][] {
+  const out: string[][] = [];
+  for (let r = 0; r < rows; r++) {
+    const row: string[] = [];
+    for (let c = 0; c < cols; c++) {
+      row.push(cells[r]?.[c] ?? fill);
+    }
+    out.push(row);
+  }
+  return out;
 }
 
 /** 按装饰密度随机撒装饰、放置建筑 —— 用确定性 PRNG，保证同种子可复现。 */

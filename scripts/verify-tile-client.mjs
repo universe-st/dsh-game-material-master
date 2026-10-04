@@ -322,10 +322,12 @@ function makeProject(overrides = {}) {
  * 错位不会报错，只会把 `stage` 读成别的值 —— 于是断言看着通过、其实测的是别的状态。
  * 这里用一条断言把个数钉住（见下面的「Hook 槽位」）。
  */
-// 17 = useLocaleTick(1) + 组件自身 12 个 useState + usePendingTasks(useState + 2×useRef)
+// 23 = useLocaleTick(1) + 组件自身 18 个 useState + usePendingTasks(useState + 2×useRef)
 //      + useStudioIntent(useState)。effect / callback 不占状态槽。
-const EXPECTED_HOOKS = 17;
-function renderTile(project, { projects = [], stage = "template", styleDraft, nameDraft } = {}) {
+// **新增状态时这个数字必须跟着改** —— 它是「槽位没串位」的唯一护栏。
+const EXPECTED_HOOKS = 23;
+function renderTile(project, options = {}) {
+  const { projects = [], stage = "template", styleDraft, nameDraft, ...drafts } = options;
   HOOK.slots = [
     0,                        // 0  useLocaleTick
     projects.map((p) => ({ id: p.id, name: p.name, generatedCount: 2, expectedCount: 2 })), // 1 projects
@@ -336,13 +338,18 @@ function renderTile(project, { projects = [], stage = "template", styleDraft, na
     styleDraft ?? (project?.style ?? ""), // 6 styleDraft
     nameDraft ?? (project?.name ?? ""),   // 7 nameDraft
     14,                       // 8  mapRows
-    14,                       // 9  mapCols
+    14,                       // 9 mapCols
     20261004,                 // 10 mapSeed
     0.08,                     // 11 decorDensity
     false,                    // 12 creating
-    // 13 / 14 / 15 / 16 是 usePendingTasks / useStudioIntent 内部的状态槽。
-    // 它们由各自的 Hook 自己管，测试没法从外面注入 —— 所以「任务在跑」这条路径
-    // 要靠 `project.job.running` 驱动（那才是 busy 的第一判据，见组件里的 busy 定义）。
+    // 13~18：编辑相关草稿（未编辑时全是 null）
+    drafts.editingKey ?? null,
+    drafts.itemDraft ?? null,
+    drafts.newItem ?? null,
+    drafts.brushKey ?? null,
+    drafts.cellKey ?? null,
+    drafts.mapDraft ?? null,
+    // 19~22 是 usePendingTasks / useStudioIntent 内部的状态槽，测试没法从外面注入
     undefined, undefined, undefined, undefined
   ];
   HOOK.cursor = 0;
@@ -506,6 +513,181 @@ section("⑤ 导出阶段");
   check("有「导出到 export/」按钮", allText(tree).includes("导出到 export/"));
   check("有「打开产物目录」按钮", allText(tree).includes("打开产物目录"));
   check("说明了导出内容", allText(tree).includes("布局 JSON"));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("② 生成阶段：地块清单的增 / 删 / 改");
+// ═══════════════════════════════════════════════════════════════════════════
+{
+  const { tree } = renderTile(makeProject(), { stage: "generate" });
+  check("每个地块卡片有「编辑」按钮", (allText(tree).match(/编辑/g) ?? []).length >= 1);
+  check("每个地块卡片有「删除」按钮", (allText(tree).match(/删除/g) ?? []).length >= 1);
+  check("有「＋ 新增地块」按钮", allText(tree).includes("＋ 新增地块"));
+  check("有「恢复默认清单」按钮", allText(tree).includes("恢复默认清单"));
+  check("卡片上显示了类别（family）", allText(tree).includes("grass"), allText(tree).slice(0, 200));
+
+  // 编辑态：表单里的字段必须都在，而且提示词要能改
+  const draft = {
+    key: "grass", label: "草地", kind: "terrain", family: "grass", footprint: [1, 1],
+    content: "改过的内容描述", mode: "template", variantCount: 3
+  };
+  const editing = renderTile(makeProject(), { stage: "generate", editingKey: "grass", itemDraft: draft }).tree;
+  const editingText = allText(editing);
+  check("编辑态显示标识（只读）", editingText.includes("标识（key，只读）"));
+  check("编辑态有用途下拉", editingText.includes("地形（占 1 格）") && editingText.includes("装饰（占 1 格、按锚点摆放）"));
+  check("编辑态有生成方式下拉",
+    editingText.includes("模板填充（地形）") && editingText.includes("2×2 地基网格（建筑）"));
+  check("编辑态有变体数", editingText.includes("变体数（每个变体一次计费调用）"));
+  check("编辑态有类别（family）", editingText.includes("类别（铺图时按它随机抽变体）"));
+  check("编辑态有占格", editingText.includes("占格 列 × 行"));
+  check("编辑态有提示词 textarea", byType(editing, "textarea").length >= 1);
+  check("提示词 textarea 里是草稿内容",
+    byType(editing, "textarea").some((node) => node.props.value === "改过的内容描述"));
+  check("编辑态有「看最终提示词」折叠区", editingText.includes("看最终提示词"));
+  check("提示词预览里含草稿内容",
+    byType(editing, "pre").some((node) => textOf(node).includes("改过的内容描述")),
+    byType(editing, "pre").map(textOf).join(" | ").slice(0, 120));
+  check("提示词预览里含统一画风",
+    byType(editing, "pre").some((node) => textOf(node).includes("像素画风")),
+    byType(editing, "pre").map(textOf).join(" | ").slice(0, 120));
+  check("编辑态有保存 / 取消 / 删除三个动作",
+    editingText.includes("保存") && editingText.includes("取消") && editingText.includes("删除这个地块"));
+
+  // 「提示词变了会作废」必须在界面上说清楚 —— 这是花钱的事
+  const promptChanged = renderTile(makeProject(), { stage: "generate", editingKey: "grass", itemDraft: draft }).tree;
+  check("提示词改动时给出作废警告",
+    allText(promptChanged).includes("保存后这个地块的已生成产物会作废"),
+    allText(promptChanged).slice(-260));
+
+  // 只改变体数时不该出现作废警告
+  const samePrompt = renderTile(makeProject(), {
+    stage: "generate", editingKey: "grass",
+    itemDraft: { ...draft, content: "鲜绿色的短草地。", variantCount: 3 }
+  }).tree;
+  check("只改变体数时不显示作废警告",
+    !allText(samePrompt).includes("保存后这个地块的已生成产物会作废") &&
+    allText(samePrompt).includes("只改名称 / 类别 / 变体数不会作废产物"));
+
+  // 新增表单
+  const adding = renderTile(makeProject(), {
+    stage: "generate",
+    newItem: { key: "", label: "", kind: "terrain", family: "", footprint: [1, 1], content: "", mode: "template", variantCount: 1 }
+  }).tree;
+  check("新增表单有标识 / 名称 / 用途", allText(adding).includes("标识（英文小写，会当文件名）") &&
+    allText(adding).includes("名称") && allText(adding).includes("用途"));
+  check("新增表单有「新增」按钮", allText(adding).includes("新增"));
+
+  // 编辑态下不该同时显示「编辑」按钮（否则用户会点错）
+  check("编辑态下卡片本身不再显示「编辑」按钮",
+    byClassPart(editing, "SPR_tileEditor").length >= 1 &&
+    !byClassPart(editing, "SPR_tileCard-editing").some((card) => textOf(card).includes("编辑")));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("④ 拼图阶段：手动编辑布局");
+// ═══════════════════════════════════════════════════════════════════════════
+{
+  const cells = [
+    ["grass", "grass", "grass"],
+    ["grass", "", "dirt"],
+    ["rock", "grass", "grass"]
+  ];
+  const withDraft = renderTile(makeProject({ map: { rows: 3, cols: 3, seed: 5, cells, decor: {}, buildings: [] } }), {
+    stage: "map", brushKey: "dirt", mapDraft: cells.map((row) => [...row])
+  }).tree;
+  const text = allText(withDraft);
+  check("未开始编辑时给「开始编辑布局」入口",
+    allText(renderTile(makeProject(), { stage: "map", mapDraft: null }).tree).includes("开始编辑布局"));
+  check("编辑态显示笔刷区", text.includes("笔刷（点格子刷上去）"));
+  check("笔刷里有每个地块", byClassPart(withDraft, "SPR_btn-mini").length >= 2);
+  check("笔刷里有橡皮擦", text.includes("橡皮擦"));
+  check("编辑态有「保存布局」", text.includes("保存布局"));
+  check("编辑态有「全部清空」", text.includes("全部清空"));
+  check("编辑态有「全刷成当前笔刷」", text.includes("全刷成当前笔刷"));
+  check("编辑态有「放弃修改」", text.includes("放弃修改"));
+
+  // 可点的格子：3×3 = 9 个
+  const cellNodes = byClassPart(withDraft, "SPR_mapCell");
+  check("渲染出 3×3 = 9 个可点格子", cellNodes.length === 9, `${cellNodes.length} 个`);
+  check("空格子带 SPR_mapCell-empty 标记",
+    byClassPart(withDraft, "SPR_mapCell-empty").length === 1,
+    `${byClassPart(withDraft, "SPR_mapCell-empty").length} 个`);
+  check("每个格子都有 onClick（真的能涂）",
+    cellNodes.every((node) => typeof node.props.onClick === "function"));
+  check("格子的 title 是「行,列 · 地块」",
+    cellNodes.every((node) => /^\d+,\d+ · /.test(String(node.props.title))),
+    String(cellNodes[0]?.props.title));
+  check("格子用 clipPath 裁成菱形（只有菱形可点）",
+    cellNodes.every((node) => String(node.props.style?.clipPath ?? "").includes("polygon")),
+    String(cellNodes[0]?.props.style?.clipPath));
+  check("格子的类名带 SPR_mapCellLabel 子节点",
+    cellNodes.every((node) => collect(node, (n) => n.props?.className === "SPR_mapCellLabel").length === 1));
+
+  // ★ 叠层坐标必须与宿主 `tileOriginAt` **逐点一致**。
+  // 这是「点到的格子 = 看到的格子」的唯一保证：浏览器半区不能 import 宿主代码，
+  // 只能各写一份公式，所以必须在这里拿宿主的实现比对。
+  // 实测踩过：界面那份把 originY 写成 `cellH/2*scale`，叠层整整偏了半个格子。
+  {
+    const host = await import("../lib/tilemap.js");
+    const settings = { cellWidth: 64, cellHeight: 96 };
+    const layout = host.tileLayout(settings, 3, 3, 2);
+    // 夹具里带上宿主真实会写的 `map.pixel`（裁剪偏移 + 交付尺寸）
+    const trim = { left: 40, top: 128, width: layout.canvasW - 80, height: layout.canvasH - 200, scale: 2 };
+    const withTrim = renderTile(
+      makeProject({ map: { rows: 3, cols: 3, seed: 5, cells, decor: {}, buildings: [], png: "map/map.png", pixel: trim } }),
+      { stage: "map", brushKey: "dirt", mapDraft: cells.map((row) => [...row]) }
+    ).tree;
+    const trimCells = byClassPart(withTrim, "SPR_mapCell");
+    const mismatches = [];
+    for (const [r, c] of [[0, 0], [0, 2], [2, 0], [1, 1], [2, 2]]) {
+      const want = host.tileOriginAt(layout, r, c);
+      const node = trimCells.find((n) => n.props.title.startsWith(`${r},${c} · `));
+      const got = { x: Number.parseFloat(node.props.style.left), y: Number.parseFloat(node.props.style.top) };
+      // 叠层坐标 = 未裁坐标 − 裁剪偏移
+      if (got.x !== want.x - trim.left || got.y !== want.y - trim.top) {
+        mismatches.push(`(${r},${c}) 界面 ${got.x},${got.y} vs 期望 ${want.x - trim.left},${want.y - trim.top}`);
+      }
+    }
+    check("叠层坐标 = 宿主 tileOriginAt − 裁剪偏移", mismatches.length === 0, mismatches.join(" | "));
+    check("叠层画布尺寸用的是 map.pixel 的交付尺寸",
+      Number.parseFloat(byClassPart(withTrim, "SPR_mapEditorCanvas")[0]?.props.style.width) === trim.width &&
+      Number.parseFloat(byClassPart(withTrim, "SPR_mapEditorCanvas")[0]?.props.style.height) === trim.height,
+      `界面 ${byClassPart(withTrim, "SPR_mapEditorCanvas")[0]?.props.style.width}×${byClassPart(withTrim, "SPR_mapEditorCanvas")[0]?.props.style.height}` +
+      ` vs 期望 ${trim.width}×${trim.height}`);
+    check("stepY 用的是菱形高（cellWidth/4）而不是 cellHeight/4",
+      layout.stepY === (64 / 4) * 2 && layout.stepY !== (96 / 4) * 2,
+      `stepY=${layout.stepY}`);
+    // 老项目没有 map.pixel，此时偏移按 0 处理（不能崩、也不能凭空移位）
+    const plain = host.tileOriginAt(layout, 0, 0);
+    check("没有 map.pixel 时按未裁坐标对齐（老项目不崩）",
+      Number.parseFloat(cellNodes[0]?.props.style.left) === plain.x &&
+      Number.parseFloat(cellNodes[0]?.props.style.top) === plain.y,
+      `界面 ${cellNodes[0]?.props.style.left},${cellNodes[0]?.props.style.top} vs ${plain.x},${plain.y}`);
+  }
+
+  // 说明要写清「涂改只改草稿、不作废产物」
+  check("说明写明手动改布局不作废地块",
+    text.includes("手动改布局不会作废已生成的地块") && text.includes("涂改只改草稿"));
+
+  // 没开始编辑时不渲染叠层
+  const notEditing = renderTile(makeProject({ map: { rows: 3, cols: 3, seed: 5, cells, decor: {}, buildings: [] } }), {
+    stage: "map", mapDraft: null
+  }).tree;
+  check("未开始编辑时不渲染可点格子", byClassPart(notEditing, "SPR_mapCell").length === 0);
+
+  // ★ 回归：轮询不能把草稿冲掉。
+  // `load()`（清草稿）会被轮询调用，一旦轮询走的是它，用户正在涂的布局每 1.5 秒
+  // 就被清一次 —— 实测表现是「拼完图可点格子整片消失」。
+  // 这里直接读源码：轮询那个 effect 里必须是 reload，不是 load。
+  {
+    const source = readFileSync(target, "utf8");
+    const pollEffect = /if \(!busy\)[\s\S]{0,400}?setInterval\(\(\) => \{ void (\w+)\(projectId\)/.exec(source);
+    check("轮询用的是 reload（不清草稿）而不是 load", pollEffect !== null && pollEffect[1] === "reload",
+      pollEffect === null ? "没匹配到轮询 effect" : `用的是 ${pollEffect[1]}`);
+    check("存在独立的 reload（不清草稿的重读）", /const reload = React\.useCallback/.test(source));
+    check("load 里会清地图草稿（切项目时用）",
+      /const load = React\.useCallback[\s\S]{0,400}?setMapDraft\(null\)/.test(source));
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
