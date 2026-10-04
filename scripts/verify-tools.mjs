@@ -93,6 +93,42 @@ function validateSchema(schema, path, problems) {
   }
 }
 
+/**
+ * 找出「无损过不了 JSON」的值：`undefined` 的键、`NaN` / `Infinity` / `-0`。
+ *
+ * DSH（typert 0.1.7+）对工具返回值做这道校验：返回值里只要有**一个**这样的
+ * 值，整次工具调用直接失败，用户只看到一句
+ * `tool "…" returned invalid output: value is not lossless JSON`——而产物好端端
+ * 躺在磁盘上，看着像插件装坏了。项目还没跑完时 `status` / `review` / `wait` /
+ * `call getProject` 会一起中招（可选字段按 `file: node.file` 写，键在值是 undefined）。
+ *
+ * 注意 **`JSON.stringify` 看不出这类问题**：它自己就会把 undefined 抹掉，
+ * 所以「断言 stringify 之后没有 undefined」是永远为真的假检查——下面第 5 节
+ * 那条假检查就是被这个坑过去的，已换成真的审计。
+ */
+function losslessProblems(value, path = "$", out = []) {
+  if (value === undefined) {
+    out.push(`${path} = undefined`);
+    return out;
+  }
+  if (typeof value === "number") {
+    if (Number.isNaN(value)) out.push(`${path} = NaN`);
+    else if (!Number.isFinite(value)) out.push(`${path} = ${value}`);
+    else if (Object.is(value, -0)) out.push(`${path} = -0`);
+    return out;
+  }
+  if (value === null || typeof value !== "object") return out;
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) {
+      if (!Object.hasOwn(value, i)) out.push(`${path}[${i}] = 空洞`);
+      else losslessProblems(value[i], `${path}[${i}]`, out);
+    }
+    return out;
+  }
+  for (const key of Object.keys(value)) losslessProblems(value[key], `${path}.${key}`, out);
+  return out;
+}
+
 async function main() {
   console.log(`临时 DSH_HOME: ${HOME}\n`);
 
@@ -194,7 +230,18 @@ async function main() {
   // ── 4. 准备一个真实项目 / 任务，供 intake 与 review 使用 ────────────────
   console.log("\n4) 固定流程第 0 步：先问再动手");
   const tool = (name) => captured.tools.find((entry) => entry.name === name);
-  const run = (name, args) => tool(name).execute(args, { signal: undefined });
+  /**
+   * 每次工具调用都顺手做一遍「无损 JSON」审计：DSH 会在工具边界做这道校验，
+   * 不过就整次调用失败。审计放在这里，是为了让**后面每一个 run() 用的用例**
+   * 都自动被盖住，新增工具/字段时不需要再补断言。
+   */
+  const losslessAudit = [];
+  const run = async (name, args) => {
+    const value = await tool(name).execute(args, { signal: undefined });
+    const problems = losslessProblems(value);
+    if (problems.length > 0) losslessAudit.push(`${name} → ${problems.slice(0, 4).join("、")}`);
+    return value;
+  };
 
   const emptyIntake = await run("game_material_intake", { module: "sprite" });
   check("没配 Key 时给出 blocker", emptyIntake.blockers.some((text) => text.includes("火山方舟")), emptyIntake.blockers.join("；"));
@@ -338,7 +385,9 @@ async function main() {
     JSON.stringify({ video: turnReview.turn?.videoUrl, strip: turnReview.turn?.stripUrl })
   );
   check("验收包带上八个截帧位置", turnReview.turnPicks?.front === 0 && turnReview.turnPicks?.back === 8, JSON.stringify(turnReview.turnPicks));
-  check("转圈模式的验收包不出现 undefined", !JSON.stringify(turnReview).includes("undefined") && !JSON.stringify(turnStatus).includes("undefined"));
+  // 这里原来断言的是 `!JSON.stringify(x).includes("undefined")`——永远为真：
+  // stringify 自己就把 undefined 抹掉了，正是这个假检查让「工具输出带 undefined、
+  // 新版 DSH 直接拒绝整次调用」的 bug 溜了过去。真检查见下一节第 6.5 条的审计。
   // 八张图还没切出来时，建议动作必须指向转圈那条路（不是 runImages）。
   await patchProject(projectId, (project) => {
     project.images.back = { status: "empty" };
@@ -433,6 +482,14 @@ async function main() {
     return run("game_material_upload", { module: "sprite", id: projectId, kind: "source", path: textPath });
   }, "无法识别的图片格式");
   await expectThrow("找不到的目标给出可读错误", () => run("game_material_status", { id: "pdeadbeef" }), "找不到");
+
+  // ── 6.5 工具返回值必须能无损过 JSON ────────────────────────────────────
+  // 新版 DSH 在工具边界做这道校验，不过就整次调用失败（只有一句
+  // `value is not lossless JSON`，用户看不出是哪个字段）。跑过的每一次 run()
+  // 都在这里汇总，所以「项目空着 / 只跑了一半」这些最容易漏 undefined 的状态
+  // 也被盖住了。
+  console.log("\n6.5) 工具返回值的无损 JSON 审计");
+  check("所有工具调用的返回值都能无损过 JSON", losslessAudit.length === 0, losslessAudit.slice(0, 3).join(" | "));
 
   // ── 7. 深链接：宿主与浏览器半区必须用同一套常量 ─────────────────────────
   console.log("\n7) 深链接契约");

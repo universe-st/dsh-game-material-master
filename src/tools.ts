@@ -78,6 +78,50 @@ function assetUrl(assetBase: string, relative: string | undefined): string | und
   return `${originForLinks()}${assetBase}${relative}`;
 }
 
+/**
+ * 把工具返回值收拾成「能无损过 JSON」的形状。
+ *
+ * DSH（typert 0.1.7+）对工具返回值做无损 JSON 校验：对象里带一个 `undefined`
+ * 的键、或者 `NaN` / `Infinity` / `-0` 这种 JSON 表达不了的数字，整次工具调用
+ * 会**直接失败**，界面上只看到 `tool "…" returned invalid output: value is not
+ * lossless JSON`——而产物其实好端端躺在磁盘上。
+ *
+ * 快照里的 `file` / `url` 这类可选字段是按 `file: node.file` 直接写的，节点还没
+ * 生成时它就是 `undefined`（键在、值是 undefined）。所以「项目还没跑完」时
+ * `status` / `review` / `wait` / `call getProject` 会全部报这个错，项目空空如也
+ * 时反而看不出来——很容易误判成「插件装坏了」。
+ *
+ * 这里做的恰好是 `JSON.stringify` 本来就会做的事：丢掉 `undefined` 键、把
+ * 非有限数字变成 `null`、`-0` 变成 `0`。**模型看到的内容与修复前完全一致**
+ * （那三种值本来就会在序列化时消失），只是不再让整次调用失败。
+ *
+ * 只处理普通对象与数组；`Date` / `Buffer` 等非普通对象原样透传，交给各自的
+ * 出口去序列化。原地整理：传进来的都是本函数刚组装出来的快照，不是共享状态。
+ */
+function jsonSafe<T>(value: T, seen = new Set<unknown>()): T {
+  if (typeof value === "number") {
+    if (Number.isNaN(value) || !Number.isFinite(value)) return null as unknown as T;
+    return (Object.is(value, -0) ? 0 : value) as unknown as T;
+  }
+  if (value === null || typeof value !== "object") return value;
+  if (seen.has(value)) return value;
+  seen.add(value);
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) value[i] = jsonSafe(value[i], seen);
+    return value;
+  }
+  // 只碰普通对象；类实例（Date / Buffer…）保持原样。
+  const proto = Object.getPrototypeOf(value);
+  if (proto !== Object.prototype && proto !== null) return value;
+  const record = value as Record<string, unknown>;
+  for (const key of Object.keys(record)) {
+    const child = record[key];
+    if (child === undefined) delete record[key];
+    else record[key] = jsonSafe(child, seen);
+  }
+  return value;
+}
+
 // ── 三份「状态快照」 ────────────────────────────────────────────────────
 // 每份都返回纯 JSON：给模型看的是**判断所需的最小字段**，不是整个 project.json。
 
@@ -409,10 +453,24 @@ export function registerStudioTools(host: StudioToolHost, gateway: GameStudioGat
   const disposers: Array<() => void> = [];
   const tools = host.tools;
 
-  /** 统一的注册包装：把 output schema 与 render 固定下来。 */
+  /**
+   * 统一的注册包装：把 output schema 与 render 固定下来，并让**每一个**工具
+   * 的返回值都过一遍 `jsonSafe`（DSH 的新版会对工具输出做无损 JSON 校验，
+   * 漏掉 `undefined` 键会让整次调用失败，见 jsonSafe 的注释）。
+   */
   const register = (definition: Record<string, any>): void => {
     if (tools === undefined) return;
-    disposers.push(tools.register(definition));
+    const execute = definition.execute;
+    const wrapped =
+      typeof execute === "function"
+        ? {
+            ...definition,
+            async execute(...args: any[]) {
+              return jsonSafe(await execute.apply(this, args));
+            }
+          }
+        : definition;
+    disposers.push(tools.register(wrapped));
   };
 
   if (tools !== undefined) {

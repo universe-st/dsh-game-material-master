@@ -41,6 +41,16 @@
   所以抠像不能只认绿色——见下面的「抠像」。
 - **重复提交会白花钱。** 三个模块都做了重复提交拦截：同一张图 / 同一段视频在跑时再点一次会被拒绝。
   agent 走对话调用时同样受这条约束（工具层不重复拦一次，报错信息才清楚）。
+- **工具返回值必须能「无损过 JSON」。** 新版 DSH（typert 0.1.7+）在工具边界做这道校验：
+  返回值里只要有一个 `undefined` 的键（或 `NaN` / `Infinity` / `-0`），**整次工具调用直接失败**，
+  界面上只有一句 `tool "…" returned invalid output: value is not lossless JSON`。
+  快照里的 `file` / `url` 这类可选字段是按 `file: node.file` 直接写的，节点还没生成时它就是
+  `undefined`（键在、值是 undefined），所以**项目只跑了一半时 `status` / `review` / `wait` /
+  `call getProject` 会一起报错**，项目空空如也时反而看不出来——很像「插件装坏了」。
+  出口统一在 `src/tools.ts` 的 `register()` 里过一遍 `jsonSafe()`（做的正是 `JSON.stringify`
+  本来就会做的事，模型看到的内容不变）。**注意 `JSON.stringify` 自己看不出这个问题**，
+  所以「断言 stringify 之后没有 undefined」是永远为真的假检查——真检查在 `verify-tools.mjs`
+  的 6.5 节（每次 `run()` 都审计一遍返回值）。
 
 ---
 
@@ -912,7 +922,7 @@ node scripts/verify-pipeline.mjs   # 抽帧/抠像/合成链路（40 项，含�
 node scripts/verify-host.mjs       # 宿主冒烟（285 项，真实 cordis + 真实 HTTP）
 node scripts/verify-client.mjs     # 浏览器半区契约（299 项：阶段 ctx 键必须被转发、每个生成类调用点都带 loading 反馈、转圈时间轴与八圆圈、手动装配的四个坑、拆件质检 / IK 约束组件）
 node scripts/verify-feedback.mjs   # 浏览器半区渲染（119 项：真加载 lib/client.js，断言遮罩真的出现 / 空闲时真的不出现 / 转圈模式两种生成方式与八圆圈都在 / 深链接点击真的切面板）
-node scripts/verify-tools.mjs      # 对话调用面（109 项：工具 schema、方法覆盖、固定流程（含阶段①生成方式必问）、审核模式、深链接契约、转圈模式的 status/review 渲染）
+node scripts/verify-tools.mjs      # 对话调用面（109 项：工具 schema、方法覆盖、返回值无损 JSON 审计、固定流程（含阶段①生成方式必问）、审核模式、深链接契约、转圈模式的 status/review 渲染）
 node scripts/verify-live-bundle.mjs # 运行中的宿主是否已在提供新束（走 /plugins/events 拿真实 graph，再按图里的 URL 取回）
 
 # 真实 API 端到端（会花钱）
@@ -966,7 +976,10 @@ node scripts/retry-video.mjs <项目 id> <方向> [--soft]         # 单方向�
 `verify-tools.mjs` 盯的是对话调用面这一类坑：工具 schema 必须落在 DSH 支持的关键字子集里、
 `game_material_call` 的 method 枚举必须**覆盖插件的每一个远程方法**（少一个就是「某个功能对话里调不了」）、
 固定流程第 0 步必须按真实状态算出要问什么（缺源图就问、已有源图就不问）、
-审核模式必须只有 auto/manual 两个选项。它还把四个模块的 `status` / `review` 文字渲染
+审核模式必须只有 auto/manual 两个选项。**每一次 `run()` 还顺手审计一遍返回值能不能无损过
+JSON**（`undefined` 键 / `NaN` / `Infinity` / `-0`）——新版 DSH 会对工具输出做这道校验，
+不过就整次调用失败，而 `JSON.stringify` 自己会把这些问题抹掉，写成「stringify 之后没有
+undefined」的断言永远为真（这里真踩过，见上面的坑）。它还把四个模块的 `status` / `review` 文字渲染
 **真的跑一遍**——这几个渲染器按同一套字段写，而骨骼动画的阶段形状跟其它三个模块不一样
 （没有 `cells`，只有 `status`），一律按 `cells` 迭代会让 `game_material_review` 以
 `stage.cells is not iterable` 整次失败，而按 `ready/total` 渲染 `status` 会印出一串
