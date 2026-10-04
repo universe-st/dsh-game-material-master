@@ -12,16 +12,17 @@ yarn.lock
 # 本地自检产物（scripts/verify-*.mjs、e2e-*.mjs 的输出与截图）
 .verify/
 
-# 研究阶段的原始 AI 产物（地图地块生成的调研，见 research/REPORT.md）
-# 约 100MB 的 2K 探针图 + 对照实验图，可重新生成（会真实计费），不入库。
-# 入库的是：REPORT.md、tools/（算法参考实现）、out/tiles/（最终交付地块）、
-# out/ 下的验证图与 *_build.json。复跑方式见 REPORT.md 附录 B。
-research/probe/
-research/out/mattetest*/
-research/out/matte-verify/
-research/out/sprites/_preview-*.png
-research/out/_*.png
-research/out/map-seamtest*.png
+# 调研任务的原始 AI 产物
+# research/<任务>/ 下每个调研任务自成一套：报告 + tools/（算法参考实现）+ out/（交付与验证图）
+# + probe/（原始 AI 生成图，可重新生成但**会真实计费**）。
+# 只有 probe/ 与对照实验的中间图不入库；复跑方式见各任务报告的「脚本清单」。
+# 约定见 research/README.md。
+research/*/probe/
+research/*/out/mattetest*/
+research/*/out/matte-verify/
+research/*/out/sprites/_preview-*.png
+research/*/out/_*.png
+research/*/out/map-seamtest*.png
 
 # 日志与系统文件
 *.log

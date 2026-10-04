@@ -1,0 +1,21 @@
+{
+  "concurrency": 3,
+  "calls": [
+    {
+      "id": "A1-geom-cn",
+      "size": "1K",
+      "prompt": "斜45度等轴测游戏地块，正交投影。画面正中一个菱形地块，2:1等距菱形，四边笔直，宽高比严格2:1。表面为绿色短草地。无透视、无地平线、无侧面墙、无立体方块。背景纯透明。像素画风，色彩明快饱和，色块干净无噪点。"
+    },
+    {
+      "id": "A2-geom-en",
+      "size": "1K",
+      "prompt": "Isometric 45-degree top-down game tile sprite, orthographic projection. One single diamond-shaped ground tile centered, strict 2:1 isometric diamond, perfectly straight edges, no perspective, no horizon, no side walls, no 3D cube, no other tiles. Surface: short green grass. Background fully transparent, no shadow, no border, no grid, no text. Clean pixel-art style, bright saturated colors, flat clean color blocks, no noise."
+    },
+    {
+      "id": "A3-ref-geom",
+      "size": "1K",
+      "images": ["C:\\Users\\kuang\\Desktop\\b28436693ce40fc5e9e0c415783f278b47292ef3.png"],
+      "prompt": "参考这张图的画风与地块形状，画一个菱形游戏地块。斜45度等轴测，正交投影，2:1等距菱形，四边笔直。表面为绿色短草地。无透视、无侧面墙、无立体方块。背景纯透明。像素画风，色彩明快饱和。"
+    }
+  ]
+}

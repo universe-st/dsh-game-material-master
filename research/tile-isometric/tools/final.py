@@ -1,8 +1,10 @@
 """生成最终交付：5 类地块（含变体）+ 组合地图 + 无缝性验证图。
 
-地块来源：
-  research/probe/b8   —— 主体 5 类（grass / dirt / rock / bush / building）
-  research/probe/b10  —— 草地、土地、灌木、石块的变体（打破网格重复感）
+地块来源（都在本任务目录 research/tile-isometric/ 下）：
+  probe/b8   —— 主体 5 类（grass / dirt / rock / bush / building）
+  probe/b10  —— 草地、土地、灌木、石块的变体（打破网格重复感）
+  probe/b9   —— 大型建筑候选
+  probe/b13  —— 独立装饰（树 / 巨石）
 """
 from __future__ import annotations
 import json
@@ -13,17 +15,19 @@ import sys
 import numpy as np
 from PIL import Image
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+HERE = os.path.dirname(os.path.abspath(__file__))
+TASK = os.path.dirname(HERE)          # research/tile-isometric
+
+sys.path.insert(0, HERE)
 from img import save  # noqa: E402
 from prepare import to_cell  # noqa: E402
 from prepare_building import to_building  # noqa: E402
 
-ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
-B8 = os.path.join(ROOT, "research", "probe", "b8")
-B10 = os.path.join(ROOT, "research", "probe", "b10")
-B9 = os.path.join(ROOT, "research", "probe", "b9")
-B13 = os.path.join(ROOT, "research", "probe", "b13")
-OUT = os.path.join(ROOT, "research", "out", "tiles")
+B8 = os.path.join(TASK, "probe", "b8")
+B10 = os.path.join(TASK, "probe", "b10")
+B9 = os.path.join(TASK, "probe", "b9")
+B13 = os.path.join(TASK, "probe", "b13")
+OUT = os.path.join(TASK, "out", "tiles")
 
 SCALE = 2
 CELL = 64 * SCALE
@@ -199,23 +203,23 @@ if __name__ == "__main__":
         (11, 1, "tree"), (12, 8, "tree2"), (9, 12, "tree4"), (6, 12, "tree3"),
         (13, 3, "tree"), (2, 0, "boulder"), (10, 11, "boulder"), (7, 8, "boulder"),
     ]
-    assemble_map(tiles, layout, os.path.join(ROOT, "research", "out", "map-demo.png"),
+    assemble_map(tiles, layout, os.path.join(TASK, "out", "map-demo.png"),
                  buildings=[(6, 6)], decor=decor, zoom=3)
 
     # ② 纯草地铺满：验证无缝
     assemble_map(tiles, [[G] * 10 for _ in range(10)],
-                 os.path.join(ROOT, "research", "out", "map-seamless.png"), zoom=3)
+                 os.path.join(TASK, "out", "map-seamless.png"), zoom=3)
 
     # ③ 每类地块单独铺 5x5：验证同类之间无缝
     for fam in ["grass", "dirt", "rock", "bush"]:
         assemble_map(tiles, [[fam] * 5 for _ in range(5)],
-                     os.path.join(ROOT, "research", "out", f"map-tile-{fam}.png"), zoom=4)
+                     os.path.join(TASK, "out", f"map-tile-{fam}.png"), zoom=4)
 
     # ④ 纯装饰图层单独验证：树/巨石铺在草地上，检查遮挡与接地
     deco_layout = [[G] * 6 for _ in range(6)]
     deco = [(r, c, ["tree", "tree3", "boulder", "tree2", "tree4"][(r * 6 + c) % 5])
             for r in range(6) for c in range(6)]
-    assemble_map(tiles, deco_layout, os.path.join(ROOT, "research", "out", "map-decor.png"),
+    assemble_map(tiles, deco_layout, os.path.join(TASK, "out", "map-decor.png"),
                  decor=deco, zoom=5, bg=(255, 255, 255, 255))
 
     print("\n输出目录：", OUT)

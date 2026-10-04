@@ -96,7 +96,7 @@
 | ③ 参考图引导的自由生成 | 1 | 1.412 | 1.412 | 0.588 | **0%** |
 | ④ **模板填充 5.0（三档模型）** | 13 | **1.987 ~ 2.010** | **1.9994** | **0.0055** | **100%** |
 
-模板填充逐条（`research/probe/b8/`）：
+模板填充逐条（`probe/b8/`）：
 
 | 文件 | 模型 | ratio | 倾角 | 边残差 | 相对误差 |
 |---|---|---|---|---|---|
@@ -157,7 +157,7 @@
 
 ## 五、因子拆解实验（模型 / 底色 / mask / 透明）
 
-### 5.1 模型可用性与透明输出（`research/probe/b7/`）
+### 5.1 模型可用性与透明输出（`probe/b7/`）
 
 | 模型 | 可用 | `background:"transparent"` | 输出 |
 |---|---|---|---|
@@ -170,7 +170,7 @@
 > 实测 Lite 版本对同一份 `background:"transparent"` 请求会时好时坏（b6 的 M1/M2 拿到 RGBA，M3/M5 拿到 RGB）。
 > **量产请固定用 `flash` 或 `pro`。**
 
-### 5.2 模板底色（`research/probe/b6/`）
+### 5.2 模板底色（`probe/b6/`）
 
 给 AI 的模板底色决定了它「留不留边」：
 
@@ -188,7 +188,7 @@
 
 Seedream 5.0 接受 `mask`（白=重绘、黑=保留）。实测**有效但不必要**：
 走模板填充时，几何已经由模板 + 后处理裁剪双保险锁死，mask 只是多一层保险。
-（`research/probe/b6/M1/M5` 有 mask 与无 mask 的结果几何一致。）
+（`probe/b6/M1/M5` 有 mask 与无 mask 的结果几何一致。）
 
 ### 5.4 「一张图出多个地块」 vs 「一张图一个地块」
 
@@ -259,14 +259,14 @@ Seedream 5.0 接受 `mask`（白=重绘、黑=保留）。实测**有效但不�
    → 贴图约定「大菱形下顶点在 (w/2, h-8)」，铺图时锚到 2×2 区域的屏幕坐标
 ```
 
-实测三张候选（`research/probe/b9/`）里 `H1-grid-flash` 最贴：
+实测三张候选（`probe/b9/`）里 `H1-grid-flash` 最贴：
 建筑底面与 2×2 地基基本吻合，屋檐略微外挑（等距游戏里这是正常且好看的）。
 
 ---
 
 ## 七、成品：5 类地块 + 组合地图
 
-### 地块库（`research/out/tiles/`）
+### 地块库（`out/tiles/`）
 
 单元格规格 **64×96**（菱形上顶点 y=32、右顶点 (64,48)、下顶点 (32,64)、左顶点 (0,48)；
 上方 32 px 预留给高出地面的装饰）。交付时统一放大 2 倍 → **128×192**，建筑贴图 256×192。
@@ -325,7 +325,7 @@ Seedream 5.0 接受 `mask`（白=重绘、黑=保留）。实测**有效但不�
 | 单元格加高 + 只裁菱形下半部分，其余保留 | ❌ **树被画了两遍**：地面层里有半棵树，装饰层里又有整棵树，拼起来是两个树冠 |
 
 第三种是陷阱，值得说清楚：模型是**一整张画**画出来的，它不知道"地面"和"装饰"是两层。
-你按 y 一刀切，两半里都有树。实测数据（`research/out/cells-deco/`）：
+你按 y 一刀切，两半里都有树。实测数据（`out/cells-deco/`）：
 
 ```
 G-treeA-flash 单元 alpha 剖面
@@ -769,7 +769,7 @@ interface TileVariant {
 
 ## 附录 B：研究脚本清单
 
-全部在 [`research/tools/`](tools/)，纯本地可复跑（生成类会真实计费）。
+全部在 [`tools/`](tools/)，纯本地可复跑（生成类会真实计费）。
 
 | 脚本 | 作用 |
 |---|---|
@@ -787,28 +787,68 @@ interface TileVariant {
 | [`assemble.py`](tools/assemble.py) | 等距拼图（含跨格贴图锚点） |
 | [`final.py`](tools/final.py) | **一键产出最终交付**：9 张地块 + 5 张装饰 + 建筑 + 4 张验证图 |
 | [`stats.py`](tools/stats.py) | 汇总各方法的几何精度统计 |
+| [`mkbatch3/5/8.mjs`](tools/mkbatch8.mjs) | 按模板批量构造作业描述 → `jobs/batch*.json` |
+| [`patch-mask.mjs`](tools/patch-mask.mjs) / [`unpatch-mask.py`](tools/unpatch-mask.py) | 把 `jobs/batch6.json` 里的 mask 占位符与真实 data URI 互相转换 |
+| `matte_*.py` / `fringe*.py` / `locate_fringe.py` | 边缘白边的诊断与候选修法对比（见 §8.7） |
+
+### 作业描述（`jobs/`）
+
+12 个批次的提示词与参数原文，**入库**。`run.mjs` 的入参就是它：
+
+| 批次 | 验证了什么 |
+|---|---|
+| `batch1` | 纯文生图（中 / 英）与参考图引导 —— 三条自由生成路线 |
+| `batch2` | 模型可用性、方形画布、2×2 多格 |
+| `batch3` | 长几何约束提示词（**实测最差的一组**） |
+| `batch4` | 模板填充的雏形：单块 / 2×2 / 轮廓 |
+| `batch5` | 模板填充首次成体系（5 类地块） |
+| `batch6` | 模板底色与 mask 的影响 |
+| `batch8` | **主力批次**：4 类地形 × 2~3 变体 + 树 + 建筑 |
+| `batch9` | 大型建筑（2×2 地基网格） |
+| `batch10` | 地块变体（打散网格重复感） |
+| `batch11` / `batch12` | 「地面 + 装饰同图」的失败尝试（见 §8.1） |
+| `batch13` | **独立装饰**：白底单图（树 4 种 + 巨石） |
 
 ### 复跑方式
 
-```powershell
-# 1. 生成模板（免费）
-& $py research\tools\mk-templates2.py
-& $py research\tools\mk-buildgrid.py
+命令都在**本任务目录**（`research/tile-isometric/`）下执行；下面路径相对它写。
+脚本本身按自身位置解析路径，所以换工作目录也一样跑得通。
 
-# 2. 生成地块与装饰（真实计费）
-node research\tools\run.mjs research\probe\batch8.json  research\probe\b8    # 主体 5 类
-node research\tools\run.mjs research\probe\batch10.json research\probe\b10   # 地块变体
-node research\tools\run.mjs research\probe\batch9.json  research\probe\b9    # 大型建筑
-node research\tools\run.mjs research\probe\batch13.json research\probe\b13   # 独立装饰（树/巨石）
+```powershell
+# 0. 进入任务目录
+cd research\tile-isometric
+
+# 1. 生成模板（免费）
+& $py tools\mk-templates2.py
+& $py tools\mk-buildgrid.py
+& $py tools\mk-masks.py          # 只在要复跑 batch6 时需要
+
+# 2. 生成地块与装饰（真实计费；作业描述在 jobs/）
+node tools\run.mjs jobs\batch8.json  probe\b8    # 主体 5 类
+node tools\run.mjs jobs\batch10.json probe\b10   # 地块变体
+node tools\run.mjs jobs\batch9.json  probe\b9    # 大型建筑
+node tools\run.mjs jobs\batch13.json probe\b13   # 独立装饰（树 / 巨石）
 
 # 3. 规整 + 拼图（免费）
-& $py research\tools\final.py
+& $py tools\final.py
 
-# 4. 精度统计
-& $py research\tools\stats.py
+# 4. 精度统计（免费，对照第 2 步的产出）
+& $py tools\stats.py
 ```
 
 （`$py = C:\Users\kuang\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe`）
+
+**入库与不入库的分界**：
+
+| 目录 | 入库 | 说明 |
+|---|---|---|
+| `tools/` | ✅ | 算法参考实现，TS 移植的对照基准 |
+| `jobs/` | ✅ | 生成作业描述（提示词 / 参数原文，约 60 KB）。**生成这一步也能复跑** |
+| `out/` | ✅ | 交付样张 + 验证图 |
+| `probe/` | ❌ | 原始 2K 生成图（约 100 MB）。可重新生成但**会真实计费** |
+
+所以克隆下来就能跑第 1、3、4 步；只有第 2 步需要自己花钱生成。
+约定见 [research/README.md](../README.md)。
 
 ---
 

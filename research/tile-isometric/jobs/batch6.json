@@ -1,0 +1,60 @@
+{
+  "concurrency": 4,
+  "calls": [
+    {
+      "id": "M1-mask-bush",
+      "model": "doubao-seedream-5-0-260128",
+      "size": "2K",
+      "background": "transparent",
+      "images": [
+        "D:\\Workspace\\myworks\\dsh-game-material-master\\research\\probe\\tpl\\t1-2048.png"
+      ],
+      "extra": {
+        "mask": "data:image/png;base64,PLACEHOLDER"
+      },
+      "prompt": "把参考图里洋红色菱形区域内的内容替换为鲜绿色短草地，草地中央长一丛圆润茂密的深绿色灌木。菱形之外保持透明。像素画风，色彩明快饱和。"
+    },
+    {
+      "id": "M2-gray-bush",
+      "model": "doubao-seedream-5-0-260128",
+      "size": "2K",
+      "background": "transparent",
+      "images": [
+        "D:\\Workspace\\myworks\\dsh-game-material-master\\research\\probe\\tpl\\gray-t1-2048.png"
+      ],
+      "prompt": "参考图里的等距菱形是地块范围，请把菱形表面画成鲜绿色短草地，草地中央长一丛圆润茂密的深绿色灌木。菱形形状位置必须与参考图一致，不要加厚度、边框、阴影。菱形之外完全透明。像素画风，色彩明快饱和。"
+    },
+    {
+      "id": "M3-brown-rock",
+      "model": "doubao-seedream-5-0-260128",
+      "size": "2K",
+      "background": "transparent",
+      "images": [
+        "D:\\Workspace\\myworks\\dsh-game-material-master\\research\\probe\\tpl\\brown-t1-2048.png"
+      ],
+      "prompt": "参考图里的等距菱形是地块范围，请把菱形表面画成灰白色岩石地面：大小不一的灰色石块与碎石拼在一起，平坦只有轻微体积感。菱形形状位置必须与参考图一致，不要加厚度、边框、阴影。菱形之外完全透明。像素画风，色彩明快饱和。"
+    },
+    {
+      "id": "M4-white-grass",
+      "model": "doubao-seedream-5-0-260128",
+      "size": "2K",
+      "images": [
+        "D:\\Workspace\\myworks\\dsh-game-material-master\\research\\probe\\tpl\\white-t1-2048.png"
+      ],
+      "prompt": "参考图里的洋红色等距菱形是地块范围，请把菱形表面画成鲜绿色短草地（草叶细密、深浅绿交错）。菱形形状位置必须与参考图一致，不要加厚度、边框、阴影、侧壁。菱形之外是纯白色背景，不要添加任何其他元素。像素画风，色彩明快饱和。"
+    },
+    {
+      "id": "M5-mask-rock",
+      "model": "doubao-seedream-5-0-260128",
+      "size": "2K",
+      "background": "transparent",
+      "images": [
+        "D:\\Workspace\\myworks\\dsh-game-material-master\\research\\probe\\tpl\\gray-t1-2048.png"
+      ],
+      "extra": {
+        "mask": "data:image/png;base64,PLACEHOLDER"
+      },
+      "prompt": "把参考图里菱形区域内的内容替换为灰白色岩石地面：大小不一的灰色石块与碎石，平坦只有轻微体积感。菱形之外保持透明。像素画风，色彩明快饱和。"
+    }
+  ]
+}

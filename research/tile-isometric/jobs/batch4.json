@@ -1,0 +1,36 @@
+{
+  "concurrency": 3,
+  "calls": [
+    {
+      "id": "T1-magenta-lite",
+      "model": "doubao-seedream-5-0-260128",
+      "size": "2K",
+      "background": "transparent",
+      "images": ["D:\\Workspace\\myworks\\dsh-game-material-master\\research\\probe\\tpl\\magenta-2to1-1024-80.png"],
+      "prompt": "把参考图里洋红色菱形区域内的内容替换为鲜绿色的短草地：均匀细密的草叶纹理，深浅绿色的随机斑块，明亮清新。菱形的形状、大小、位置、四个顶点必须和参考图完全一致，绝对不要改变轮廓、不要加边框、不要加厚度、不要加阴影、不要旋转。菱形之外必须保持完全透明，不要添加任何其他元素、文字或标记。像素画风，色彩明快饱和。"
+    },
+    {
+      "id": "T2-magenta-pro",
+      "model": "doubao-seedream-5-0-pro-260628",
+      "size": "2K",
+      "images": ["D:\\Workspace\\myworks\\dsh-game-material-master\\research\\probe\\tpl\\magenta-2to1-1024-80.png"],
+      "prompt": "把参考图里洋红色菱形区域内的内容替换为鲜绿色的短草地：均匀细密的草叶纹理，深浅绿色的随机斑块，明亮清新。菱形的形状、大小、位置、四个顶点必须和参考图完全一致，绝对不要改变轮廓、不要加边框、不要加厚度、不要加阴影、不要旋转。菱形之外必须是纯白色背景。像素画风，色彩明快饱和。"
+    },
+    {
+      "id": "T3-outline-lite",
+      "model": "doubao-seedream-5-0-260128",
+      "size": "2K",
+      "background": "transparent",
+      "images": ["D:\\Workspace\\myworks\\dsh-game-material-master\\research\\probe\\tpl\\magenta-2to1-1024-outline.png"],
+      "prompt": "参考图是一个洋红色菱形（带青色描边）。请把菱形内部填成鲜绿色的短草地：均匀细密的草叶纹理，深浅绿色随机斑块。必须严格保留菱形的轮廓与四个顶点位置，青色描边也要原样保留。菱形之外完全透明。像素画风，色彩明快饱和。"
+    },
+    {
+      "id": "T4-sheet2x2-lite",
+      "model": "doubao-seedream-5-0-260128",
+      "size": "2K",
+      "background": "transparent",
+      "images": ["D:\\Workspace\\myworks\\dsh-game-material-master\\research\\probe\\tpl\\sheet2x2-1024.png"],
+      "prompt": "参考图是 2 行 2 列共 4 个菱形色块。请把左上（洋红）填成鲜绿色短草地、右上（橙色）填成棕褐色翻耕土地、左下（蓝色）填成灰白色岩石地面、右下（绿色）填成草地加一丛深绿色灌木。四个菱形的形状、大小、位置、四个顶点必须与参考图完全一致，不要改变轮廓、不要加厚度、不要加边框、不要加阴影。菱形之外完全透明。像素画风，色彩明快饱和，干净的色块。"
+    }
+  ]
+}

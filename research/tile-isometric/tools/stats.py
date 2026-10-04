@@ -4,15 +4,26 @@ import glob
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# 路径都相对本任务目录（research/tile-isometric/）解析，跟当前工作目录无关。
+HERE = os.path.dirname(os.path.abspath(__file__))
+TASK = os.path.dirname(HERE)          # research/tile-isometric
+
+sys.path.insert(0, HERE)
 from geo import measure_ground  # noqa: E402
 
 SKIP = {"G-building-flash.png", "G-tree-pro.png", "G-bushmany-lite.png"}
+
+
+def _p(*parts: str) -> str:
+    return os.path.join(TASK, *parts)
+
+
 GROUPS = [
-    ("① 纯文生图 Seedream 4.0（无模板）", ["research/probe/b1/*.jpg"]),
-    ("② 纯文生图 Seedream 5.0（堆砌几何约束的长提示词）", ["research/probe/b3/*.jpg", "research/probe/b3/*.png"]),
-    ("③ 自由生成 Seedream 5.0（短提示词）", ["research/probe/b5/F-free-bush.png"]),
-    ("④ 模板填充 Seedream 5.0 三档模型", ["research/probe/b8/G-*.png"]),
+    ("① 纯文生图 Seedream 4.0（无模板）", [_p("probe", "b1", "*.jpg")]),
+    ("② 纯文生图 Seedream 5.0（堆砌几何约束的长提示词）",
+     [_p("probe", "b3", "*.jpg"), _p("probe", "b3", "*.png")]),
+    ("③ 自由生成 Seedream 5.0（短提示词）", [_p("probe", "b5", "F-free-bush.png")]),
+    ("④ 模板填充 Seedream 5.0 三档模型", [_p("probe", "b8", "G-*.png")]),
 ]
 
 

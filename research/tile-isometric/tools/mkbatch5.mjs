@@ -66,6 +66,7 @@ calls.push({
 });
 
 const out = { concurrency: 4, calls };
-writeFileSync(resolve(here, "..", "probe", "batch5.json"), JSON.stringify(out, null, 2));
+// 作业文件写进 jobs/（入库）；probe/ 只放原始生成图
+writeFileSync(resolve(here, "..", "jobs", "batch5.json"), JSON.stringify(out, null, 2));
 console.log(`wrote batch5.json with ${calls.length} calls`);
 for (const c of calls) console.log(" ", c.id, c.model, c.prompt.length + " chars");
