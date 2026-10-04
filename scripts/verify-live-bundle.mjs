@@ -73,7 +73,11 @@ if (row === undefined) {
 }
 console.log(`找到入口：${row.id} rev=${row.rev}`);
 
-const bundle = await get(row.url);
+// 宿主给的 `entry.url` 在这个版本里**不带前导 `/`**（形如 `plugins/…/client.js?rev=…`）。
+// 直接拿它当 request path 会发出非法的请求行，宿主回 HTTP 400 / 0 字节 ——
+// 看着像「束挂了」，其实只是开头少了个斜杠，标记检查会整片报 ✗。
+const bundlePath = row.url.startsWith("/") ? row.url : `/${row.url}`;
+const bundle = await get(bundlePath);
 console.log(`按图取束：HTTP ${bundle.status}，${bundle.body.length} 字节`);
 if (process.env.DSH_VERIFY_DUMP === "1") {
   console.log("── 束开头 ──");
