@@ -584,7 +584,12 @@ async function generateOne(
   });
 
   const ext = sniffImageExt(result.bytes);
-  const rawRelative = join("raw", `${item.key}.v${variantIndex + 1}.${ext}`);
+  // ⚠️ 存进 project.json 的相对路径一律用 `/`，**不能用 `join()`**。
+  // `join` 在 Windows 上给的是 `cell\grass.v1.png`，而这个字符串会被直接拼进
+  // 资源路由的 URL（`${assetBase}${relative}`）—— 浏览器把反斜杠宽容地当分隔符，
+  // 所以本地看着正常，但在 POSIX 上文件名/URL 都对不上。
+  // 写盘用绝对路径（join(dir, …)）不受影响。
+  const rawRelative = `raw/${item.key}.v${variantIndex + 1}.${ext}`;
   await writeFile(tileAssetPath(project.id, rawRelative), result.bytes);
 
   const decoded = await decodeFile(tileAssetPath(project.id, rawRelative));
@@ -592,7 +597,7 @@ async function generateOne(
 
   if (item.kind === "decor" || item.mode === "plain") {
     const { bitmap, report } = regularizeDecorSprite(decoded, project.settings);
-    const cellRelative = join("decor", `${item.key}.v${variantIndex + 1}.png`);
+    const cellRelative = `decor/${item.key}.v${variantIndex + 1}.png`;
     await writeFile(tileAssetPath(project.id, cellRelative), encodeBitmap(bitmap));
     variant.cell = cellRelative;
     variant.report = { mode: "sprite", scale: [report.scale, report.scale], retried: ctx.retried };
@@ -629,7 +634,7 @@ async function generateOne(
       ? `模型没有画出 2:1 的等距菱形（实测 ${measuredRatio!.toFixed(3)}），已按模板几何回退。请换用 Seedream 5.0 系列模型（4.0 会把菱形画成近正方形），或在「设置 → 游戏素材大师」里改模型后重跑这一张。`
       : fallback;
 
-  const cellRelative = join("cell", `${item.key}.v${variantIndex + 1}.png`);
+  const cellRelative = `cell/${item.key}.v${variantIndex + 1}.png`;
   await writeFile(tileAssetPath(project.id, cellRelative), encodeBitmap(bitmap));
   variant.cell = cellRelative;
   variant.report = { ...report, ratioMeasured: report.ratioMeasured ?? measuredRatio, fallbackReason: hint, retried: ctx.retried };
@@ -932,14 +937,38 @@ export interface TileProjectView extends TileProject {
    * - 给**对话工具**用时是绝对 URL（见 `tileSnapshot`），因为模型要直接贴给用户点。
    */
   assetBase: string;
+  /** 进度汇总。界面头部显示「已生成 n / m，已验收 k」。 */
+  progress: { generated: number; expected: number; approved: number };
 }
 
 export function tileView(project: TileProject): TileProjectView {
+  // ⚠️ `progress` 与 `map.png` 都是**宿主算给界面看的派生字段**，必须在这里显式给出。
+  // 踩过两次：
+  //   · 界面读 `project.progress` → undefined，头部永远显示「已生成 0 / 0」
+  //   · 界面读 `project.map.ready` → 宿主从来没算过这个字段（只有 `png`），
+  //     于是**拼好的地图永远不显示**，界面一直停在「还没有拼图」
+  // 客户端读的键必须在这里算出来；verify-tile-client.mjs 现在会断言这一点。
   return {
     ...project,
     job: jobs.get(project.id),
-    assetBase: `/dsh-game-material-master/tile-assets/${project.id}/`
+    assetBase: `/dsh-game-material-master/tile-assets/${project.id}/`,
+    progress: tileProgress(project)
   };
+}
+
+/** 生成 / 期望 / 已验收三件套（界面与工具共用一份算法）。 */
+export function tileProgress(project: TileProject): { generated: number; expected: number; approved: number } {
+  let generated = 0;
+  let expected = 0;
+  let approved = 0;
+  for (const item of project.items) {
+    expected += Math.max(1, item.variantCount);
+    for (const variant of item.variants) {
+      if (variant.cell !== undefined) generated++;
+      if (variant.approved === true) approved++;
+    }
+  }
+  return { generated, expected, approved };
 }
 
 /** 装饰锚点（界面显示用）。 */

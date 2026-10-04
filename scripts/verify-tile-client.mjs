@@ -295,7 +295,12 @@ function makeProject(overrides = {}) {
     createdAt: "2026-10-04T00:00:00.000Z",
     updatedAt: "2026-10-04T01:00:00.000Z",
     items: [makeItem()],
-    map: { rows: 14, cols: 14, seed: 20261004, cells: [], decor: {}, buildings: [], png: "map/map.png", json: "map/map.json", ready: true, file: "map/map.png" },
+    // map 只用宿主**真实会发**的字段。曾经这里多写了一个 `ready: true`，
+    // 于是「地图预览」那条断言在界面读 `map.ready` 时依然通过 ——
+    // 而真机上宿主从不发 `ready`，拼好的地图永远不显示、界面一直停在
+    // 「还没有拼图」。夹具比宿主「更宽容」会让测试变成假绿，
+    // 所以这里刻意只放 rows / cols / seed / cells / decor / buildings / png / json。
+    map: { rows: 14, cols: 14, seed: 20261004, cells: [], decor: {}, buildings: [], png: "map/map.png", json: "map/map.json" },
     stages: {
       template: { status: "done" },
       generate: { status: "done" },
@@ -464,10 +469,33 @@ section("④ 拼图阶段");
   check("说明同种子逐像素一致", allText(tree).includes("逐像素一致"));
   const mapImages = byType(tree, "img").filter((node) => node.props.className === "SPR_tileMap");
   check("已拼图时显示地图预览", mapImages.length === 1, `${mapImages.length} 张`);
-  check("地图预览带 seed 说明", mapImages.length === 1 && String(mapImages[0].props.alt ?? "").length >= 0);
+  check("地图预览用的是 map.png（宿主真实字段）",
+    mapImages.length === 1 && String(mapImages[0].props.src).includes("/map/map.png"),
+    mapImages.length === 1 ? String(mapImages[0].props.src) : "(无)");
+  check("地图预览的 URL 里没有反斜杠",
+    mapImages.length === 1 && !String(mapImages[0].props.src).includes("\\"),
+    mapImages.length === 1 ? String(mapImages[0].props.src) : "(无)");
+  // caption 只在双击放大后的弹窗里渲染（ZoomableImage 的常态输出里没有），
+  // 所以这里不去断言它 —— 该断言的是「预览真的指向 map.png，且 URL 干净」。
+  check("地图预览的 alt 是「地图」", mapImages.length === 1 && mapImages[0].props.alt === "地图",
+    mapImages.length === 1 ? String(mapImages[0].props.alt) : "(无)");
 
-  const noMap = renderTile(makeProject({ map: { rows: 14, cols: 14, seed: 1, cells: [], decor: {}, buildings: [], ready: false } }), { stage: "map" }).tree;
+  // 没拼过图时：既没有 png、也没有 ready —— 必须给空态而不是残留的裂图
+  const noMap = renderTile(makeProject({ map: { rows: 14, cols: 14, seed: 1, cells: [], decor: {}, buildings: [] } }), { stage: "map" }).tree;
   check("没拼图时给空态引导", allText(noMap).includes("还没有拼图"));
+  check("没拼图时不显示地图预览",
+    byType(noMap, "img").filter((node) => node.props.className === "SPR_tileMap").length === 0);
+}
+
+section("头部进度不能是 0 / 0（宿主必须算 progress）");
+{
+  // 真机踩过：界面读 `project.progress`，而宿主没算这个字段 →
+  // 头部永远显示「已生成 0 / 0，已验收 0」，跟实际产物对不上。
+  const withProgress = renderTile(makeProject(), { stage: "template" }).tree;
+  check("头部显示宿主给的进度", allText(withProgress).includes("已生成 2 / 2"), allText(withProgress).slice(0, 200));
+  const withoutProgress = renderTile(makeProject({ progress: undefined }), { stage: "template" }).tree;
+  check("宿主没给 progress 时退化成 0 / 0（说明这个字段确实被读了）",
+    allText(withoutProgress).includes("已生成 0 / 0"), allText(withoutProgress).slice(0, 200));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

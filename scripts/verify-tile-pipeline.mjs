@@ -135,7 +135,7 @@ section("② 生成阶段：用研究期的真实 2K 图喂规整（不花钱）
     const dir = G.tileProjectDir(project.id);
     mkdirSync(join(dir, "raw"), { recursive: true });
     mkdirSync(join(dir, "cell"), { recursive: true });
-    const rawRel = join("raw", "grass.v1.png");
+    const rawRel = "raw/grass.v1.png";
     writeFileSync(G.tileAssetPath(project.id, rawRel), readFileSync(probe));
 
     const decoded = await MEDIA.decodeFile(G.tileAssetPath(project.id, rawRel));
@@ -145,7 +145,7 @@ section("② 生成阶段：用研究期的真实 2K 图喂规整（不花钱）
     check("T20 实测比例 ∈ [1.98, 2.02]", Math.abs(m.ratio - 2) <= 0.02, m.ratio.toFixed(4));
 
     const { bitmap, report } = GEOM.regularizeToCell(decoded, project.settings, m, "measured");
-    const cellRel = join("cell", "grass.v1.png");
+    const cellRel = "cell/grass.v1.png";
     writeFileSync(G.tileAssetPath(project.id, cellRel), MEDIA.encodeBitmap(bitmap));
     check("T21 规整产物尺寸 = 单元格", bitmap.width === project.settings.cellWidth && bitmap.height === project.settings.cellHeight);
     check("T22 报告 mode = measured", report.mode === "measured");
@@ -159,6 +159,34 @@ section("② 生成阶段：用研究期的真实 2K 图喂规整（不花钱）
   }
 }
 
+section("相对路径一律用正斜杠（会被拼进资源路由 URL）");
+{
+  // ⚠️ 这条钉的是一个只在 Windows 上「看着正常」的坑：
+  // 存进 project.json 的相对路径如果用了 `join()`，Windows 上会得到
+  // `cell\grass.v1.png`，而它会被直接拼进 `${assetBase}${relative}` 当 URL 用。
+  // 浏览器宽容地把 `\` 当分隔符，所以本地不报错；换到 POSIX 文件名就对不上。
+  const dash = await G.readTileProject(project.id);
+  const relatives = [];
+  for (const item of dash.items) {
+    for (const variant of item.variants) {
+      if (typeof variant.cell === "string") relatives.push(variant.cell);
+      if (typeof variant.raw === "string") relatives.push(variant.raw);
+    }
+  }
+  if (typeof dash.map.png === "string") relatives.push(dash.map.png);
+  if (typeof dash.map.json === "string") relatives.push(dash.map.json);
+  const withBackslash = relatives.filter((rel) => rel.includes("\\"));
+  check("T23b 项目里的相对路径没有反斜杠", withBackslash.length === 0,
+    withBackslash.join(" / ") || `共检查 ${relatives.length} 条`);
+  check("T23c 相对路径都是「第一段/文件名」形态",
+    relatives.length > 0 && relatives.every((rel) => /^[a-z0-9]+\/.+/.test(rel)),
+    relatives.slice(0, 3).join(" / "));
+  // 资源路由的目录白名单必须认得第一段
+  const firstSegments = [...new Set(relatives.map((rel) => rel.split("/")[0]))];
+  check("T23d 相对路径的第一段都在可服务目录白名单里",
+    firstSegments.every((seg) => G.SERVABLE_TILE_DIRS.has(seg)), firstSegments.join("、"));
+}
+
 section("④ 拼图阶段（本地，免费）");
 {
   const dir = G.tileProjectDir(project.id);
@@ -169,7 +197,7 @@ section("④ 拼图阶段（本地，免费）");
     mkdirSync(join(dir, "decor"), { recursive: true });
     const decoded = await MEDIA.decodeFile(treeProbe);
     const { bitmap, report } = GEOM.regularizeDecorSprite(decoded, project.settings);
-    const rel = join("decor", "tree.v1.png");
+    const rel = "decor/tree.v1.png";
     writeFileSync(G.tileAssetPath(project.id, rel), MEDIA.encodeBitmap(bitmap));
     await G.patchTileProject(project.id, (fresh) => {
       const item = fresh.items.find((i) => i.key === "tree");
@@ -181,7 +209,7 @@ section("④ 拼图阶段（本地，免费）");
     const decoded = await MEDIA.decodeFile(buildProbe);
     const geom = { centerX: decoded.width / 2, centerY: decoded.height / 2, halfWidth: decoded.width * 0.46, halfHeight: decoded.width * 0.23 };
     const { bitmap } = GEOM.regularizeToCell(decoded, project.settings, geom, "template");
-    const rel = join("cell", "building.v1.png");
+    const rel = "cell/building.v1.png";
     writeFileSync(G.tileAssetPath(project.id, rel), MEDIA.encodeBitmap(bitmap));
     await G.patchTileProject(project.id, (fresh) => {
       const item = fresh.items.find((i) => i.key === "building");

@@ -1588,6 +1588,11 @@
 .SPR_step-done .SPR_stepMark{color:var(--dsw-alias-state-success-primary,#2e7d32)}
 .SPR_step-error .SPR_stepMark{color:var(--dsw-alias-state-error-primary,#c62828)}
 .SPR_stepMark{font-size:11px}
+/* ⚠️ 面板的 .SPR_module 是 display:flex;flex-direction:column，所以 .SPR_row
+   作为 flex item 会被算成 display:block —— 这会把 .SPR_field-inline 的
+   inline-flex 压掉，四个数字输入框就**竖着排**（实测踩过，看着像样式坏了）。
+   这里显式把行声明成 flex，让行内的 field 横向排。 */
+.SPR_tileStage .SPR_row{display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap}
 .SPR_field-inline{display:inline-flex;align-items:center;gap:6px}
 .SPR_input-num{width:84px}
 .SPR_btn-mini{font-size:11px;padding:2px 8px}
@@ -5163,11 +5168,15 @@
             }))
           }, T("换个种子重铺"))
         ),
-        project.map?.ready === true
+        // ⚠️ 判据是 `map.png`（宿主真实给的字段），**不是** `map.ready`。
+        // 宿主从来没算过 `ready`，所以写成 `map.ready === true` 时**拼好的地图
+        // 永远不显示**，界面一直停在「还没有拼图」——而且不报任何错。
+        // 实测踩过。verify-tile-client.mjs 现在会断言「已有 png 时必须显示预览」。
+        typeof project.map?.png === "string"
           ? h("div", { className: "SPR_row" },
               h(ZoomableImage, {
                 className: "SPR_tileMap",
-                src: `${project.assetBase}${project.map.file}?v=${encodeURIComponent(project.updatedAt ?? "")}`,
+                src: `${project.assetBase}${project.map.png}?v=${encodeURIComponent(project.updatedAt ?? "")}`,
                 alt: T("地图"),
                 caption: `${project.map.cols}×${project.map.rows} · seed ${project.map.seed}`
               })
