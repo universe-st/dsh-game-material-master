@@ -1263,7 +1263,7 @@ node scripts/dsh-web-cookie.mjs 127.0.0.1:43121 --json
 | `node scripts/verify-tile.mjs` | 模块五几何内核（**109 项**）：模板比例严格 2:1、合成图菱形测量、规整后无缺口/无越界、装饰锚点与遮挡、拼图无洞与同种子逐像素一致、PNG 往返。含**两条反向验证**——把模板几何改回硬编码错误值必须产生透明缺口、把抠底换回硬阈值必须留下近白像素；修复一旦被回退，这两条会红 |
 | `node scripts/verify-tile-pipeline.mjs` | 模块五数据层与流水线（**76 项**）：项目 CRUD（含非法单元格尺寸被拒）、模板阶段产出与几何、用**研究期真实 2K 图**喂规整（不花钱）、拼图与导出的产物、同种子重拼逐像素一致、换种子结果不同、**`map.pixel`**（叠层对齐用的裁剪偏移与交付尺寸）、**失效传播**（作废 generate 要清空变体与地图；只作废 map 时已花钱的地块必须保住）、**手改布局必须被保留**（传 `decorDensity` 等覆盖参数不能把它冲掉）、**全部为空的布局要走 fill 而不是渲染一张空画布**、**相对路径一律正斜杠**（`join()` 在 Windows 上给 `cell\…`，它会被拼进 URL）、提示词构造、快照给界面是相对路径而给对话工具是绝对 URL |
 | `node scripts/verify-tile-gateway.mjs` | 模块五**走真实网关**（**53 项**）：payload 解析、中英默认清单、模板作业、验收回写、`saveTileProject` 的**作废边界**（只改标签产物必须保住；改内容只废那一个；改画风全废）、**增删改地块**（新增计入 progress、改用途/家族/占格/变体数生效、删除后数量正确、提交空清单不能清空项目、`resetItemsToDefault` 中英各一份）、**手动改布局**（写回 cells/rows/cols/seed、不作废地块、带空格能重铺、空 cells 不清空）、拼图/导出、错误路径、`setReviewMode` 支持 tile。纯函数与直接调 tilegen 都测不到这一层——实测它抓出过「验收一个地块就崩」与「任何一次保存都清空全部（花钱生成的）产物」 |
-| `node scripts/verify-tile-client.mjs` | 模块五界面**真渲染**（**118 项**）：真加载 `lib/client.js` + 假 React 按槽位渲染 `TileModule`。五个阶段都不能白屏、空态、几何角标、**任务在跑时遮罩必须出现**、未生成的格子显示「排队中」、**拼好的地图必须显示预览**、头部进度不能是 0/0、点击真的调到对应远程方法；**地块清单增删改**（编辑态表单七个字段齐全、提示词实时预览、改提示词给出作废警告、只改变体数不出警告、新增表单）；**地图手动编辑**（9 个可点格子、菱形 clipPath、空格标记、未开始编辑不渲染叠层）。它抓出过 `LoadingOverlay` 参数名写错导致遮罩永不出现、`load()` 被轮询调用把草稿冲掉。**夹具只放宿主真实会发的字段**——多写一个 `ready` 就会让断言假绿 |
+| `node scripts/verify-tile-client.mjs` | 模块五界面**真渲染**（**122 项**）：真加载 `lib/client.js` + 假 React 按槽位渲染 `TileModule`。五个阶段都不能白屏、空态、几何角标、**任务在跑时遮罩必须出现**、未生成的格子显示「排队中」、**拼好的地图必须显示预览**、头部进度不能是 0/0、点击真的调到对应远程方法；**地块清单增删改**（编辑态表单七个字段齐全、提示词实时预览、改提示词给出作废警告、只改变体数不出警告、新增表单）；**地图手动编辑**（9 个可点格子、菱形 clipPath、空格标记、未开始编辑不渲染叠层）。它抓出过 `LoadingOverlay` 参数名写错导致遮罩永不出现、`load()` 被轮询调用把草稿冲掉。**夹具只放宿主真实会发的字段**——多写一个 `ready` 就会让断言假绿 |
 | `node scripts/find-missing-i18n.mjs` | **工具**（不是断言）：列出所有还没进词条表的 `T("…")` 原文，直接输出可粘贴的条目 |
 | `node scripts/verify-i18n.mjs` | 中英词条表契约：**每个 `T()` 都有英文条目 / 没有死条目 / `{nN}` 占位符两侧一致 / 译文不残留汉字与全角标点 / `lib/client.js` 与 `src/client.ts` 的词条表一致（忘了 build 就发版会整体退回中文）** |
 | `node scripts/i18n-wrap.mjs` | 词法级 codemod：把 `src/client.ts` 里含中日韩字符的字面量包成 `T(...)`（模板字面量拆成 `{nN}` 占位符，幂等，`i18n-ignore-*` 区间不碰） |
@@ -1285,7 +1285,7 @@ node scripts/verify-i18n.mjs       # 中英词条表契约（9 项：覆盖 / �
 node scripts/verify-tile.mjs       # 模块五几何内核（109 项，含两条反向验证）
 node scripts/verify-tile-pipeline.mjs # 模块五数据层与流水线（76 项）
 node scripts/verify-tile-gateway.mjs  # 模块五走真实网关（53 项）
-node scripts/verify-tile-client.mjs   # 模块五界面真渲染（118 项，拦「遮罩没出现」「地图不显示」这类静默问题）
+node scripts/verify-tile-client.mjs   # 模块五界面真渲染（122 项，拦「遮罩没出现」「地图不显示」这类静默问题）
 node scripts/verify-live-bundle.mjs # 运行中的宿主是否已在提供新束（走 /plugins/events 拿真实 graph，再按图里的 URL 取回）
 
 # 真实 API 端到端（会花钱）

@@ -997,6 +997,7 @@
       "标识（英文小写，会当文件名）": "Id (lowercase, used as a file name)",
       "灰色岩壁": "Grey cliff",
       "生成提示词（只描述「菱形里面是什么」）": "Prompt (describe only what is inside the diamond)",
+      "留空即用标识": "Leave empty to reuse the id",
       "新增地块": "Add tile",
       "新增": "Add",
       "编辑": "Edit",
@@ -5483,6 +5484,23 @@
                 h("option", { value: "decor" }, T("装饰（占 1 格、按锚点摆放）")),
                 h("option", { value: "building" }, T("建筑（跨格）"))
               )
+            ),
+            h("label", { className: "SPR_field" },
+              h("span", { className: "SPR_fieldLabel" }, T("变体数（每个变体一次计费调用）")),
+              h(NumField, {
+                className: "SPR_input SPR_input-num",
+                value: newItem.variantCount, min: 1, max: 6, step: 1,
+                onCommit: (next) => setNewItem({ ...newItem, variantCount: Math.max(1, Math.min(6, next)) })
+              })
+            ),
+            h("label", { className: "SPR_field" },
+              h("span", { className: "SPR_fieldLabel" }, T("类别（铺图时按它随机抽变体）")),
+              h("input", {
+                className: "SPR_input",
+                placeholder: newItem.key === "" ? T("留空即用标识") : newItem.key,
+                value: newItem.family,
+                onChange: (event) => setNewItem({ ...newItem, family: event.target.value })
+              })
             )
           ),
           h("label", { className: "SPR_field" },

@@ -576,6 +576,13 @@ section("② 生成阶段：地块清单的增 / 删 / 改");
   check("新增表单有标识 / 名称 / 用途", allText(adding).includes("标识（英文小写，会当文件名）") &&
     allText(adding).includes("名称") && allText(adding).includes("用途"));
   check("新增表单有「新增」按钮", allText(adding).includes("新增"));
+  // 新增时必须能一次把变体数与类别定下来，否则用户加完还得再进编辑态改一遍
+  check("新增表单有变体数", allText(adding).includes("变体数（每个变体一次计费调用）"));
+  check("新增表单有类别（family）", allText(adding).includes("类别（铺图时按它随机抽变体）"));
+  check("新增表单有生成提示词 textarea", byType(adding, "textarea").length === 1);
+  check("新增表单的三个输入框都在（标识 / 名称 / 类别）",
+    byType(adding, "input").filter((n) => n.props.type !== "number").length >= 3,
+    `${byType(adding, "input").filter((n) => n.props.type !== "number").length} 个文本框`);
 
   // 编辑态下不该同时显示「编辑」按钮（否则用户会点错）
   check("编辑态下卡片本身不再显示「编辑」按钮",
