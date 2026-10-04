@@ -1226,10 +1226,16 @@
       ["runRigLayout", true],
       ["runRigBones", true],
       ["runRigAtlas", true],
-      // 地图地块：第二个字段 = 「调用期间要不要盖 loading 遮罩 / 算作活跃任务」
+      // 地图地块。
+      // ⚠️ 第二个字段是「这个方法**收不收 payload**」，不是「要不要盖遮罩」。
+      // 写成 false 而方法其实收 payload，typert 会在浏览器侧直接拒绝：
+      //   client api: gameStudio/getTileProject expected 0 argument(s), got 1
+      // 界面表现是「点了没反应 + 一行错误」，不会崩，所以很容易漏过去。
+      // scripts/verify-tools.mjs 现在会把两边的 payload 布尔逐条比对（见该文件的
+      // 「客户端清单的 payload 标记」），这类错配不会再溜过。
       ["listTileProjects", false],
       ["createTileProject", true],
-      ["getTileProject", false],
+      ["getTileProject", true],
       ["deleteTileProject", true],
       ["saveTileProject", true],
       ["runTileTemplate", true],
@@ -1240,7 +1246,7 @@
       ["saveTileMapCells", true],
       ["runTileExport", true],
       ["cancelTileJob", true],
-      ["revealTileProject", false]
+      ["revealTileProject", true]
     ];
 
     const CONTRIBUTION = {

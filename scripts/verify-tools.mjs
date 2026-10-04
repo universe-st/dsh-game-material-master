@@ -549,12 +549,34 @@ async function main() {
 
   // ── 8. 浏览器半区的方法清单与宿主 manifest 必须一一对应 ─────────────────
   console.log("\n8) 远程方法清单一致性");
-  const listed = [...clientSource.matchAll(/^\s*\["(\w+)",\s*(true|false)\],?$/gm)].map((match) => match[1]);
+  const clientEntries = [...clientSource.matchAll(/^\s*\["(\w+)",\s*(true|false)\],?$/gm)].map((match) => ({
+    method: match[1],
+    payload: match[2] === "true"
+  }));
+  const listed = clientEntries.map((entry) => entry.method);
   const manifestMethods = METHODS.map((spec) => spec.method);
   const missingInClient = manifestMethods.filter((method) => !listed.includes(method));
   const extraInClient = listed.filter((method) => !manifestMethods.includes(method));
   check("客户端清单覆盖全部方法", missingInClient.length === 0, missingInClient.join("、"));
   check("客户端没有多余方法", extraInClient.length === 0, extraInClient.join("、"));
+
+  /**
+   * 第二个字段是「这个方法收不收 payload」，两边必须**逐条**一致。
+   *
+   * 只比方法名是不够的：把收 payload 的方法标成 false，typert 会在浏览器侧直接拒绝
+   * （`expected 0 argument(s), got 1`），界面表现是「点了没反应 + 一行错误」，
+   * 既不崩也不影响别的功能，很容易漏过。实测 `getTileProject` 就是这么错的。
+   */
+  const payloadMismatch = [];
+  for (const spec of METHODS) {
+    const entry = clientEntries.find((item) => item.method === spec.method);
+    if (entry === undefined) continue;
+    const hostHasPayload = spec.payload !== undefined;
+    if (entry.payload !== hostHasPayload) {
+      payloadMismatch.push(`${spec.method}（客户端 ${entry.payload} / 宿主 ${hostHasPayload}）`);
+    }
+  }
+  check("客户端清单的 payload 标记与宿主一致", payloadMismatch.length === 0, payloadMismatch.join("、"));
 
   // ── 9. 系统提示词里的固定流程 ──────────────────────────────────────────
   console.log("\n9) 系统提示词的固定流程");

@@ -1541,8 +1541,58 @@ async function main() {
     check("骨骼动画任务已删除", !rigJobsAfter.jobs.some((item) => item.id === rigId));
   }
 
-  // ── 13. 删除 ───────────────────────────────────────────────────────────
-  console.log("13) 删除项目");
+  // ── 14. 地图地块的资源路由 ─────────────────────────────────────────────
+  //
+  // ⚠️ 这一节钉的是一个**静默坏掉**的点：路由里的 scope 白名单有**两处**——
+  // `AssetScope` 类型和 `handleAsset` 里的运行时判断。只改类型不改判断，
+  // TypeScript 不会报错（scope 是断言出来的），请求直接掉进 404，
+  // 界面表现只是「图裂了」。实测 `tile-assets` 就这么漏过一轮。
+  console.log("14) 地图地块的资源路由");
+  {
+    const tilegen = await import("../lib/tilegen.js");
+    // 自己起一台 server：`handler` 与前面几节用的是同一个，但端口各节独立。
+    const server4 = createServer((req, res) => void handler(req, res));
+    await new Promise((resolve) => server4.listen(0, "127.0.0.1", resolve));
+    const port4 = server4.address().port;
+    const tile = await studio.createTileProject({ name: "路由验证" });
+    const tileId = tile.id;
+    try {
+      check("项目 id 形如 t…", tilegen.isValidTileProjectId(tileId), tileId);
+      check("view 带 assetBase 且指向 tile-assets",
+        String(tile.assetBase).endsWith(`/tile-assets/${tileId}/`), String(tile.assetBase));
+
+      // 真写一个模板文件，再从 HTTP 路由取回来
+      const { mkdir: mkdirp, writeFile: writeF } = await import("node:fs/promises");
+      await mkdirp(join(tilegen.tileProjectDir(tileId), "template"), { recursive: true });
+      await writeF(join(tilegen.tileProjectDir(tileId), "template", "cell.png"), encodePng(Buffer.from([255, 0, 0, 255]), 1, 1));
+
+      const base = `http://127.0.0.1:${port4}/dsh-game-material-master/tile-assets/${tileId}`;
+      const cell = await fetch(`${base}/template/cell.png`).catch(() => null);
+      check("模板图可经资源路由取得（tile-assets 在白名单里）",
+        cell !== null && cell.status === 200, cell === null ? "请求失败" : String(cell.status));
+      check("模板图的 Content-Type 是 image/png",
+        cell !== null && String(cell.headers.get("content-type")).startsWith("image/png"),
+        cell === null ? "无响应" : String(cell.headers.get("content-type")));
+
+      // 不在白名单里的子目录必须 403（project.json 在项目根，第一段就是文件名）
+      const outside = await fetch(`${base}/project.json`).catch(() => null);
+      check("项目根文件不走资源路由（403）",
+        outside !== null && outside.status === 403, outside === null ? "请求失败" : String(outside.status));
+
+      // 目录穿越必须被挡
+      const traverse = await fetch(`${base}/template/../../project.json`).catch(() => null);
+      check("目录穿越被挡（非 200）",
+        traverse === null || traverse.status !== 200, traverse === null ? "请求失败" : String(traverse.status));
+    } finally {
+      server4.close();
+      await studio.deleteTileProject({ projectId: tileId });
+    }
+    const tileList = await studio.listTileProjects();
+    check("地图地块项目已删除", !tileList.projects.some((item) => item.id === tileId));
+  }
+
+  // ── 15. 删除 ───────────────────────────────────────────────────────────
+  console.log("15) 删除项目");
   await studio.deleteProject({ projectId });
   const after = await studio.listProjects();
   check("项目已从列表移除", !after.projects.some((p) => p.id === projectId));
