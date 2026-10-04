@@ -5191,7 +5191,10 @@
         steps,
         notice === null ? null : h("div", { className: `SPR_notice SPR_notice-${notice.kind}` }, notice.text),
         stageBody,
-        busy ? h(LoadingOverlay, { text: T("正在生成地块…") }) : null
+        // ⚠️ 这里必须是 `show`：LoadingOverlay 的判据是 `show !== true` 就返回 null。
+        // 写成 `busy` 不会报任何错，只是**遮罩永远不出现** —— 生成地块是真实计费的，
+        // 没有反馈用户就会反复点「生成全部」。自检 verify-tile-client.mjs 钉这条。
+        busy ? h(LoadingOverlay, { show: true, text: T("正在生成地块…") }) : null
       );
     }
 

@@ -60,6 +60,7 @@ node scripts/verify-feedback.mjs   # 浏览器半区真渲染（119 项）
 node scripts/verify-i18n.mjs       # 中英词条表契约（9 项）
 node scripts/verify-tile.mjs       # 地图地块几何内核（109 项，含反向验证）
 node scripts/verify-tile-pipeline.mjs  # 地图地块数据层与流水线（65 项）
+node scripts/verify-tile-client.mjs    # 地图地块界面真渲染（68 项，拦「遮罩没出现」这类静默问题）
 ```
 
 `scripts/find-missing-i18n.mjs` 不是断言脚本，是**工具**：列出所有还没进词条表的
