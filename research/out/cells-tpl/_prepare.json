@@ -1,0 +1,34 @@
+{
+  "F-grass.png": {
+    "mode": "template",
+    "scale": [
+      0.0679,
+      0.0679
+    ],
+    "out": "research\\out\\cells-tpl\\F-grass.png"
+  },
+  "F-dirt.png": {
+    "mode": "template",
+    "scale": [
+      0.0679,
+      0.0679
+    ],
+    "out": "research\\out\\cells-tpl\\F-dirt.png"
+  },
+  "F-rock.png": {
+    "mode": "template",
+    "scale": [
+      0.0679,
+      0.0679
+    ],
+    "out": "research\\out\\cells-tpl\\F-rock.png"
+  },
+  "F-bush.png": {
+    "mode": "template",
+    "scale": [
+      0.0679,
+      0.0679
+    ],
+    "out": "research\\out\\cells-tpl\\F-bush.png"
+  }
+}

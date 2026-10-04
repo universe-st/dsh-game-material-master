@@ -1,0 +1,131 @@
+{
+  "grass": {
+    "mode": "measured",
+    "scale": [
+      0.0453,
+      0.0454
+    ],
+    "k_measured": 2.007,
+    "ratio_measured": 2.002,
+    "w2": 706.2,
+    "h2": 352.7,
+    "resid": 2.0
+  },
+  "grass2": {
+    "mode": "measured",
+    "scale": [
+      0.0451,
+      0.0449
+    ],
+    "k_measured": 1.996,
+    "ratio_measured": 1.988,
+    "w2": 709.1,
+    "h2": 356.7,
+    "resid": 2.0
+  },
+  "dirt": {
+    "mode": "measured",
+    "scale": [
+      0.0454,
+      0.0453
+    ],
+    "k_measured": 2.007,
+    "ratio_measured": 1.996,
+    "w2": 705.5,
+    "h2": 353.5,
+    "resid": 2.0
+  },
+  "dirt2": {
+    "mode": "measured",
+    "scale": [
+      0.0454,
+      0.0455
+    ],
+    "k_measured": 2.002,
+    "ratio_measured": 2.004,
+    "w2": 705.2,
+    "h2": 351.9,
+    "resid": 1.5
+  },
+  "rock": {
+    "mode": "measured",
+    "scale": [
+      0.0453,
+      0.0452
+    ],
+    "k_measured": 1.999,
+    "ratio_measured": 1.993,
+    "w2": 706.0,
+    "h2": 354.2,
+    "resid": 1.8
+  },
+  "rock2": {
+    "mode": "measured",
+    "scale": [
+      0.0453,
+      0.0452
+    ],
+    "k_measured": 2.004,
+    "ratio_measured": 1.996,
+    "w2": 706.6,
+    "h2": 353.9,
+    "resid": 2.0
+  },
+  "bush": {
+    "mode": "measured",
+    "scale": [
+      0.0454,
+      0.0452
+    ],
+    "k_measured": 1.991,
+    "ratio_measured": 1.991,
+    "w2": 704.9,
+    "h2": 354.0,
+    "resid": 1.7
+  },
+  "bush2": {
+    "mode": "measured",
+    "scale": [
+      0.0452,
+      0.0449
+    ],
+    "k_measured": 1.996,
+    "ratio_measured": 1.986,
+    "w2": 707.4,
+    "h2": 356.1,
+    "resid": 1.9
+  },
+  "bush3": {
+    "mode": "measured",
+    "scale": [
+      0.045,
+      0.0454
+    ],
+    "k_measured": 2.021,
+    "ratio_measured": 2.019,
+    "w2": 710.9,
+    "h2": 352.1,
+    "resid": 2.0
+  },
+  "building": {
+    "mode": "bbox",
+    "bbox": [
+      226,
+      283,
+      1313,
+      1252
+    ],
+    "bbox_wh": [
+      1088,
+      970
+    ],
+    "scaled_wh": [
+      98.7,
+      88.0
+    ],
+    "scale": [
+      0.0907,
+      0.0907
+    ]
+  }
+}

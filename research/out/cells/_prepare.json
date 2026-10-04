@@ -1,0 +1,54 @@
+{
+  "F-grass.png": {
+    "mode": "measured",
+    "scale": [
+      0.0339,
+      0.0295
+    ],
+    "k_measured": 1.338,
+    "ratio_measured": 1.742,
+    "w2": 944.0,
+    "h2": 542.0,
+    "resid": 82.7,
+    "out": "research\\out\\cells\\F-grass.png"
+  },
+  "F-dirt.png": {
+    "mode": "measured",
+    "scale": [
+      0.034,
+      0.034
+    ],
+    "k_measured": 1.997,
+    "ratio_measured": 2.0,
+    "w2": 940.9,
+    "h2": 470.3,
+    "resid": 1.9,
+    "out": "research\\out\\cells\\F-dirt.png"
+  },
+  "F-rock.png": {
+    "mode": "measured",
+    "scale": [
+      0.0339,
+      0.0341
+    ],
+    "k_measured": 1.998,
+    "ratio_measured": 2.013,
+    "w2": 944.1,
+    "h2": 468.9,
+    "resid": 3.2,
+    "out": "research\\out\\cells\\F-rock.png"
+  },
+  "F-bush.png": {
+    "mode": "measured",
+    "scale": [
+      0.0336,
+      0.0343
+    ],
+    "k_measured": 2.042,
+    "ratio_measured": 2.04,
+    "w2": 952.1,
+    "h2": 466.8,
+    "resid": 2.0,
+    "out": "research\\out\\cells\\F-bush.png"
+  }
+}
