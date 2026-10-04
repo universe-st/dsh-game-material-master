@@ -64,7 +64,9 @@ async function main() {
   check("注册了一条 prefix 路由", captured.routes.length === 1 && captured.routes[0].kind === "prefix", JSON.stringify(captured.routes.map((r) => r.path)));
 
   const invocations = captured.manifest?.invocations ?? [];
-  check("manifest 方法数为 97", invocations.length === 97, `实际 ${invocations.length}`);
+  // 方法数是**清单完整性**的锚点：新增 / 删除远程方法时必须同步改这个数字。
+  // 它拦住的是「加了方法却忘了写进 METHODS」这类静默不一致。
+  check("manifest 方法数为 111（新增远程方法时同步改这个数）", invocations.length === 111, `实际 ${invocations.length}`);
   const ids = new Set(invocations.map((i) => i.id));
   check("方法 id 唯一", ids.size === invocations.length);
   check("所有方法都声明在 gameStudio 服务下", invocations.every((i) => i.service === "gameStudio" && i.namespace === "gameStudio"));

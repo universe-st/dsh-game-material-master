@@ -33,11 +33,12 @@ import { listProjects, readProject } from "./store.js";
 import { listImageJobs, readImageJob, sniffImage } from "./imagegen.js";
 import { listSequenceJobs, readSequenceJob, listSequenceTasks } from "./seqgen.js";
 import { listRigJobs, readRigJob, rigSnapshot } from "./riggen.js";
+import { listTileProjects, readTileProject, tileSnapshot } from "./tilegen.js";
 import { TOOL_METHODS } from "./wire.js";
 import { PANEL_KEY, buildOpenLink, originForLinks, type OpenIntent } from "./links.js";
 
-/** 三个模块的 key 与界面里的模块 key 完全一致。 */
-const MODULES = ["sprite", "image", "sequence", "rig"] as const;
+/** 四个模块的 key 与界面里的模块 key 完全一致。 */
+const MODULES = ["sprite", "image", "sequence", "rig", "tile"] as const;
 type ModuleKey = (typeof MODULES)[number];
 
 /** 工具名统一前缀，避免和别家插件撞名。 */
@@ -63,12 +64,13 @@ function moduleOf(value: unknown): ModuleKey | undefined {
   return typeof value === "string" && (MODULES as readonly string[]).includes(value) ? (value as ModuleKey) : undefined;
 }
 
-/** 任务 id 前缀决定它属于哪个模块（p… / i… / s… / r…）。 */
+/** 任务 id 前缀决定它属于哪个模块（p… / i… / s… / r… / t…）。 */
 export function moduleForId(id: string): ModuleKey | undefined {
   if (/^p[a-z0-9]+$/.test(id)) return "sprite";
   if (/^i[a-z0-9]+$/.test(id)) return "image";
   if (/^s[a-z0-9]+$/.test(id)) return "sequence";
   if (/^r[a-z0-9]+$/.test(id)) return "rig";
+  if (/^t[a-z0-9]+$/.test(id)) return "tile";
   return undefined;
 }
 
@@ -340,6 +342,11 @@ async function snapshotOf(module: ModuleKey, id: string): Promise<any> {
     if (job === undefined) throw new Error(`找不到序列帧任务：${id}`);
     return sequenceSnapshot(job);
   }
+  if (module === "tile") {
+    const project = await readTileProject(id);
+    if (project === undefined) throw new Error(`找不到地图地块项目：${id}`);
+    return tileSnapshot(project, originForLinks());
+  }
   const job = await readRigJob(id);
   if (job === undefined) throw new Error(`找不到骨骼动画任务：${id}`);
   // 工具侧要的是**绝对** URL（会直接贴给用户点），所以带上已上报的 origin。
@@ -383,6 +390,7 @@ function intentFromCall(method: string, payload: Record<string, any>): OpenInten
     return module === undefined ? undefined : { module, jobId };
   }
   if (method.startsWith("listRigJob") || method.startsWith("createRigJob")) return { module: "rig" };
+  if (method.startsWith("listTileProject") || method.startsWith("createTileProject")) return { module: "tile" };
   if (method.startsWith("listImageJob") || method.startsWith("createImageJob")) return { module: "image" };
   if (method.startsWith("listSequenceJob") || method.startsWith("createSequenceJob")) return { module: "sequence" };
   if (method.startsWith("listProject") || method.startsWith("createProject")) return { module: "sprite" };
@@ -544,9 +552,10 @@ export function registerStudioTools(host: StudioToolHost, gateway: GameStudioGat
               sprite: buildOpenLink({ module: "sprite" }),
               image: buildOpenLink({ module: "image" }),
               sequence: buildOpenLink({ module: "sequence" }),
-              rig: buildOpenLink({ module: "rig" })
+              rig: buildOpenLink({ module: "rig" }),
+              tile: buildOpenLink({ module: "tile" })
             },
-            hint: "用 game_material_status({module,id}) 看某个目标的细节；八方向图的四步是 images → videos → frames → sheet。"
+            hint: "用 game_material_status({module,id}) 看某个目标的细节；八方向图的四步是 images → videos → frames → sheet，地图地块是 template → generate → review → map。"
           };
         }
         const module = resolveTarget(args?.module, id);
@@ -827,6 +836,16 @@ export function registerStudioTools(host: StudioToolHost, gateway: GameStudioGat
           return { module, id, index: index ?? null, approved, count: targets.length, ...openInfo({ module: "image", jobId: id }, "点开看验收结果") };
         }
 
+        if (module === "tile") {
+          const key = asString(args?.key) || undefined;
+          const variant = args?.variant === undefined ? undefined : clampInt(args.variant, 0, 0, 99);
+          await (gateway as any).setTileApproved({ projectId: id, key, variant, approved });
+          return {
+            module, id, key: key ?? null, variant: variant ?? null, approved,
+            ...openInfo({ module: "tile", jobId: id }, "点开看验收结果")
+          };
+        }
+
         if (module === "sequence") {
           const job = await readSequenceJob(id);
           if (job === undefined) throw new Error(`找不到序列帧任务：${id}`);
@@ -1026,6 +1045,23 @@ function intakeFor(module: ModuleKey, id: string, told: Set<string>, config: any
     known.默认拆件网格 = `${config ? "" : ""}4 列 × 4 行 = 16 个标准人形部件（头/脖子/躯干/胯/上臂/小臂/手/大腿/小腿/脚），格子位置即部件身份`;
     known.默认动画 = "idle 待机 / walk 行走 / run 奔跑 / wave 挥手 / jump 跳跃 / attack 攻击";
   }
+  if (module === "tile") {
+    if (config?.arkApiKeySet !== true) {
+      blockers.push("还没配置火山方舟 API Key（生图必需）：设置 → 游戏素材大师 → 火山方舟 API Key，配好点「测试连接」。");
+    }
+    known.五个阶段 = "① 模板（本地免费）→ ② 生成地块（★计费）→ ③ 验收 → ④ 拼成地图（本地免费，可反复）→ ⑤ 导出";
+    known.几何由代码保证 = "菱形模板由本地代码渲染（严格 2:1 等距），AI 只负责填内容。实测这样菱形比例达标率 100%";
+    known.默认地块清单 = "9 类地形（草/土/石/灌木，各 1~2 变体）+ 4 个独立装饰（树/松树/巨石）+ 1 栋跨 2×2 格建筑";
+    known.默认单元格 = `${config?.cellWidth ?? 64} 宽，高为 96（菱形占中部，上方留白给高出地面的装饰）`;
+    // ⚠️ 属性名只能用标识符允许的字符：带圈数字 ② 之类不是合法标识符字符，
+    // 写成 `known.只有第②步花钱` 会直接编译不过（Invalid character）。
+    known.只有第2步花钱 = "生成一个变体 = 一次 Seedream 调用；模板、规整、拼图、导出全在本地，免费且可反复";
+    known.装饰与地面分开生成 = "树/巨石走「白底单图 + 锚点摆放」，不与地面画在同一张图上（同图会被画两遍）";
+    if (target?.reviewMode) known.审核模式 = target.reviewMode;
+    ask("style", "整套地块的画风描述是什么？（例如「像素画风，色彩明快饱和，干净色块，无噪点」；可留空走默认）", "它会追加到每个地块的提示词末尾，改一次整套画风都变。", "用 game_material_call 的 saveTileProject({projectId, style}) 保存。");
+    ask("items", "要做哪几类地块？（默认给 9 类地形 + 4 个装饰 + 1 栋建筑，可以直接用，也可以增删改）", "地块清单决定画面里有什么，也决定要花多少次调用。", "用 saveTileProject({projectId, items:[…]}) 整份写回；每项含 key/label/kind/family/content/mode/variantCount。");
+    ask("mapLayout", "地图要多大？（默认 14×14）要不要指定某几格用别的类别、或者撒装饰？", "布局是本地计算，改多少次都不花钱。", "用 runTileMap({projectId, rows, cols, seed, fill, decorDensity})；手动指定格子用 saveTileMapCells。");
+  }
 
   if (id === "") {
     questions.push({
@@ -1037,9 +1073,11 @@ function intakeFor(module: ModuleKey, id: string, told: Set<string>, config: any
             ? "新建一个图片任务，还是在已有任务上继续？"
             : module === "sequence"
               ? "新建一个序列帧任务，还是在已有任务上继续？"
-              : "新建一个骨骼动画任务，还是在已有任务上继续？",
+              : module === "tile"
+                ? "新建一个地图地块项目，还是在已有项目上继续？"
+                : "新建一个骨骼动画任务，还是在已有任务上继续？",
       why: "后面的参数都挂在项目 / 任务上。",
-      how: "新建：game_material_call({method:'createProject'|'createImageJob'|'createSequenceJob'|'createRigJob', payload:{name}})，返回的 id 就是后续 payload 里的 projectId / jobId。"
+      how: "新建：game_material_call({method:'createProject'|'createImageJob'|'createSequenceJob'|'createRigJob'|'createTileProject', payload:{name}})，返回的 id 就是后续 payload 里的 projectId / jobId。"
     });
   }
 
@@ -1138,7 +1176,11 @@ const UPLOAD_KINDS: Record<ModuleKey, string[]> = {
   sprite: ["source"],
   image: ["ref", "item"],
   sequence: ["firstFrame", "lastFrame", "referenceImage", "referenceVideo"],
-  rig: ["source", "part"]
+  rig: ["source", "part"],
+  // 地图地块**不需要上传素材**：地块由代码渲染的菱形模板 + 提示词生成。
+  // 留空数组而不是漏掉这一项 —— 漏掉会让类型检查失败，而空数组能让
+  // 「上传」这条路给出明确的报错信息（见 uploadFromPath）。
+  tile: []
 };
 
 async function uploadFromPath(
@@ -1183,6 +1225,10 @@ async function uploadFromPath(
   } else if (module === "rig") {
     if (kind === "part") await call.uploadRigPart({ jobId: id, name: fileName, data: base64 });
     else await call.uploadRigSource({ jobId: id, name: fileName, data: base64 });
+  } else if (module === "tile") {
+    // 地图地块目前不需要上传素材：地块由模板 + 提示词生成。
+    // 明确报错，而不是掉进 sequence 分支里做一件风马牛不相及的事。
+    throw new Error("地图地块模块不需要上传素材：地块由「代码渲染的菱形模板 + 提示词」生成。要改画风请用 saveTileProject({style})");
   } else {
     await call.uploadSequenceRef({ jobId: id, kind, name: fileName, data: base64 });
   }

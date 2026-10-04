@@ -495,7 +495,7 @@ async function main() {
   console.log("\n7) 深链接契约");
   check("查询参数名一致", links.OPEN_QUERY_KEY === "dsh-gmm", links.OPEN_QUERY_KEY);
   check("面板 id 与客户端一致", links.PANEL_KEY === "gameStudio", links.PANEL_KEY);
-  check("模块名与界面一致", links.STUDIO_MODULES.join(",") === "sprite,image,sequence,rig", links.STUDIO_MODULES.join(","));
+  check("模块名与界面一致", links.STUDIO_MODULES.join(",") === "sprite,image,sequence,rig,tile", links.STUDIO_MODULES.join(","));
 
   const link = links.buildOpenLink({ module: "sprite", projectId, stage: "videos" }, "http://127.0.0.1:43120");
   check(
@@ -519,7 +519,7 @@ async function main() {
   ]) {
     check(`${label}：含同名查询参数`, text.includes(`"${links.OPEN_QUERY_KEY}"`), links.OPEN_QUERY_KEY);
     check(`${label}：含面板 id 常量`, text.includes(`"${links.PANEL_KEY}"`), links.PANEL_KEY);
-    check(`${label}：含三个模块名`, links.STUDIO_MODULES.every((module) => text.includes(`"${module}"`)), links.STUDIO_MODULES.join("、"));
+    check(`${label}：含全部模块名（${links.STUDIO_MODULES.length} 个）`, links.STUDIO_MODULES.every((module) => text.includes(`"${module}"`)), links.STUDIO_MODULES.join("、"));
     check(`${label}：注册了捕获阶段的链接拦截`, text.includes('addEventListener("click"') && text.includes("true)"), "捕获阶段");
     check(`${label}：会上报 origin`, text.includes("reportClientOrigin"), "");
     check(`${label}：读取地址栏里的深链接`, text.includes("consumeUrlIntent"), "");

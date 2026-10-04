@@ -1,0 +1,325 @@
+/**
+ * 地图地块模块 · 数据层与流水线自检（M1）。
+ *
+ * 纯本地、不联网：把「生成」以外的东西全跑一遍 ——
+ * 建项目 → 生成模板 → 伪造一份 raw 产物 → 走规整 → 拼图 → 导出 → 失效传播。
+ *
+ * 「伪造 raw 产物」是刻意的：真实生成要花钱，而这里要验的是它之后的所有环节。
+ * 伪造用的样本是**研究期真实生成的 2K 图**（probe/），所以规整走的是真数据。
+ */
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const ROOT = resolve(HERE, "..");
+const PROBE = join(ROOT, "research", "tile-isometric", "probe");
+
+let passed = 0;
+const failures = [];
+function check(name, ok, detail = "") {
+  if (ok) passed++;
+  else {
+    failures.push(`${name}${detail ? ` — ${detail}` : ""}`);
+    console.log(`  ✗ ${name}${detail ? ` — ${detail}` : ""}`);
+  }
+}
+function section(t) {
+  console.log(`\n── ${t} ──`);
+}
+
+/** 等到没有任务在跑（后台作业是异步的，固定 sleep 不可靠）。 */
+async function waitIdle(id, timeoutMs = 30000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeoutMs) {
+    if (!G.tileBusy(id)) return true;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  return false;
+}
+
+const G = await import("../lib/tilegen.js");
+const GEOM = await import("../lib/tilegeom.js");
+const MEDIA = await import("../lib/tilemedia.js");
+const { tileJobsRoot } = await import("../lib/config.js");
+
+// 隔离：用一个临时项目，跑完删掉（不污染用户真实的 tile-jobs/）
+const projectIds = [];
+process.on("exit", () => {
+  for (const id of projectIds) {
+    try {
+      rmSync(join(tileJobsRoot(), id), { recursive: true, force: true });
+    } catch {
+      /* 清理失败不影响结论 */
+    }
+  }
+});
+
+section("项目 CRUD");
+let project;
+{
+  project = await G.createTileProject("自检项目");
+  projectIds.push(project.id);
+  check("T1 新建项目：id 形如 t…", /^t[a-z0-9]+$/.test(project.id), project.id);
+  check("T2 新建项目：带了默认地块清单", project.items.length >= 14, `${project.items.length} 项`);
+  check("T3 默认清单包含 5 类：草/土/石/灌木/建筑",
+    ["grass", "dirt", "rock", "bush", "building"].every((k) => project.items.some((i) => i.key === k)));
+  check("T4 建筑占 2×2", project.items.find((i) => i.key === "building")?.footprint.join(",") === "2,2");
+  check("T5 装饰的 mode = plain", project.items.find((i) => i.key === "tree")?.mode === "plain");
+  check("T6 地形的 mode = template", project.items.find((i) => i.key === "grass")?.mode === "template");
+  check("T7 五个阶段初始都是 idle",
+    G.TILE_STAGES.every((s) => project.stages[s].status === "idle"));
+
+  const read = await G.readTileProject(project.id);
+  check("T8 读回项目一致", read !== undefined && read.name === "自检项目");
+
+  const listed = await G.listTileProjects();
+  check("T9 项目出现在列表里", listed.some((p) => p.id === project.id));
+
+  // 非法单元格宽必须被拒（菱形半宽要落在整数格上）
+  let threw = false;
+  try {
+    await G.createTileProject("坏参数", { settings: { cellWidth: 70, cellHeight: 96 } });
+  } catch {
+    threw = true;
+  }
+  check("T10 cellWidth 不能被 4 整除时拒绝建项目", threw);
+
+  let threw2 = false;
+  try {
+    await G.createTileProject("坏参数2", { settings: { cellWidth: 64, cellHeight: 32 } });
+  } catch {
+    threw2 = true;
+  }
+  check("T11 cellHeight ≤ 菱形高时拒绝建项目", threw2);
+}
+
+section("① 模板阶段（本地，免费）");
+{
+  const started = await G.runTemplateStage(project.id);
+  check("T12 模板阶段启动", started.started === true, started.reason ?? "");
+  await waitIdle(project.id);
+  const dir = G.tileProjectDir(project.id);
+  check("T13 产出 template/cell.png", existsSync(join(dir, "template", "cell.png")));
+  check("T14 产出 template/grid2x2.png", existsSync(join(dir, "template", "grid2x2.png")));
+
+  const cell = await MEDIA.decodeFile(join(dir, "template", "cell.png"));
+  check("T15 模板尺寸 2048×2048", cell.width === 2048 && cell.height === 2048, `${cell.width}×${cell.height}`);
+
+  // 模板几何：量出来的比例必须是 2.0（这是整个模块的地基）
+  let left = cell.width, top = cell.height, right = -1, bottom = -1;
+  let magenta = 0;
+  for (let y = 0; y < cell.height; y++) {
+    for (let x = 0; x < cell.width; x++) {
+      const i = (y * cell.width + x) * 4;
+      if (cell.rgba[i + 3] < 128) continue;
+      magenta++;
+      if (x < left) left = x; if (x > right) right = x;
+      if (y < top) top = y; if (y > bottom) bottom = y;
+    }
+  }
+  const w = right - left + 1, h = bottom - top + 1;
+  check("T16 模板菱形比例 = 2.000 ± 0.01", Math.abs(w / h - 2) <= 0.01, `实测 ${(w / h).toFixed(4)}`);
+  console.log(`  · 模板菱形 ${w}×${h}，比例 ${(w / h).toFixed(4)}，中心 (${((left + right) / 2).toFixed(0)},${((top + bottom) / 2).toFixed(0)})`);
+  check("T17 模板是洋红", magenta > 1000);
+  check("T18 模板菱形居中", Math.abs((left + right) / 2 - 1024) <= 2 && Math.abs((top + bottom) / 2 - 1024) <= 2);
+}
+
+section("② 生成阶段：用研究期的真实 2K 图喂规整（不花钱）");
+{
+  // 直接把研究期的真实产物拷进 raw/，然后手工走 generateOne 的规整路径
+  const probe = join(PROBE, "b8", "G-grass-flash.png");
+  if (!existsSync(probe)) {
+    console.log("  · probe/ 不存在 —— 跳过真实数据部分");
+  } else {
+    const dir = G.tileProjectDir(project.id);
+    mkdirSync(join(dir, "raw"), { recursive: true });
+    mkdirSync(join(dir, "cell"), { recursive: true });
+    const rawRel = join("raw", "grass.v1.png");
+    writeFileSync(G.tileAssetPath(project.id, rawRel), readFileSync(probe));
+
+    const decoded = await MEDIA.decodeFile(G.tileAssetPath(project.id, rawRel));
+    const m = GEOM.measureGroundDiamond(decoded);
+    const sane = GEOM.measurementLooksSane(decoded, m);
+    check("T19 真实生成图测量可信", sane === undefined, String(sane));
+    check("T20 实测比例 ∈ [1.98, 2.02]", Math.abs(m.ratio - 2) <= 0.02, m.ratio.toFixed(4));
+
+    const { bitmap, report } = GEOM.regularizeToCell(decoded, project.settings, m, "measured");
+    const cellRel = join("cell", "grass.v1.png");
+    writeFileSync(G.tileAssetPath(project.id, cellRel), MEDIA.encodeBitmap(bitmap));
+    check("T21 规整产物尺寸 = 单元格", bitmap.width === project.settings.cellWidth && bitmap.height === project.settings.cellHeight);
+    check("T22 报告 mode = measured", report.mode === "measured");
+
+    await G.patchTileProject(project.id, (fresh) => {
+      const item = fresh.items.find((i) => i.key === "grass");
+      item.variants[0] = { index: 0, raw: rawRel, cell: cellRel, report, approved: true };
+    });
+    const after = await G.readTileProject(project.id);
+    check("T23 变体被写入 project.json", after.items.find((i) => i.key === "grass").variants[0]?.cell === cellRel);
+  }
+}
+
+section("④ 拼图阶段（本地，免费）");
+{
+  const dir = G.tileProjectDir(project.id);
+  // 再补一个装饰与一个建筑，让拼图有多样性
+  const treeProbe = join(PROBE, "b13", "D-treeA-white.png");
+  const buildProbe = join(PROBE, "b9", "H1-grid-flash.png");
+  if (existsSync(treeProbe)) {
+    mkdirSync(join(dir, "decor"), { recursive: true });
+    const decoded = await MEDIA.decodeFile(treeProbe);
+    const { bitmap, report } = GEOM.regularizeDecorSprite(decoded, project.settings);
+    const rel = join("decor", "tree.v1.png");
+    writeFileSync(G.tileAssetPath(project.id, rel), MEDIA.encodeBitmap(bitmap));
+    await G.patchTileProject(project.id, (fresh) => {
+      const item = fresh.items.find((i) => i.key === "tree");
+      item.variants[0] = { index: 0, cell: rel, report: { mode: "sprite", scale: [report.scale, report.scale] }, approved: true };
+    });
+    check("T24 装饰规整产物写到 decor/", existsSync(G.tileAssetPath(project.id, rel)));
+  }
+  if (existsSync(buildProbe)) {
+    const decoded = await MEDIA.decodeFile(buildProbe);
+    const geom = { centerX: decoded.width / 2, centerY: decoded.height / 2, halfWidth: decoded.width * 0.46, halfHeight: decoded.width * 0.23 };
+    const { bitmap } = GEOM.regularizeToCell(decoded, project.settings, geom, "template");
+    const rel = join("cell", "building.v1.png");
+    writeFileSync(G.tileAssetPath(project.id, rel), MEDIA.encodeBitmap(bitmap));
+    await G.patchTileProject(project.id, (fresh) => {
+      const item = fresh.items.find((i) => i.key === "building");
+      item.variants[0] = { index: 0, cell: rel, report: { mode: "template", scale: [0.068, 0.068] }, approved: true };
+    });
+  }
+
+  const started = await G.runMapStage(project.id, { rows: 6, cols: 6, seed: 7, fill: "grass", decorDensity: 0.15 });
+  check("T25 拼图阶段启动", started.started === true, started.reason ?? "");
+  await waitIdle(project.id);
+  check("T26 产出 map/map.png", existsSync(join(dir, "map", "map.png")));
+  check("T27 产出 map/map.json", existsSync(join(dir, "map", "map.json")));
+
+  const after = await G.readTileProject(project.id);
+  check("T28 项目里记下了 map.png 路径", after.map.png === "map/map.png");
+  check("T29 stage map = done", after.stages.map.status === "done", after.stages.map.status);
+
+  const mapJson = JSON.parse(readFileSync(join(dir, "map", "map.json"), "utf8"));
+  check("T30 map.json 记录了 rows/cols/seed", mapJson.rows === 6 && mapJson.cols === 6 && mapJson.seed === 7);
+
+  const map = await MEDIA.decodeFile(join(dir, "map", "map.png"));
+  check("T31 地图比单元格大", map.width > 200 && map.height > 200, `${map.width}×${map.height}`);
+
+  // 可复现性：同种子重拼必须逐像素一致
+  const first = readFileSync(join(dir, "map", "map.png"));
+  await G.runMapStage(project.id, { rows: 6, cols: 6, seed: 7, fill: "grass", decorDensity: 0.15 });
+  await waitIdle(project.id);
+  const second = readFileSync(join(dir, "map", "map.png"));
+  check("T32 同种子重拼 → 逐像素一致", first.equals(second));
+
+  // 换种子必须不同
+  await G.runMapStage(project.id, { rows: 6, cols: 6, seed: 99, fill: "grass" });
+  await waitIdle(project.id);
+  const third = readFileSync(join(dir, "map", "map.png"));
+  check("T33 换种子 → 结果不同", !first.equals(third));
+
+  // 没有已生成地块时必须明确报错，而不是产出一张空图
+  let threw = false;
+  try {
+    await G.runMapStage(project.id, { rows: 4, cols: 4, fill: "不存在的类别" });
+  } catch {
+    threw = true;
+  }
+  check("T34 用不存在的类别拼图会报错（而不是输出空图）", threw);
+}
+
+section("⑤ 导出阶段（本地，免费）");
+{
+  const dir = G.tileProjectDir(project.id);
+  const started = await G.runExportStage(project.id);
+  check("T35 导出阶段启动", started.started === true, started.reason ?? "");
+  await waitIdle(project.id);
+  check("T36 产出 export/map.png", existsSync(join(dir, "export", "map.png")));
+  check("T37 产出 export/map.json", existsSync(join(dir, "export", "map.json")));
+  check("T38 产出 export/tiles/ 下的地块", existsSync(join(dir, "export", "tiles", "grass.v1.png")));
+  const after = await G.readTileProject(project.id);
+  check("T39 stage export = done", after.stages.export.status === "done", after.stages.export.status);
+}
+
+section("失效传播（改上游 → 下游作废）");
+{
+  await G.patchTileProject(project.id, (fresh) => {
+    G.invalidateFrom(fresh, "generate");
+  });
+  const after = await G.readTileProject(project.id);
+  check("T40 作废 generate → 地块变体被清空", after.items.every((i) => i.variants.length === 0));
+  check("T41 作废 generate → map 也作废", after.map.png === undefined);
+  check("T42 作废 generate → stage 全部回到 idle",
+    ["generate", "review", "map", "export"].every((s) => after.stages[s].status === "idle"));
+
+  // 只作废 map 时，地块必须保住（那是花钱买的）
+  await G.patchTileProject(project.id, (fresh) => {
+    fresh.items.find((i) => i.key === "grass").variants[0] = { index: 0, cell: "cell/grass.v1.png" };
+    fresh.stages.generate = { status: "done" };
+    G.invalidateFrom(fresh, "map");
+  });
+  const after2 = await G.readTileProject(project.id);
+  check("T43 只作废 map → 地块保住", after2.items.find((i) => i.key === "grass").variants.length === 1);
+  check("T44 只作废 map → generate 仍是 done", after2.stages.generate.status === "done");
+}
+
+section("提示词构造");
+{
+  const grass = project.items.find((i) => i.key === "grass");
+  const decor = project.items.find((i) => i.key === "tree");
+  const building = project.items.find((i) => i.key === "building");
+  const p1 = G.buildTilePrompt(grass, project.style);
+  const p2 = G.buildTilePrompt(decor, project.style);
+  const p3 = G.buildTilePrompt(building, project.style);
+  check("T45 地形提示词带固定前缀", p1.startsWith(G.TERRAIN_PREFIX.slice(0, 20)));
+  check("T46 地形提示词包含内容描述", p1.includes(grass.content.slice(0, 10)));
+  check("T47 地形提示词包含画风", p1.includes(project.style.slice(0, 10)));
+  check("T48 装饰提示词用白底（不是透明）", p2.startsWith(G.DECOR_PREFIX) && p2.includes("纯白色背景"));
+  check("T49 装饰提示词不含「透明」", !p2.includes("透明"));
+  check("T50 建筑提示词说明 2x2 地基", p3.includes("2x2") || p3.includes("2×2"));
+  check("T51 中文默认文案是中文", G.defaultTileStyle().includes("像素画"));
+  check("T52 英文默认文案是英文", G.defaultTileStyle("en").includes("pixel-art"));
+  check("T53 中英清单条目数一致",
+    G.defaultTileItems().length === G.defaultTileItems("en").length,
+    `${G.defaultTileItems().length} vs ${G.defaultTileItems("en").length}`);
+}
+
+section("汇总视图与摘要");
+{
+  const view = G.tileView(await G.readTileProject(project.id));
+  // 视图给界面用：产物是**相对**路径 + 一个 assetBase，由浏览器自己拼 origin
+  check("T54 tileView 带 assetBase", typeof view.assetBase === "string" && view.assetBase.endsWith("/"), view.assetBase);
+  check("T54b assetBase 指向本模块的资源路由",
+    view.assetBase === `/dsh-game-material-master/tile-assets/${project.id}/`, view.assetBase);
+  // 对话工具用另一份快照：产物必须是**绝对** URL（会直接贴给用户点）
+  const snap = G.tileSnapshot(await G.readTileProject(project.id), "http://127.0.0.1:19387");
+  const firstUrl = snap.items.flatMap((i) => i.variants).map((v) => v.url).find((u) => typeof u === "string");
+  check("T55 tileSnapshot 的产物是绝对 URL", typeof firstUrl === "string" && firstUrl.startsWith("http://127.0.0.1:19387/"), String(firstUrl));
+  check("T55b tileSnapshot 带进度统计", typeof snap.progress?.expected === "number" && snap.progress.expected > 0);
+  check("T55c tileSnapshot 带地图信息", snap.map !== undefined && typeof snap.map.ready === "boolean");
+  const summary = G.summarizeTileProject(await G.readTileProject(project.id));
+  check("T56 摘要统计 expectedCount > 0", summary.expectedCount > 0, String(summary.expectedCount));
+  check("T57 isValidTileProjectId 认得自己的 id", G.isValidTileProjectId(project.id));
+  check("T58 isValidTileProjectId 拒绝别的模块的 id", !G.isValidTileProjectId("p123456"));
+  check("T59 单元目录白名单齐备",
+    ["template", "raw", "cell", "decor", "map", "export"].every((d) => G.SERVABLE_TILE_DIRS.has(d)));
+}
+
+section("作业与并发保护");
+{
+  check("T60 空闲时 tileBusy = false", G.tileBusy(project.id) === false);
+  const job = G.currentTileJob(project.id);
+  check("T61 没有在跑时 tileBusy = false", G.tileBusy(project.id) === false);
+  check("T61b 完成后的作业记录保留（界面要显示最终状态）", job !== undefined && job.running === null);
+}
+
+console.log(`\n${"═".repeat(60)}`);
+console.log(`通过 ${passed} 项，失败 ${failures.length} 项`);
+if (failures.length > 0) {
+  console.log("\n失败清单：");
+  for (const f of failures) console.log(`  ✗ ${f}`);
+  process.exit(1);
+}
+console.log("地图地块数据层与流水线自检全绿 ✅");
+
+void writeFileSync;

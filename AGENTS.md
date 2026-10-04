@@ -20,6 +20,7 @@ DSH 插件「游戏素材大师」：从一张角色设定图出发批量产出�
 | 图片生成 | `image` | 正式 |
 | 序列帧生成 | `sequence` | 正式 |
 | 骨骼动画生成 | `rig` | **实验性**（页签带角标、进入弹窗、模块内常驻提示条） |
+| 地图地块生成 | `tile` | 正式（等距地块 → 拼成地图） |
 
 ---
 
@@ -57,7 +58,12 @@ node scripts/verify-tools.mjs      # 对话调用面（109 项）
 node scripts/verify-pipeline.mjs   # 抽帧 / 抠像 / 合成（40 项）
 node scripts/verify-feedback.mjs   # 浏览器半区真渲染（119 项）
 node scripts/verify-i18n.mjs       # 中英词条表契约（9 项）
+node scripts/verify-tile.mjs       # 地图地块几何内核（109 项，含反向验证）
+node scripts/verify-tile-pipeline.mjs  # 地图地块数据层与流水线（65 项）
 ```
+
+`scripts/find-missing-i18n.mjs` 不是断言脚本，是**工具**：列出所有还没进词条表的
+`T("…")` 原文，直接输出可粘贴的条目。加了新界面文案时先跑它。
 
 其余脚本（`verify-rig*.mjs`、`e2e-*.mjs` 等）的覆盖范围见 ENGINEERING.md 的「自检脚本」表。
 `e2e-*.mjs` / `probe-redraw.mjs` 会**真实调 API 花钱**，不要顺手跑。

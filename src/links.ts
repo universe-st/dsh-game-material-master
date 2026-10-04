@@ -31,21 +31,24 @@ export const OPEN_QUERY_KEY = "dsh-gmm";
 /** 工作台在 `main` 槽里的 key，也是侧栏 `sidebar.panellist` 的 id。 */
 export const PANEL_KEY = "gameStudio";
 
-/** 四个模块的 key。 */
-export const STUDIO_MODULES = ["sprite", "image", "sequence", "rig"] as const;
+/** 五个模块的 key。 */
+export const STUDIO_MODULES = ["sprite", "image", "sequence", "rig", "tile"] as const;
 export type StudioModule = (typeof STUDIO_MODULES)[number];
 
 /** 八方向图的四个阶段。 */
 export const SPRITE_STAGES = ["images", "videos", "frames", "sheet"] as const;
+
+/** 地图地块的五个阶段。 */
+export const TILE_STAGES = ["template", "generate", "review", "map", "export"] as const;
 
 /** 一次「打开界面」的意图。字段全部可选：缺省表示保持界面当前状态。 */
 export interface OpenIntent {
   module?: StudioModule;
   /** 模块一的项目 id（p…）。 */
   projectId?: string;
-  /** 模块二 / 三 / 四的任务 id（i… / s… / r…）。 */
+  /** 模块二 / 三 / 四 / 五的任务 id（i… / s… / r… / t…）。 */
   jobId?: string;
-  /** 八方向图的阶段：images / videos / frames / sheet。 */
+  /** 阶段：八方向图 images/videos/frames/sheet；地图地块 template/generate/review/map。 */
   stage?: string;
   /** 需要刻意高亮的方位（八方向图）。 */
   direction?: string;

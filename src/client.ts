@@ -901,7 +901,66 @@
       "gameStudio 远程服务不可用，请确认插件已启用": "The gameStudio remote service is unavailable. Make sure the plugin is enabled.",
       "{n0} 调用失败": "{n0} call failed",
       "{n0}: 深链接拦截": "{n0}: deep link interception",
-      "{n0}: 深链接引导": "{n0}: deep link guidance"
+      "{n0}: 深链接引导": "{n0}: deep link guidance",
+
+      // ── 地图地块生成（模块五）──
+      "地图地块生成": "Map tile generation",
+      "等距地块 → 拼成地图：几何交给代码，内容交给 AI": "Isometric tiles → a whole map: geometry by code, content by AI",
+      "① 模板": "① Template",
+      "本地代码渲染严格 2:1 的等距菱形模板——几何的唯一真源，免费": "Locally rendered strict 2:1 isometric diamond template — the single source of truth for geometry, free",
+      "② 生成地块": "② Generate tiles",
+      "把模板交给 Seedream 填内容。这一步真实计费，每个变体一次调用": "Hand the template to Seedream to fill in. This step is billed: one call per variant",
+      "③ 验收": "③ Review",
+      "逐项看几何报告与成品，不满意的单张重跑": "Check the geometry report and the result per item; re-run any single one you dislike",
+      "④ 拼成地图": "④ Assemble map",
+      "本地按等距网格铺图，按类别随机抽变体。免费，可反复换种子": "Lay tiles on the isometric grid locally, picking variants at random per family. Free, re-seed as often as you like",
+      "⑤ 导出": "⑤ Export",
+      "导出地块包与地图 PNG / JSON": "Export the tile pack plus map PNG / JSON",
+      "未命名地图": "Untitled map",
+      "项目": "Project",
+      "（未选择）": "(none selected)",
+      "新项目名称": "New project name",
+      "已生成 {n0} / {n1}，已验收 {n2}": "Generated {n0} / {n1}, approved {n2}",
+      "还没有地图地块项目——取个名字点「新建项目」开始。": "No map tile project yet — name one and click 'New project' to start.",
+      "模板由本地代码渲染，几何严格 2:1 等距，是所有产物的几何真源。它不对说明是代码问题，不是模型问题。": "The template is rendered locally with strict 2:1 isometric geometry and is the source of truth for every tile. If it is wrong, that is a code problem, not a model problem.",
+      "生成模板": "Generate template",
+      "生成模板（免费）": "Generate template (free)",
+      "停止": "Stop",
+      "本地计算，不花钱": "Computed locally, no cost",
+      "单格模板": "Single-cell template",
+      "2×2 地基网格": "2×2 foundation grid",
+      "模板几何": "Template geometry",
+      "生成一个变体 = 一次 Seedream 调用。地形走「模板填充」，装饰走「白底单图 + 锚点摆放」，建筑走「2×2 地基网格」。": "One variant = one Seedream call. Terrain uses template filling, decor uses a white-background single image placed on an anchor, buildings use the 2×2 foundation grid.",
+      "统一画风": "Shared style",
+      "保存画风": "Save style",
+      "改画风会让已生成的地块全部作废（重跑要花钱）": "Changing the style invalidates every generated tile (re-running costs money)",
+      "生成全部": "Generate all",
+      "生成全部地块": "Generate all tiles",
+      "补缺": "Fill gaps",
+      "所有地块都已经生成过了": "Every tile has already been generated",
+      "只补没生成的": "Only fill missing ones",
+      "正在生成：{n0}（已完成 {n1}/{n2}）": "Generating: {n0} ({n1}/{n2} done)",
+      "排队中": "Queued",
+      "待生成": "Pending",
+      "重跑": "Re-run",
+      "逐项看成品与几何报告。几何正常的地块拼起来不会有缝；标「模板几何」说明这张没量准，建议重跑。": "Check each result and its geometry report. Tiles with correct geometry will not show seams; a 'template geometry' badge means the measurement failed, so re-running is recommended.",
+      "验收": "Review",
+      "铺图全在本地：按等距网格铺、按类别随机抽变体、按 (r+c) 顺序遮挡。同种子 + 同布局 = 逐像素一致，可以反复试到满意为止。": "Assembly is entirely local: laid on the isometric grid, variants picked per family, painted in (r+c) order. Same seed + same layout = pixel-identical, so you can re-roll until you like it.",
+      "行": "Rows",
+      "列": "Cols",
+      "种子": "Seed",
+      "装饰密度": "Decor density",
+      "拼图": "Assemble",
+      "铺成地图（免费）": "Assemble map (free)",
+      "换种子": "Re-seed",
+      "换个种子重铺": "Re-roll with a new seed",
+      "地图": "Map",
+      "还没有拼图——点「铺成地图」立刻看到结果（不花钱）。": "No map assembled yet — click 'Assemble map' to see the result immediately (no cost).",
+      "导出地块包（每张 PNG）+ 地图 PNG + 布局 JSON。全部本地计算。": "Export the tile pack (one PNG each) plus map PNG and layout JSON. All computed locally.",
+      "导出": "Export",
+      "导出到 export/": "Export to export/",
+      "打开产物目录": "Open output folder",
+      "正在生成地块…": "Generating tiles…"
     };
 /* i18n-ignore-end */
 
@@ -920,6 +979,9 @@
       },
       () => {
         MODULES = make_MODULES();
+      },
+      () => {
+        TILE_STAGES = make_TILE_STAGES();
       },
       () => {
         STAGES = make_STAGES();
@@ -1163,7 +1225,22 @@
       ["runRigSegment", true],
       ["runRigLayout", true],
       ["runRigBones", true],
-      ["runRigAtlas", true]
+      ["runRigAtlas", true],
+      // 地图地块：第二个字段 = 「调用期间要不要盖 loading 遮罩 / 算作活跃任务」
+      ["listTileProjects", false],
+      ["createTileProject", true],
+      ["getTileProject", false],
+      ["deleteTileProject", true],
+      ["saveTileProject", true],
+      ["runTileTemplate", true],
+      ["runTileItems", true],
+      ["runTileItem", true],
+      ["setTileApproved", true],
+      ["runTileMap", true],
+      ["saveTileMapCells", true],
+      ["runTileExport", true],
+      ["cancelTileJob", true],
+      ["revealTileProject", false]
     ];
 
     const CONTRIBUTION = {
@@ -1276,10 +1353,23 @@
       { key: "sprite", title: T("八方向图生成"), hint: T("一张设定图 → 8 方向 × 8 帧精灵图") },
       { key: "image", title: T("图片生成"), hint: T("按提示词出图，可带参考图，支持抠绿幕导出 PNG") },
       { key: "sequence", title: T("序列帧生成"), hint: T("图/视频参考生成视频 → 抽帧 → 抠像 → 合成与播放预览") },
-      { key: "rig", title: T("骨骼动画生成"), hint: T("拆件 → 装配定位 → 推骨骼与动画 → 打包 Spine 图集"), experimental: true }
+      { key: "rig", title: T("骨骼动画生成"), hint: T("拆件 → 装配定位 → 推骨骼与动画 → 打包 Spine 图集"), experimental: true },
+      { key: "tile", title: T("地图地块生成"), hint: T("等距地块 → 拼成地图：几何交给代码，内容交给 AI") }
     ];
     }
     let MODULES = make_MODULES();
+
+    /** 地图地块的五个阶段（对齐宿主 src/links.ts 的 TILE_STAGES）。 */
+    function make_TILE_STAGES() {
+      return [
+      { key: "template", title: T("① 模板"), hint: T("本地代码渲染严格 2:1 的等距菱形模板——几何的唯一真源，免费") },
+      { key: "generate", title: T("② 生成地块"), hint: T("把模板交给 Seedream 填内容。这一步真实计费，每个变体一次调用") },
+      { key: "review", title: T("③ 验收"), hint: T("逐项看几何报告与成品，不满意的单张重跑") },
+      { key: "map", title: T("④ 拼成地图"), hint: T("本地按等距网格铺图，按类别随机抽变体。免费，可反复换种子") },
+      { key: "export", title: T("⑤ 导出"), hint: T("导出地块包与地图 PNG / JSON") }
+    ];
+    }
+    let TILE_STAGES = make_TILE_STAGES();
 
 
     function make_STAGES() {
@@ -1304,8 +1394,8 @@
     // http(s) 链接加 target="_blank"，不拦就会真的新开一个标签页。
     // 只按 `dsh-gmm` 参数识别自己的链接，其它链接（含站外的）一律放行。
     const OPEN_QUERY_KEY = "dsh-gmm";
-    const OPEN_MODULES = new Set(["sprite", "image", "sequence", "rig"]);
-    /** 意图订阅者：三个模块组件都挂着，谁在挂载谁就被通知。 */
+    const OPEN_MODULES = new Set(["sprite", "image", "sequence", "rig", "tile"]);
+    /** 意图订阅者：各模块组件都挂着，谁在挂载谁就被通知。 */
     const intentListeners = new Set<any>();
     /** 最近一次意图。晚挂载的组件（切模块后才渲染）订阅时立刻拿到它。 */
     let pendingIntent = null;
@@ -1462,8 +1552,35 @@
 .SPR_step{font:inherit;font-size:12px;cursor:pointer;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l2);border-radius:999px;padding:5px 12px;color:var(--dsw-alias-label-secondary);display:inline-flex;align-items:center;gap:6px}
 .SPR_step[data-active=true]{color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-state-business-primary);box-shadow:0 0 0 1px color-mix(in srgb, var(--dsw-alias-state-business-primary) 28%, transparent)}
 .SPR_stepDot{width:7px;height:7px;border-radius:50%;background:var(--dsw-alias-label-tertiary);flex:none}
-.SPR_card{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);border-radius:12px;padding:14px;margin-bottom:14px}
-.SPR_cardHead{display:flex;align-items:baseline;gap:8px;margin-bottom:4px;flex-wrap:wrap}
+/* ── 地图地块生成（模块五）─────────────────────────────────────────────
+   地块卡片要能一眼看出「几何对不对」：缩略图按 2:3 显示（单元格 64×96），
+   下面跟一枚几何角标（2:1 · 实测比例）。角标是这一屏最有信息量的东西。 */
+.SPR_tileHeader{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.SPR_tileStage{display:flex;flex-direction:column;gap:12px}
+.SPR_tileGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
+.SPR_tileCard{border:1px solid var(--dsw-alias-border-l2);border-radius:10px;padding:10px;background:var(--dsw-alias-bg-layer-1);display:flex;flex-direction:column;gap:8px}
+.SPR_tileCardHead{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.SPR_tileCardTitle{font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary)}
+.SPR_tileThumbs{display:grid;grid-template-columns:repeat(auto-fill,minmax(78px,1fr));gap:8px}
+.SPR_tileThumb{display:flex;flex-direction:column;gap:4px;align-items:center}
+.SPR_tileThumb .SPR_thumb{aspect-ratio:2/3;max-height:150px}
+.SPR_thumb-empty{display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--dsw-alias-label-tertiary);border:1px dashed var(--dsw-alias-border-l2);border-radius:8px;min-height:100px}
+.SPR_tileBadge{font-size:10px;padding:1px 6px;border-radius:999px;border:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary)}
+.SPR_tileBadge-ok{color:var(--dsw-alias-state-success-primary,#2e7d32);border-color:currentColor}
+.SPR_tileBadge-warn{color:var(--dsw-alias-state-warning-primary,#b26a00);border-color:currentColor}
+.SPR_tileBadge-bad{color:var(--dsw-alias-state-error-primary,#c62828);border-color:currentColor}
+.SPR_tileProgress{font-size:12px;color:var(--dsw-alias-label-secondary);padding:6px 10px;border-radius:8px;background:var(--dsw-alias-bg-layer-3)}
+.SPR_tileAsset{display:flex;flex-direction:column;gap:4px;align-items:center;width:140px}
+.SPR_tileMap{max-width:100%;border-radius:10px;border:1px solid var(--dsw-alias-border-l2);background-color:var(--dsw-alias-bg-layer-3)}
+.SPR_step-active{color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-state-business-primary)}
+.SPR_step-done .SPR_stepMark{color:var(--dsw-alias-state-success-primary,#2e7d32)}
+.SPR_step-error .SPR_stepMark{color:var(--dsw-alias-state-error-primary,#c62828)}
+.SPR_stepMark{font-size:11px}
+.SPR_field-inline{display:inline-flex;align-items:center;gap:6px}
+.SPR_input-num{width:84px}
+.SPR_btn-mini{font-size:11px;padding:2px 8px}
+.SPR_btn-on{border-color:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-label-primary)}
+.SPR_card{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);border-radius:12px;padding:14px;margin-bottom:14px}.SPR_cardHead{display:flex;align-items:baseline;gap:8px;margin-bottom:4px;flex-wrap:wrap}
 .SPR_cardHead h3{margin:0;font-size:13px;font-weight:600}
 .SPR_hint{color:var(--dsw-alias-label-tertiary);font-size:12px;margin:0 0 10px}
 .SPR_toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0}
@@ -2642,7 +2759,9 @@
             ? h(ImageModule, { api })
             : module === "sequence"
               ? h(SequenceModule, { api })
-              : h(RigModule, { api })
+              : module === "tile"
+                ? h(TileModule, { api })
+                : h(RigModule, { api })
       );
     }
 
@@ -4675,8 +4794,408 @@
     const K_IMG_UPLOAD = "img:upload";
     const K_IMG_CREATE = "img:create";
 
-    function ImageModule(props) {
+    /**
+     * 模块五 · 地图地块生成。
+     *
+     * 与其它模块最大的不同：**几何由本地代码保证**。
+     * 菱形模板是本地渲染的（严格 2:1 等距），AI 只负责把菱形内部填成指定地貌；
+     * 生成完之后再本地量一次、仿射对齐到标准菱形。所以每一步都要把
+     * 「几何报告」摆出来给用户看 —— 那是判断这批地块能不能拼起来的第一依据。
+     */
+    function TileModule(props) {
       useLocaleTick();
+      const api = props.api;
+      const [projects, setProjects] = React.useState([]);
+      const [projectId, setProjectId] = React.useState(null);
+      const [project, setProject] = React.useState(null);
+      const [notice, setNotice] = React.useState(null);
+      const [stage, setStage] = React.useState("template");
+      const [styleDraft, setStyleDraft] = React.useState("");
+      const [nameDraft, setNameDraft] = React.useState("");
+      const [mapRows, setMapRows] = React.useState(14);
+      const [mapCols, setMapCols] = React.useState(14);
+      const [mapSeed, setMapSeed] = React.useState(20261004);
+      const [decorDensity, setDecorDensity] = React.useState(0.08);
+      const [creating, setCreating] = React.useState(false);
+      const tasks = usePendingTasks();
+      const intent = useStudioIntent();
+
+      React.useEffect(() => {
+        if (intent === null) return;
+        if (intent.module === "tile" && typeof intent.jobId === "string") setProjectId(intent.jobId);
+        if (intent.module === "tile" && typeof intent.stage === "string") setStage(intent.stage);
+      }, [intent]);
+
+      const busy = project !== null && project.job !== null && project.job !== undefined && project.job.running !== null;
+
+      const refreshProjects = React.useCallback(async () => {
+        try {
+          const result = await api.listTileProjects();
+          setProjects(result.projects ?? []);
+          return result.projects ?? [];
+        } catch (error) {
+          setNotice({ kind: "error", text: msg(error) });
+          return [];
+        }
+      }, [api]);
+
+      const load = React.useCallback(async (id) => {
+        if (id === null) return;
+        try {
+          const next = await api.getTileProject(id);
+          setProject(next);
+          setStyleDraft(next.style ?? "");
+          setNameDraft(next.name ?? "");
+          setMapRows(next.map?.rows ?? 14);
+          setMapCols(next.map?.cols ?? 14);
+          setMapSeed(next.map?.seed ?? 20261004);
+        } catch (error) {
+          setNotice({ kind: "error", text: msg(error) });
+        }
+      }, [api]);
+
+      React.useEffect(() => { void refreshProjects(); }, [refreshProjects]);
+      React.useEffect(() => { void load(projectId); }, [projectId, load]);
+
+      // 有任务在跑时轮询：进度要能自己往前走，不能等用户手动刷新
+      React.useEffect(() => {
+        if (!busy) return undefined;
+        const timer = setInterval(() => { void load(projectId); }, 1500);
+        return () => clearInterval(timer);
+      }, [busy, projectId, load]);
+
+      const run = React.useCallback(async (label, fn) => {
+        setNotice(null);
+        try {
+          const result = await tasks.run(`tile:${label}`, label, fn);
+          if (result !== undefined && result !== null && typeof result === "object" && "started" in result && result.started === false) {
+            setNotice({ kind: "error", text: result.reason ?? T("任务没有启动") });
+          }
+          await load(projectId);
+          await refreshProjects();
+        } catch (error) {
+          setNotice({ kind: "error", text: msg(error) });
+        }
+      }, [tasks, load, projectId, refreshProjects]);
+
+      const createProject = React.useCallback(async () => {
+        setCreating(true);
+        setNotice(null);
+        try {
+          const created = await api.createTileProject({ name: nameDraft.trim() === "" ? T("未命名地图") : nameDraft.trim() });
+          setProjectId(created.id);
+          setStage("template");
+          await refreshProjects();
+        } catch (error) {
+          setNotice({ kind: "error", text: msg(error) });
+        } finally {
+          setCreating(false);
+        }
+      }, [api, nameDraft, refreshProjects]);
+
+      // ── 顶部：项目选择 / 新建 ──────────────────────────────────────────
+      const header = h("div", { className: "SPR_tileHeader" },
+        h("span", { className: "SPR_fieldLabel" }, T("项目")),
+        h("select", {
+          className: "SPR_input",
+          value: projectId ?? "",
+          onChange: (event) => setProjectId(event.target.value === "" ? null : event.target.value)
+        },
+          h("option", { value: "" }, T("（未选择）")),
+          projects.map((entry) => h("option", { key: entry.id, value: entry.id },
+            `${entry.name} · ${entry.generatedCount}/${entry.expectedCount}`))
+        ),
+        h("input", {
+          className: "SPR_input",
+          placeholder: T("新项目名称"),
+          value: nameDraft,
+          onChange: (event) => setNameDraft(event.target.value)
+        }),
+        h(BusyBtn, {
+          busy: creating,
+          className: "SPR_btn",
+          onClick: () => void createProject()
+        }, T("新建项目")),
+        project === null ? null : h("span", { className: "SPR_muted" },
+          T("已生成 {n0} / {n1}，已验收 {n2}", {
+            n0: project.progress?.generated ?? 0,
+            n1: project.progress?.expected ?? 0,
+            n2: project.progress?.approved ?? 0
+          }))
+      );
+
+      if (project === null) {
+        return h("div", { className: "SPR_module" },
+          header,
+          h("div", { className: "SPR_empty" }, T("还没有地图地块项目——取个名字点「新建项目」开始。")),
+          notice === null ? null : h("div", { className: `SPR_notice SPR_notice-${notice.kind}` }, notice.text)
+        );
+      }
+
+      // ── 步骤条 ────────────────────────────────────────────────────────
+      const steps = h("div", { className: "SPR_steps" },
+        TILE_STAGES.map((entry) => {
+          const state = project.stages?.[entry.key] ?? { status: "idle" };
+          return h("button", {
+            key: entry.key,
+            type: "button",
+            className: `SPR_step${stage === entry.key ? " SPR_step-active" : ""} SPR_step-${state.status}`,
+            title: entry.hint,
+            onClick: () => setStage(entry.key)
+          },
+            entry.title,
+            state.status === "done" ? h("span", { className: "SPR_stepMark" }, "✓") : null,
+            state.status === "error" ? h("span", { className: "SPR_stepMark" }, "!") : null
+          );
+        })
+      );
+
+      // ── ① 模板 ────────────────────────────────────────────────────────
+      const templateStage = h("div", { className: "SPR_tileStage" },
+        h("p", { className: "SPR_hint" }, T("模板由本地代码渲染，几何严格 2:1 等距，是所有产物的几何真源。它不对说明是代码问题，不是模型问题。")),
+        h("div", { className: "SPR_row" },
+          h(BusyBtn, {
+            busy: busy,
+            className: "SPR_btn SPR_btn-primary",
+            onClick: () => void run(T("生成模板"), () => api.runTileTemplate({ projectId: project.id }))
+          }, T("生成模板（免费）")),
+          busy ? h(BusyBtn, {
+            busy: false,
+            className: "SPR_btn",
+            onClick: () => void run(T("停止"), () => api.cancelTileJob({ projectId: project.id }))
+          }, T("停止")) : null,
+          h("span", { className: "SPR_muted" }, T("本地计算，不花钱"))
+        ),
+        h("div", { className: "SPR_row" },
+          ["cell", "grid2x2"].map((name) =>
+            h("div", { key: name, className: "SPR_tileAsset" },
+              h("img", {
+                className: "SPR_thumb",
+                src: `${project.assetBase}template/${name}.png?v=${encodeURIComponent(project.updatedAt ?? "")}`,
+                alt: name,
+                onError: (event) => { event.target.style.display = "none"; }
+              }),
+              h("span", { className: "SPR_muted" }, name === "cell" ? T("单格模板") : T("2×2 地基网格"))
+            )
+          )
+        )
+      );
+
+      // ── ② 生成 ────────────────────────────────────────────────────────
+      const geomBadge = (variant) => {
+        const report = variant.report;
+        if (variant.error !== undefined) return h("span", { className: "SPR_tileBadge SPR_tileBadge-bad" }, T("失败"));
+        if (report === undefined) return null;
+        if (report.mode === "template") return h("span", { className: "SPR_tileBadge SPR_tileBadge-warn" }, T("模板几何"));
+        const ratio = report.ratioMeasured;
+        if (typeof ratio !== "number") return h("span", { className: "SPR_tileBadge" }, "—");
+        const off = Math.abs(ratio - 2);
+        const cls = off <= 0.02 ? "SPR_tileBadge-ok" : off <= 0.05 ? "SPR_tileBadge" : "SPR_tileBadge-warn";
+        return h("span", { className: `SPR_tileBadge ${cls}` }, `2:1 · ${ratio.toFixed(3)}`);
+      };
+
+      const generateStage = h("div", { className: "SPR_tileStage" },
+        h("p", { className: "SPR_hint" }, T("生成一个变体 = 一次 Seedream 调用。地形走「模板填充」，装饰走「白底单图 + 锚点摆放」，建筑走「2×2 地基网格」。")),
+        h("div", { className: "SPR_row" },
+          h("span", { className: "SPR_fieldLabel" }, T("统一画风")),
+          h("input", {
+            className: "SPR_input SPR_input-wide",
+            value: styleDraft,
+            onChange: (event) => setStyleDraft(event.target.value)
+          }),
+          h(BusyBtn, {
+            busy: busy || tasks.active,
+            className: "SPR_btn",
+            onClick: () => void run(T("保存画风"), async () => {
+              await api.saveTileProject({ projectId: project.id, style: styleDraft });
+            })
+          }, T("保存画风")),
+          h("span", { className: "SPR_muted" }, T("改画风会让已生成的地块全部作废（重跑要花钱）"))
+        ),
+        h("div", { className: "SPR_row" },
+          h(BusyBtn, {
+            busy: busy,
+            className: "SPR_btn SPR_btn-primary",
+            onClick: () => void run(T("生成全部"), () => api.runTileItems({ projectId: project.id }))
+          }, T("生成全部地块")),
+          h(BusyBtn, {
+            busy: busy,
+            className: "SPR_btn",
+            onClick: () => void run(T("补缺"), async () => {
+              const missing = project.items.filter((item) => item.variants.length === 0).map((item) => item.key);
+              if (missing.length === 0) return { started: false, reason: T("所有地块都已经生成过了") };
+              return api.runTileItems({ projectId: project.id, keys: missing });
+            })
+          }, T("只补没生成的")),
+          busy ? h(BusyBtn, {
+            busy: false,
+            className: "SPR_btn",
+            onClick: () => void run(T("停止"), () => api.cancelTileJob({ projectId: project.id }))
+          }, T("停止")) : null
+        ),
+        busy && project.job !== null && project.job !== undefined
+          ? h("div", { className: "SPR_tileProgress" },
+              T("正在生成：{n0}（已完成 {n1}/{n2}）", {
+                n0: project.job.running ?? "…",
+                n1: project.job.done?.length ?? 0,
+                n2: project.job.targets?.length ?? 0
+              }))
+          : null,
+        h("div", { className: "SPR_tileGrid" },
+          project.items.map((item) => h("div", {
+            key: item.key,
+            className: "SPR_tileCard"
+          },
+            h("div", { className: "SPR_tileCardHead" },
+              h("span", { className: "SPR_tileCardTitle" }, item.label),
+              h("span", { className: "SPR_muted" }, `${item.kind} · ${item.variantCount} 张`)
+            ),
+            h("div", { className: "SPR_tileThumbs" },
+              Array.from({ length: Math.max(1, item.variantCount) }).map((_, index) => {
+                const variant = item.variants[index];
+                const ready = variant !== undefined && variant.cell !== undefined;
+                return h("div", { key: index, className: "SPR_tileThumb" },
+                  ready
+                    ? h("img", {
+                        className: "SPR_thumb",
+                        src: `${project.assetBase}${variant.cell}?v=${encodeURIComponent(project.updatedAt ?? "")}`,
+                        alt: `${item.key}-${index}`
+                      })
+                    : h("div", { className: "SPR_thumb SPR_thumb-empty" },
+                        busy && project.job?.targets?.includes(`${item.key}#v${index + 1}`) ? T("排队中") : T("待生成")),
+                  ready ? geomBadge(variant) : null,
+                  ready ? h(BusyBtn, {
+                    busy: busy,
+                    className: "SPR_btn SPR_btn-mini",
+                    onClick: () => void run(T("重跑"), () => api.runTileItem({ projectId: project.id, key: item.key, variant: index }))
+                  }, T("重跑")) : null
+                );
+              })
+            )
+          ))
+        )
+      );
+
+      // ── ③ 验收 ────────────────────────────────────────────────────────
+      const reviewStage = h("div", { className: "SPR_tileStage" },
+        h("p", { className: "SPR_hint" }, T("逐项看成品与几何报告。几何正常的地块拼起来不会有缝；标「模板几何」说明这张没量准，建议重跑。")),
+        h("div", { className: "SPR_tileGrid" },
+          project.items.map((item) => h("div", { key: item.key, className: "SPR_tileCard" },
+            h("div", { className: "SPR_tileCardHead" },
+              h("span", { className: "SPR_tileCardTitle" }, item.label),
+              item.variants.length === 0 ? h("span", { className: "SPR_tileBadge SPR_tileBadge-warn" }, T("未生成")) : null
+            ),
+            h("div", { className: "SPR_tileThumbs" },
+              item.variants.map((variant) => h("div", { key: variant.index, className: "SPR_tileThumb" },
+                variant.cell === undefined
+                  ? h("div", { className: "SPR_thumb SPR_thumb-empty" }, variant.error ?? T("失败"))
+                  : h(ZoomableImage, {
+                      className: "SPR_thumb",
+                      src: `${project.assetBase}${variant.cell}?v=${encodeURIComponent(project.updatedAt ?? "")}`,
+                      alt: `${item.key}-${variant.index}`,
+                      caption: `#${variant.index + 1}`
+                    }),
+                geomBadge(variant),
+                variant.cell === undefined ? null : h("div", { className: "SPR_row" },
+                  h("button", {
+                    type: "button",
+                    className: `SPR_btn SPR_btn-mini${variant.approved === true ? " SPR_btn-on" : ""}`,
+                    onClick: () => void run(T("验收"), async () => {
+                      await api.setTileApproved({
+                        projectId: project.id, key: item.key, variant: variant.index,
+                        approved: variant.approved !== true
+                      });
+                    })
+                  }, variant.approved === true ? T("已通过") : T("通过")),
+                  h(BusyBtn, {
+                    busy: busy,
+                    className: "SPR_btn SPR_btn-mini",
+                    onClick: () => void run(T("重跑"), () => api.runTileItem({ projectId: project.id, key: item.key, variant: variant.index }))
+                  }, T("重跑"))
+                )
+              ))
+            )
+          ))
+        )
+      );
+
+      // ── ④ 拼图 ────────────────────────────────────────────────────────
+      const numberField = (label, value, setValue, min, max, step) =>
+        h("label", { className: "SPR_field SPR_field-inline" },
+          h("span", { className: "SPR_fieldLabel" }, label),
+          h(NumField, { className: "SPR_input SPR_input-num", value, min, max, step, onCommit: (next) => setValue(next) })
+        );
+
+      const mapStage = h("div", { className: "SPR_tileStage" },
+        h("p", { className: "SPR_hint" }, T("铺图全在本地：按等距网格铺、按类别随机抽变体、按 (r+c) 顺序遮挡。同种子 + 同布局 = 逐像素一致，可以反复试到满意为止。")),
+        h("div", { className: "SPR_row" },
+          numberField(T("行"), mapRows, setMapRows, 1, 64, 1),
+          numberField(T("列"), mapCols, setMapCols, 1, 64, 1),
+          numberField(T("种子"), mapSeed, setMapSeed, 0, 999999999, 1),
+          numberField(T("装饰密度"), decorDensity, setDecorDensity, 0, 1, 0.01)
+        ),
+        h("div", { className: "SPR_row" },
+          h(BusyBtn, {
+            busy: busy,
+            className: "SPR_btn SPR_btn-primary",
+            onClick: () => void run(T("拼图"), () => api.runTileMap({
+              projectId: project.id, rows: mapRows, cols: mapCols, seed: mapSeed, fill: "grass", decorDensity
+            }))
+          }, T("铺成地图（免费）")),
+          h(BusyBtn, {
+            busy: busy,
+            className: "SPR_btn",
+            onClick: () => void run(T("换种子"), () => api.runTileMap({
+              projectId: project.id, rows: mapRows, cols: mapCols,
+              seed: Math.floor(Math.random() * 1000000), fill: "grass", decorDensity
+            }))
+          }, T("换个种子重铺"))
+        ),
+        project.map?.ready === true
+          ? h("div", { className: "SPR_row" },
+              h(ZoomableImage, {
+                className: "SPR_tileMap",
+                src: `${project.assetBase}${project.map.file}?v=${encodeURIComponent(project.updatedAt ?? "")}`,
+                alt: T("地图"),
+                caption: `${project.map.cols}×${project.map.rows} · seed ${project.map.seed}`
+              })
+            )
+          : h("div", { className: "SPR_empty" }, T("还没有拼图——点「铺成地图」立刻看到结果（不花钱）。"))
+      );
+
+      // ── ⑤ 导出 ────────────────────────────────────────────────────────
+      const exportStage = h("div", { className: "SPR_tileStage" },
+        h("p", { className: "SPR_hint" }, T("导出地块包（每张 PNG）+ 地图 PNG + 布局 JSON。全部本地计算。")),
+        h("div", { className: "SPR_row" },
+          h(BusyBtn, {
+            busy: busy,
+            className: "SPR_btn SPR_btn-primary",
+            onClick: () => void run(T("导出"), () => api.runTileExport({ projectId: project.id }))
+          }, T("导出到 export/")),
+          h("button", {
+            type: "button",
+            className: "SPR_btn",
+            onClick: () => void api.revealTileProject({ projectId: project.id }).catch((error) => setNotice({ kind: "error", text: msg(error) }))
+          }, T("打开产物目录"))
+        )
+      );
+
+      const stageBody = stage === "template" ? templateStage
+        : stage === "generate" ? generateStage
+        : stage === "review" ? reviewStage
+        : stage === "map" ? mapStage
+        : exportStage;
+
+      return h("div", { className: "SPR_module" },
+        header,
+        steps,
+        notice === null ? null : h("div", { className: `SPR_notice SPR_notice-${notice.kind}` }, notice.text),
+        stageBody,
+        busy ? h(LoadingOverlay, { text: T("正在生成地块…") }) : null
+      );
+    }
+
+    function ImageModule(props) {      useLocaleTick();
       const api = props.api;
       const [jobs, setJobs] = React.useState([]);
       const [jobId, setJobId] = React.useState(null);
@@ -9663,7 +10182,24 @@
         runRigSegment: (payload) => call("runRigSegment", payload),
         runRigLayout: (payload) => call("runRigLayout", payload),
         runRigBones: (payload) => call("runRigBones", payload),
-        runRigAtlas: (payload) => call("runRigAtlas", payload)
+        runRigAtlas: (payload) => call("runRigAtlas", payload),
+
+        // 地图地块生成
+        listTileProjects: () => call("listTileProjects"),
+        createTileProject: (payload) => call("createTileProject", { lang: activeLang(), ...payload }),
+        // 清单 / 画风描述的默认值存在宿主侧，所以「读」和「重置为默认」都要把语言带过去
+        getTileProject: (projectId) => call("getTileProject", { projectId, lang: activeLang() }),
+        deleteTileProject: (payload) => call("deleteTileProject", payload),
+        saveTileProject: (payload) => call("saveTileProject", { lang: activeLang(), ...payload }),
+        runTileTemplate: (payload) => call("runTileTemplate", payload),
+        runTileItems: (payload) => call("runTileItems", payload),
+        runTileItem: (payload) => call("runTileItem", payload),
+        setTileApproved: (payload) => call("setTileApproved", payload),
+        runTileMap: (payload) => call("runTileMap", payload),
+        saveTileMapCells: (payload) => call("saveTileMapCells", payload),
+        runTileExport: (payload) => call("runTileExport", payload),
+        cancelTileJob: (payload) => call("cancelTileJob", payload),
+        revealTileProject: (payload) => call("revealTileProject", payload)
       };
 
       // ── 深链接：会话里的链接点一下切到本插件页面 ─────────────────────
@@ -9727,7 +10263,7 @@
     bundleModule.exports.GAME_STUDIO_PANEL_ID = GAME_STUDIO_PANEL_ID;
     // 仅测试用把手：三个模块组件在工厂闭包里，脚本要能拿出来单独渲染
     // （见 scripts/verify-feedback.mjs）。运行时没有任何调用点。
-    bundleModule.exports.__test = { StudioPanel, ImageModule, SequenceModule, usePendingTasks, LoadingOverlay, MediaBox, BusyBtn, BusyBadge, NumField, ZoomableImage, CSS, subscribeIntent, parseIntents, openStudioIntent, OPEN_QUERY_KEY };
+    bundleModule.exports.__test = { StudioPanel, TileModule, ImageModule, SequenceModule, usePendingTasks, LoadingOverlay, MediaBox, BusyBtn, BusyBadge, NumField, ZoomableImage, CSS, subscribeIntent, parseIntents, openStudioIntent, OPEN_QUERY_KEY };
     return bundleModule.exports;
   }
 });

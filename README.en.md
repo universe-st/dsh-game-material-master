@@ -19,7 +19,7 @@ no system image libraries required, and your assets are never uploaded to a thir
 > in place for one full turn, then the eight directions are cut out automatically; switch the method in
 > stage ① if you'd rather generate each direction separately).
 
-All three modules share the same "generate → review → re-run" workbench. Every stage can be **redone on its
+All four modules share the same "generate → review → re-run" workbench. Every stage can be **redone on its
 own**, and every asset can be **approved item by item**. The "review mode" lets an agent approve each step
 and move on automatically, or stop at every step and wait for your go-ahead.
 
@@ -28,7 +28,15 @@ and move on automatically, or stop at every step and wait for your go-ahead.
 | **① Eight-direction sprite sheet** | One character sheet → 8 directions × 8 frames (default "turn capture": eight directions cut from one rotation video) | A walk spritesheet you can drive with WASD |
 | **② Image generation** | Prompt (optionally with reference images) → images → green-screen keying | Clean transparent PNG character art / props |
 | **③ Sequence frames** | First/last frame or a reference video → generate video → extract frames → key | A horizontally laid out, loopable sequence |
+| **⑤ Map tile generation** | Isometric tiles → assemble a whole map | A tile pack (PNGs) + map PNG + layout JSON |
 | ~~④ Rigged animation~~ | Part extraction → assembly → skeletal animation → Spine / DragonBones atlas | **Experimental, not covered in this document** |
+
+> 💡 **Module ⑤ "Map tile generation" is built on one idea: geometry by code, content by AI.**
+> The diamond template is rendered locally (strict 2:1 isometric) and the AI only fills its interior with the
+> requested terrain. Each result is then measured and affine-aligned back to the standard diamond, and the map
+> is assembled locally on the isometric grid. Geometry is therefore always exact — tiles never show seams, and
+> re-assembling with the same seed is pixel-identical. Measured: letting the model draw the diamond freely
+> gives ratios of 1.03–1.55 (nowhere near 2:1), while template filling hits 100%.
 
 > ⚠️ **Module ④ "Rigged animation" is still experimental and not yet finished**: the quality of part extraction
 > depends on the image model, automatic assembly and bone inference frequently need manual correction on real
@@ -290,7 +298,11 @@ Everything in the UI that you can click, change or approve is bilingual.
 ├── image-jobs/<id>/    image generation
 ├── sequence-jobs/<id>/ sequence frames
 └── rig-jobs/<id>/      rigged animation (experimental: sheet / parts / layout / rig / atlas)
+└── tile-jobs/<id>/     map tiles (template / raw / cell / decor / map / export)
 ```
+
+> Map tiles keep the **raw generation output** in `raw/`: after changing regularisation parameters such as
+> the cell size you can re-run regularisation for free, without paying to generate again.
 
 ## Development
 

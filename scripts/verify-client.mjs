@@ -439,7 +439,7 @@ function checkRigContracts(text, label) {
     text.includes("RigExperimentalBar") && text.includes("https://github.com/universe-st/dsh-game-material-master")
   );
   check(`${label}：实验性弹窗用 position:fixed`, /\.SPR_gateMask\{[^}]*position:fixed/.test(text));
-  check(`${label}：深链接允许 rig 模块`, text.includes('new Set(["sprite", "image", "sequence", "rig"])'));
+  check(`${label}：深链接允许全部五个模块`, text.includes('new Set(["sprite", "image", "sequence", "rig", "tile"])'));
   for (const method of [
     "listRigJobs",
     "createRigJob",

@@ -66,18 +66,58 @@ import { assetPath, createProject, deleteProject, listProjects, log, patchProjec
 import * as imagegen from "./imagegen.js";
 import * as seqgen from "./seqgen.js";
 import * as riggen from "./riggen.js";
+import * as tilegen from "./tilegen.js";
 import { MANIFEST, METHODS, SERVICE_NAME } from "./wire.js";
 import { rememberClientOrigin } from "./links.js";
 import { registerStudioTools } from "./tools.js";
 /**
  * 游戏素材大师 —— 宿主半区。
  *
- * 一个 Typert 远程服务（"gameStudio"）承载三个功能模块的控制面：
- *   ① 八方向图生成  ② 图片生成  ③ 序列帧生成
- * 三者共用同一套配置（API Key / 模型 / 抠像默认值），但各自独立存项目。
+ * 一个 Typert 远程服务（"gameStudio"）承载五个功能模块的控制面：
+ *   ① 八方向图生成  ② 图片生成  ③ 序列帧生成  ④ 骨骼动画生成  ⑤ 地图地块生成
+ * 五者共用同一套配置（API Key / 模型 / 抠像默认值），但各自独立存项目。
  *
- * 另外用 `ctx.webServer` 注册一条 prefix 路由，把三个模块的产物直接发给浏览器。
+ * 另外用 `ctx.webServer` 注册一条 prefix 路由，把各模块的产物直接发给浏览器。
  */
+/**
+ * 合并界面提交的地块清单：保留已生成的变体，只更新可编辑字段。
+ *
+ * 为什么要合并而不是直接覆盖：清单里带着 `variants`（那是花钱生成的产物），
+ * 界面只提交 `key/label/content/variantCount/...`。直接覆盖会让用户
+ * **改一个标签就丢掉整批已生成的图**，而且不会报错。
+ */
+function mergeTileItems(existing: any[], incoming: any[]): any[] {
+  const byKey = new Map(existing.map((item) => [item.key, item]));
+  const out: any[] = [];
+  for (const raw of incoming) {
+    const key = typeof raw?.key === "string" ? raw.key : "";
+    if (key === "") continue;
+    const previous = byKey.get(key);
+    const variantCount = clampInt(raw.variantCount, previous?.variantCount ?? 1, 1, 6);
+    const next: any = {
+      key,
+      label: typeof raw.label === "string" && raw.label !== "" ? raw.label : (previous?.label ?? key),
+      kind: raw.kind === "decor" || raw.kind === "building" ? raw.kind : "terrain",
+      family: typeof raw.family === "string" && raw.family !== "" ? raw.family : (previous?.family ?? key),
+      footprint: Array.isArray(raw.footprint) && raw.footprint.length === 2
+        ? [clampInt(raw.footprint[0], 1, 1, 4), clampInt(raw.footprint[1], 1, 1, 4)] as [number, number]
+        : (previous?.footprint ?? [1, 1]),
+      content: typeof raw.content === "string" ? raw.content : (previous?.content ?? ""),
+      mode: raw.mode === "plain" || raw.mode === "grid2x2" ? raw.mode : (previous?.mode ?? "template"),
+      variantCount,
+      variants: previous === undefined ? [] : previous.variants.slice(0, variantCount),
+      approved: previous?.approved
+    };
+    // 内容变了 → 已生成的变体失效（它们画的是旧内容）
+    if (previous !== undefined && (previous.content !== next.content || previous.mode !== next.mode)) {
+      next.variants = [];
+      next.approved = undefined;
+    }
+    out.push(next);
+  }
+  return out.length > 0 ? out : existing;
+}
+
 export const name = "dsh-game-material-master";
 /**
 * `webServer` 必须声明成硬依赖：它要等真正 listen 成功之后才可用，
@@ -612,7 +652,183 @@ export class GameStudioGateway extends TypertRemoteService {
       await riggen.writeRigJob(job);
       return { ok: true, id, module, reviewMode };
     }
+    // 地图地块（模块五）。**别重犯 rig 早期那个漏**：
+    // 少了这个分支，「固定流程第 0 步必须问清审核模式」对 tile 就落不了地。
+    if (module === "tile") {
+      const project = await tilegen.readTileProject(id);
+      if (project === undefined) throw new Error(`项目不存在：${id}`);
+      project.reviewMode = reviewMode;
+      await tilegen.writeTileProject(project);
+      return { ok: true, id, module, reviewMode };
+    }
     throw new Error(`未知模块：${module}`);
+  }
+
+  // ── 地图地块生成（模块五）──────────────────────────────────────────────
+  async listTileProjects() {
+    return { projects: await tilegen.listTileProjects() };
+  }
+  async createTileProject(payload: any) {
+    const input = asRecord(payload);
+    const project = await tilegen.createTileProject(asString(input.name, "未命名地图"), {
+      style: typeof input.style === "string" ? input.style : undefined,
+      lang: typeof input.lang === "string" ? input.lang : undefined,
+      settings: input.settings as any
+    });
+    return tilegen.tileView(project);
+  }
+  /**
+   * 读项目。
+   * `lang` 决定「从没改过的地块清单 / 画风描述」用哪一国话的默认值 ——
+   * 它必须出现在 wire 的 schema 里，否则会被静默丢掉（见 wire.ts 的注释）。
+   */
+  async getTileProject(payload: any) {
+    const input = asRecord(payload);
+    const project = await tilegen.readTileProject(asString(input.projectId), asString(input.lang));
+    if (project === undefined) throw new Error(`项目不存在：${asString(input.projectId)}`);
+    return tilegen.tileView(project);
+  }
+  async deleteTileProject(payload: any) {
+    const id = asString(asRecord(payload).projectId);
+    await tilegen.deleteTileProject(id);
+    return { ok: true };
+  }
+  async saveTileProject(payload: any) {
+    const input = asRecord(payload);
+    const id = asString(input.projectId);
+    const lang = typeof input.lang === "string" ? input.lang : undefined;
+    const project = await tilegen.readTileProject(id);
+    if (project === undefined) throw new Error(`项目不存在：${id}`);
+    if (typeof input.name === "string" && input.name.trim() !== "") project.name = input.name.trim();
+    if (typeof input.style === "string" && input.style !== project.style) {
+      project.style = input.style;
+      // 改画风 = 改整套提示词 → 已生成的地块全部作废（重新生成要花钱）
+      tilegen.invalidateFrom(project, "generate");
+    }
+    if (input.resetItemsToDefault === true) {
+      project.items = tilegen.defaultTileItems(lang);
+      tilegen.invalidateFrom(project, "generate");
+    } else if (Array.isArray(input.items)) {
+      project.items = mergeTileItems(project.items, input.items as any[]);
+      tilegen.invalidateFrom(project, "generate");
+    }
+    if (input.settings !== undefined) {
+      const settings = { ...project.settings, ...(input.settings as any) };
+      if (settings.cellWidth !== project.settings.cellWidth || settings.cellHeight !== project.settings.cellHeight) {
+        project.settings = settings;
+        // 几何规格变了：模板与全部产物都作废
+        tilegen.invalidateFrom(project, "template");
+      } else {
+        project.settings = settings;
+      }
+    }
+    await tilegen.writeTileProject(project);
+    return tilegen.tileView(project);
+  }
+  async runTileTemplate(payload: any) {
+    return tilegen.runTemplateStage(asString(asRecord(payload).projectId));
+  }
+  async runTileItems(payload: any) {
+    const input = asRecord(payload);
+    const keys = Array.isArray(input.keys) ? input.keys.filter((k: unknown) => typeof k === "string") : undefined;
+    return tilegen.runGenerateStage(asString(input.projectId), { keys });
+  }
+  async runTileItem(payload: any) {
+    const input = asRecord(payload);
+    return tilegen.runGenerateStage(asString(input.projectId), {
+      key: asString(input.key),
+      variant: typeof input.variant === "number" ? input.variant : undefined
+    });
+  }
+  async setTileApproved(payload: any) {
+    const input = asRecord(payload);
+    const id = asString(input.projectId);
+    const approved = input.approved === true;
+    const key = typeof input.key === "string" ? input.key : undefined;
+    const variant = typeof input.variant === "number" ? input.variant : undefined;
+    await tilegen.patchTileProject(id, (project) => {
+      let touched = 0;
+      for (const item of project.items) {
+        if (key !== undefined && item.key !== key) continue;
+        if (variant !== undefined) {
+          const entry = item.variants[variant];
+          if (entry === undefined) continue;
+          entry.approved = approved;
+          touched++;
+          continue;
+        }
+        item.approved = approved;
+        for (const entry of item.variants) entry.approved = approved;
+        touched++;
+      }
+      if (touched === 0) throw new Error(key === undefined ? "没有可验收的地块" : `找不到地块：${key}`);
+      // 验收只影响打勾，不作废任何东西（这一条是有意的）
+      const allApproved = project.items.every((item) =>
+        item.variants.length > 0 && item.variants.every((v) => v.approved === true));
+      project.stages.review = { status: allApproved ? "done" : "idle", at: new Date().toISOString() };
+      log(project as any, "info", `${approved ? "通过" : "取消通过"}：${key ?? "全部"}${variant !== undefined ? ` 第 ${variant + 1} 张` : ""}`);
+    });
+    return { ok: true };
+  }
+  async runTileMap(payload: any) {
+    const input = asRecord(payload);
+    return tilegen.runMapStage(asString(input.projectId), {
+      rows: typeof input.rows === "number" ? input.rows : undefined,
+      cols: typeof input.cols === "number" ? input.cols : undefined,
+      seed: typeof input.seed === "number" ? input.seed : undefined,
+      fill: typeof input.fill === "string" ? input.fill : undefined,
+      decorDensity: typeof input.decorDensity === "number" ? input.decorDensity : undefined
+    });
+  }
+  async saveTileMapCells(payload: any) {
+    const input = asRecord(payload);
+    const id = asString(input.projectId);
+    await tilegen.patchTileProject(id, (project) => {
+      if (Array.isArray(input.cells)) {
+        const cells = (input.cells as unknown[][])
+          .filter((row) => Array.isArray(row))
+          .map((row) => row.map((cell) => String(cell)));
+        if (cells.length > 0) {
+          project.map.cells = cells;
+          project.map.rows = cells.length;
+          project.map.cols = Math.max(...cells.map((row) => row.length));
+        }
+      }
+      if (typeof input.seed === "number") project.map.seed = Math.trunc(input.seed);
+      if (input.decor !== undefined && typeof input.decor === "object") {
+        project.map.decor = Object.fromEntries(
+          Object.entries(input.decor as Record<string, unknown>).map(([k, v]) => [k, String(v)]));
+      }
+      if (Array.isArray(input.buildings)) {
+        project.map.buildings = (input.buildings as unknown[][])
+          .filter((entry) => Array.isArray(entry) && entry.length >= 3)
+          .map((entry) => [Number(entry[0]), Number(entry[1]), String(entry[2])] as [number, number, string]);
+      }
+      // 手动改布局不作废地块（那是花钱买的），只作废下游
+      tilegen.invalidateFrom(project, "map");
+    });
+    return { ok: true };
+  }
+  async runTileExport(payload: any) {
+    return tilegen.runExportStage(asString(asRecord(payload).projectId));
+  }
+  async cancelTileJob(payload: any) {
+    const id = asString(asRecord(payload).projectId);
+    tilegen.cancelTileJob(id);
+    return { ok: true };
+  }
+  async revealTileProject(payload: any) {
+    const id = asString(asRecord(payload).projectId);
+    const project = await tilegen.readTileProject(id);
+    if (project === undefined) throw new Error(`项目不存在：${id}`);
+    const dir = tilegen.tileProjectDir(id);
+    const command = process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer" : "xdg-open";
+    try {
+      spawn(command, [dir], { detached: true, stdio: "ignore" }).unref();
+    } catch (error) {
+      throw new Error(`无法打开目录：${error instanceof Error ? error.message : String(error)}`);
+    }
+    return { ok: true, dir };
   }
   // ── 流水线控制 ──────────────────────────────────────────────────────────
   async runImage(payload) {
@@ -1610,8 +1826,10 @@ const SERVABLE_SEQUENCE_DIRS = new Set(["refs", "video-refs", "videos", "frames"
 // `export/` 是后加的第二条导出路径（DragonBones 5.5 的 `_ske.json`）。
 // 白名单只比对**第一段**路径，所以 `export/dragonbones/xxx.json` 加一条 `export` 就够。
 const SERVABLE_RIG_DIRS = new Set(["source", "sheet", "parts", "layout", "rig", "atlas", "export"]);
+/** 地图地块：模板、原始生成、规整产物、装饰、地图、导出包。 */
+const SERVABLE_TILE_DIRS = new Set(["template", "raw", "cell", "decor", "map", "export"]);
 
-type AssetScope = "assets" | "image-assets" | "sequence-assets" | "rig-assets";
+type AssetScope = "assets" | "image-assets" | "sequence-assets" | "rig-assets" | "tile-assets";
 
 interface AssetTarget {
   file: string;
@@ -1630,6 +1848,10 @@ function resolveAssetTarget(scope: AssetScope, id: string, relative: string): As
   if (scope === "rig-assets") {
     if (!riggen.isValidRigJobId(id)) return undefined;
     return { file: riggen.rigAssetPath(id, relative), dirs: SERVABLE_RIG_DIRS };
+  }
+  if (scope === "tile-assets") {
+    if (!tilegen.isValidTileProjectId(id)) return undefined;
+    return { file: tilegen.tileAssetPath(id, relative), dirs: SERVABLE_TILE_DIRS };
   }
   if (!seqgen.isValidSequenceJobId(id)) return undefined;
   return { file: seqgen.sequenceAssetPath(id, relative), dirs: SERVABLE_SEQUENCE_DIRS };
