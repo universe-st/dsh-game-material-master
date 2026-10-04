@@ -532,7 +532,9 @@ async function main() {
   {
     const semantics = await import("../lib/rigsemantics.js");
     const hostRoles = [...semantics.RIG_ROLES];
-    const clientRoles = [...clientSource.matchAll(/\{\s*key:\s*"(\w+)",\s*label:\s*"([^"]+)"\s*\}/g)].map((m) => [m[1], m[2]]);
+    // 文案已 i18n 化：client.ts 里是 `label: T("头部")`。这里比对的是**中文原文**
+    // （词条表的 key），也就是宿主的 ROLE_LABELS——比英文译文才是真契约。
+    const clientRoles = [...clientSource.matchAll(/\{\s*key:\s*"(\w+)",\s*label:\s*(?:T\()?"([^"]+)"\)?\s*\}/g)].map((m) => [m[1], m[2]]);
     const missing = hostRoles.filter((role) => !clientRoles.some(([key]) => key === role));
     const extra = clientRoles.filter(([key]) => !hostRoles.includes(key));
     check("客户端角色列表覆盖宿主的全部角色", missing.length === 0, missing.join("、"));

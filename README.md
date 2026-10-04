@@ -206,6 +206,26 @@ dsh plugin --profile web add /path/to/dsh-game-material-master
 Key 只写入本机 `<DSH_HOME>/game-material-master/config.json`，界面回显始终脱敏。
 **模型是插件级设置，三个模块共用**，切换模型后任务自动对齐新档位。
 
+## 界面语言
+
+**插件界面跟随 DSH 自身的语言设置**（设置 → 通用 → 语言），中文 / 英文都是一等公民，
+切换**即时生效**、不用刷新页面：工作台标题、四个模块页签、每一张卡片的按钮、提示条、
+弹窗与设置页全部跟着走。
+
+实现上不猜也不复制 DSH 的语言状态，而是接 DSH 的 `locale` 服务
+（`@deepseek-ai/dsh-client-locale`）：插件把中英词条表注册进去，之后所有界面文案都从它取。
+服务不在时不报错，界面退回中文原文。
+
+范围说明：**多语言覆盖的是浏览器半区的界面文案**——工作台标题、四个模块页签、
+每一张卡片的按钮与提示条、弹窗、设置页、验收控件。以下两类仍是中文，因为 DSH 目前
+只把 locale 服务提供给浏览器半区：
+
+- **运行日志里由宿主写入的行**（「开始生成「南 · 正对镜头」」「…生成完成，用时 12.3 秒」等）
+  以及拆件质检给出的动态结论；
+- 对话工具返回给模型看的文本（`game_material_status` / `review` 的渲染、`intake` 的追问）。
+
+界面上能点、能改、能验收的部分都是双语。
+
 ## 常见坑
 
 - 提示词别用「剪影」——生图模型会照字面把角色画成纯黑轮廓。
@@ -231,8 +251,22 @@ npm run typecheck    # 只做类型检查
 ```
 
 本地自检（不联网、不花钱）：`scripts/verify-host.mjs`（宿主链路）、`verify-tools.mjs`
-（对话调用面）、`verify-pipeline.mjs`（抽帧 / 抠像 / 合成）、`verify-rig.mjs`
-（骨骼算法层）等。真实 API 端到端脚本会花钱，按需运行。
+（对话调用面）、`verify-pipeline.mjs`（抽帧 / 抠像 / 合成）、`verify-client.mjs` +
+`verify-feedback.mjs`（浏览器半区契约与真渲染）、`verify-i18n.mjs`（中英词条表完整性）、
+`verify-rig.mjs`（骨骼算法层）等。真实 API 端到端脚本会花钱，按需运行。
+
+### 加一条界面文案
+
+中文原文**就是**词条表的 key，所以正常写代码即可：
+
+```ts
+h("span", null, T("正在装配定位…"))                       // 纯文案
+T("第 {n0} 帧", { n0: index + 1 })                        // 带插值，英文可自由换语序
+```
+
+然后在 `src/client.ts` 的词条表（`i18n-ignore-start` / `i18n-ignore-end` 之间）补一条英文；
+漏了也不会崩，`verify-i18n.mjs` 会拦下来。批量包老代码用
+`node scripts/i18n-wrap.mjs src/client.ts --write`（词法级、幂等，可反复跑）。
 
 改代码后如何生效：
 

@@ -745,6 +745,128 @@ row 4: left-lower-leg| right-lower-leg| left-foot        | right-foot
 
 ---
 
+## 界面语言：接 DSH 的 locale，而不是自己猜
+
+界面文案跟随 **DSH 自己的语言设置**（设置 → 通用 → 语言），切换即时生效、不刷新页面。
+这里没有第二条真相：插件不读 `navigator.language`，也不自己存一份偏好。
+
+### 接线：可选依赖，缺了也要能用
+
+DSH 的浏览器半区把 locale 服务挂在 `ctx.provide("locale", …)` 上
+（`@deepseek-ai/dsh-client-locale`）。插件在 `apply()` 里 `attachI18n(ctx)`：
+
+```ts
+const locale = ctx.get("locale");
+if (locale === undefined) return false;          // 服务不在 → 界面退回中文原文
+ctx.effect(() => locale.register(I18N_NS, { zh: ZH, en: EN }), "…");
+boundTranslate = locale.bind(I18N_NS);
+rebuildStaticText();                             // ← 见下一节，漏了就永远停在旧语言
+ctx.effect(() => locale.subscribe(() => { boundTranslate = locale.bind(I18N_NS); rebuildStaticText(); … }));
+```
+
+两个刻意的选择：
+
+- **没有把 `"locale"` 写进 `inject` 列表**。写进去插件就会卡在这个服务上——宿主里少挂一个
+  locale 插件，整个工作台就不出现了。现在的写法是「先试一次，没成就 `ctx.inject(["locale"], …)`
+  等它可用」，两条路都失败也只是界面保持中文，功能一条不少。
+- **注册失败一律吞掉**（`try/catch`）。locale 服务对同名 namespace 的重复注册会抛错，
+  而插件卸载重挂是正常路径；为了一个文案表把整块界面搞崩不值得。
+
+### key 就是中文原文
+
+词条表长这样，key 是源码里那句中文本身：
+
+```ts
+const EN = { "正在装配定位…": "Running auto placement…", "第 {n0} 帧": "Frame {n0}" };
+const ZH = Object.fromEntries(Object.keys(EN).map((key) => [key, key]));
+```
+
+两千多条 `T()` 调用点，如果改成人造 key（`rig.layout.busy`），就得同时维护一张
+「代号 ↔ 中文」的对照表，且**每一处漏改都只有运行时才看得出来**。用中文原文当 key：
+
+- 调用点写的就是文案，`T("正在装配定位…")` 一眼能读懂，code review 不需要查表；
+- 漏翻**不会显示成 key**——locale 回退链是「当前语言 → en」，两边都没有时
+  `translate()` 返回 key 本身，也就是中文。最坏情况只是「这一条没翻」；
+- `verify-i18n.mjs` 靠「源码里的 `T("…")` 集合 ⊆ 词条表 key 集合」一次性把漏翻找齐。
+
+英文可以换语序：插值走 `{n0}` 这类占位符（与 locale 服务内部同一套规则），
+`T("第 {n0} 帧", { n0: i })` 的英文写成 `"Frame {n0}"` 完全没问题。
+
+`ZH` 必须是**完整的恒等映射**。locale 的回退链是「当前语言 → en」，只注册 `en`
+的话中文界面会一路落到英文——这个 bug 在中文环境下反而不容易发现（开发时看到的全是中文）。
+
+### 坑：模块级常量把 `T()` 求值求早了
+
+这是整套里唯一一个「不报错、只是不对」的地方，实测踩到：
+
+```ts
+const DIRECTIONS = [{ key: "front", compass: "S", label: T("南 · 正对镜头") }, …];  // ← 模块加载时就翻译完了
+```
+
+浏览器半区是经典脚本，模块顶层的 `T()` 在**插件 load 时**就跑完了，那时 locale 服务
+还没挂上（`boundTranslate === null`），拿到的全是中文原文，而且此后永远是那一份。
+表现是：切到英文后，标题、按钮、提示条全变英文了，**方向名 / 模块页签还是中文**。
+
+修法是把这些表改成「工厂 + `let`」，由 `rebuildStaticText()` 在挂上服务和每次语言切换时重算：
+
+```ts
+function make_DIRECTIONS() { return [ … ]; }
+let DIRECTIONS = make_DIRECTIONS();
+const staticTextRebuilders = [() => { DIRECTIONS = make_DIRECTIONS(); }, …, () => { LABEL_OF = make_LABEL_OF(); }];
+```
+
+注意顺序：`LABEL_OF` 派生自 `DIRECTIONS`，重算表里必须排在它后面。
+**新增模块级 `T()` 文案表时要同步加一条 rebuilder**，否则又会退化成「切了语言它不动」。
+只写在函数体里（组件、渲染函数）的 `T()` 不受影响——那些每次渲染都重新求值。
+
+### 批量包装老代码：词法级 codemod
+
+800+ 条文案靠手改必漏，所以有一个纯词法的改写脚本：
+
+```bash
+node scripts/i18n-wrap.mjs src/client.ts --keys /tmp/keys.json   # 只出清单，不改文件
+node scripts/i18n-wrap.mjs src/client.ts --write                 # 真正改写（幂等，可反复跑）
+node scripts/i18n-wrap.mjs src/client.ts --dump /tmp/keys.json   # 从已包好的文件里回收 key
+```
+
+它不建语法树（TypeScript 7 是原生编译器，没有可用的 JS 编译器 API），只做
+「字符串 / 模板 / 注释 / 正则」四态扫描——这里够用。三条规则值得知道：
+
+1. 模板字面量会被拆成占位符：`` `第 ${i + 1} 帧` `` → `T("第 {n0} 帧", { n0: i + 1 })`，
+   表达式原样搬进去，所以嵌套的字符串字面量会在下一轮被单独包上（**要跑 2~3 轮才收敛**）；
+2. 已经是 `T(` 第一个实参的字面量会跳过，所以脚本幂等；
+3. `i18n-ignore-start` / `i18n-ignore-end` 之间的整段不碰——**词条表本身必须划出去**，
+   否则 `T("中文"): "English"` 会变成语法错误。
+
+只有注释里出现中文的模板也跳过：内联 CSS（`const CSS = \`…\``）的注释是给开发看的，
+不是 UI 文案。
+
+### 自检
+
+`node scripts/verify-i18n.mjs` 钉住五件事：**每个 `T()` 都有英文条目**、**没有没人用的死条目**、
+**中英两侧 `{nN}` 占位符一一对应**（少一个界面上就少一段文字）、**译文里不残留汉字 / 全角标点**
+（`·`、箭头、`▲▼`、`¥`、`≤` 这些故意保留的符号在白名单里）、**`lib/client.js` 与
+`src/client.ts` 的词条表一致**（忘了 `npm run build` 就发版，界面会整体退回中文）。
+
+### 没做的部分：宿主半区的文案
+
+DSH 只把 `locale` 服务挂在**浏览器半区**（`ctx.provide("locale", …)`），宿主半区拿不到，
+所以下面两类仍是中文：
+
+| 位置 | 例子 | 为什么 |
+|---|---|---|
+| 运行日志里由宿主 `log()` / `appendJobLog()` 写入的行 | `开始生成「南 · 正对镜头」`、`「{方向}」生成完成，用时 12.3 秒` | 宿主编好字符串再落到项目 JSON 里，语言切换时已经定型 |
+| 对话工具返回给模型的文本 | `game_material_status` / `review` 的渲染、`intake` 的追问 | 面向模型，不是面向界面 |
+
+要接着做的话，正确的路子不是把宿主字符串拖到客户端用正则猜，而是**让宿主写结构化日志**
+（`{ key, params }`，`message` 保留为中文兜底），由客户端渲染时翻译——`LogEntry` /
+`JobLogEntry` 加两个可选字段即可，旧日志没有 `key` 就原样显示，向后兼容。
+注意方向名这类插值不能由宿主填：宿主手里的 `LABEL_OF` 是中文的，应该传**方向 key**，
+由客户端经 `LABEL_OF` 解析，否则英文界面里会冒出中文方向名。
+
+
+---
+
 ## 抠像是怎么做的（含「角色贴边被整片误抠」的坑）
 
 主判据是**边界洪水填充**：从四边出发，只沿着「颜色像背景」且「与相邻背景像素接近」的方向生长，
@@ -909,6 +1031,8 @@ node scripts/dsh-web-cookie.mjs 127.0.0.1:43121 --json
 | `node scripts/probe-redraw.mjs <部件PNG> "<提示词>"` | **花钱**：直接调生图模型重绘一个部件并打印统计（与插件共用提示词构造器）。用于排查「是模型不行还是管线不行」 |
 | `node scripts/e2e-rig-live.mjs <角色整图>` | 模块四真实链路：**真的调一次生图模型**拆件，再跑完装配/骨骼/图集（约 0.2 元） |
 | `node scripts/verify-host.mjs` | 宿主半区全链路（**285 项**）：四个模块的本地链路、**阶段①的转圈截帧（合成一段「转动」视频跑真实 ffmpeg，覆盖截帧位置、按比例换算、下游作废、切换生成方式）**、资源路由（含 `turn/` 白名单）、预览页的 `text/html`、目录穿越与 id 前缀校验 |
+| `node scripts/verify-i18n.mjs` | 中英词条表契约：**每个 `T()` 都有英文条目 / 没有死条目 / `{nN}` 占位符两侧一致 / 译文不残留汉字与全角标点 / `lib/client.js` 与 `src/client.ts` 的词条表一致（忘了 build 就发版会整体退回中文）** |
+| `node scripts/i18n-wrap.mjs` | 词法级 codemod：把 `src/client.ts` 里含中日韩字符的字面量包成 `T(...)`（模板字面量拆成 `{nN}` 占位符，幂等，`i18n-ignore-*` 区间不碰） |
 | `node scripts/verify-tools.mjs` / `verify-client.mjs` / `verify-pipeline.mjs` | 对话调用面（含四个模块 status/review 的文字渲染）、浏览器半区契约（含「每个远程方法都有 api 实现」与手动装配的四条回归）、抠像回归 |
 
 
@@ -923,6 +1047,7 @@ node scripts/verify-host.mjs       # 宿主冒烟（285 项，真实 cordis + �
 node scripts/verify-client.mjs     # 浏览器半区契约（299 项：阶段 ctx 键必须被转发、每个生成类调用点都带 loading 反馈、转圈时间轴与八圆圈、手动装配的四个坑、拆件质检 / IK 约束组件）
 node scripts/verify-feedback.mjs   # 浏览器半区渲染（119 项：真加载 lib/client.js，断言遮罩真的出现 / 空闲时真的不出现 / 转圈模式两种生成方式与八圆圈都在 / 深链接点击真的切面板）
 node scripts/verify-tools.mjs      # 对话调用面（109 项：工具 schema、方法覆盖、返回值无损 JSON 审计、固定流程（含阶段①生成方式必问）、审核模式、深链接契约、转圈模式的 status/review 渲染）
+node scripts/verify-i18n.mjs       # 中英词条表契约（9 项：覆盖 / 死条目 / 占位符 / 译文纯净度 / 产物同步）
 node scripts/verify-live-bundle.mjs # 运行中的宿主是否已在提供新束（走 /plugins/events 拿真实 graph，再按图里的 URL 取回）
 
 # 真实 API 端到端（会花钱）
@@ -972,6 +1097,12 @@ node scripts/retry-video.mjs <项目 id> <方向> [--soft]         # 单方向�
 以及**深链接点击真的会切面板**——装上真的捕获阶段监听器，派发一次合成点击，
 断言 `preventDefault` 被调用、`layout.selectPanel("gameStudio")` 被调用、意图被广播出来；
 同时断言普通外链与 Ctrl+点击 / 中键**不被抢走**。
+
+它的 React 桩是**按顺序喂 Hook 槽位**的（`EXPECTED_HOOKS` + `HOOK.slots` 数组），
+所以**在组件顶部插一个 Hook 就会把后面所有 state 读串**。多语言那次在五个模块组件顶部
+各插了一个 `useLocaleTick()`（一个 `useState`），表现就是 `usePendingTasks` 读到 `undefined`
+直接抛错——桩里的槽位数组与 `EXPECTED_HOOKS` 要跟着一起加。数字对不上不是「测试太严」，
+而是**Hook 顺序真的改了**：真实 React 下同样会读串，只是后果更隐蔽。
 
 `verify-tools.mjs` 盯的是对话调用面这一类坑：工具 schema 必须落在 DSH 支持的关键字子集里、
 `game_material_call` 的 method 枚举必须**覆盖插件的每一个远程方法**（少一个就是「某个功能对话里调不了」）、

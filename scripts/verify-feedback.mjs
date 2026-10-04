@@ -324,23 +324,25 @@ const api = new Proxy(
  * 本地却什么都看不出来。数字变了就说明 Hook 顺序改了，必须同步这里的槽位。
  */
 const EXPECTED_HOOKS = {
-  StudioPanel: 18,
-  ImageModule: 14,
-  SequenceModule: 15
+  StudioPanel: 19,
+  ImageModule: 15,
+  SequenceModule: 16
 };
 
 /**
  * 渲染 StudioPanel 的某个阶段。
  *
  * StudioPanel 的 Hook 顺序（只列 state 槽，顺序不能错）：
- *   0 projects / 1 projectId / 2 project / 3 stage / 4 module / 5 notice /
- *   6 loading / 7 promptDraft / 8 promptOpen / 9 videoPromptDraft /
- *   10 settingsDraft / 11 sourceBusy / 12 dropOver / 14 usePendingTasks.map /
- *   15 useStudioIntent（深链接意图；null = 没有待处理的链接）
- * useRef（13 fileInputRef，以及 usePendingTasks 内部的 ref）与 useCallback 不占 state 槽。
+ *   0 useLocaleTick（语言切换重渲染的计数器，值没人读）/
+ *   1 projects / 2 projectId / 3 project / 4 stage / 5 module / 6 notice /
+ *   7 loading / 8 promptDraft / 9 promptOpen / 10 videoPromptDraft /
+ *   11 settingsDraft / 12 sourceBusy / 13 dropOver / 15 usePendingTasks.map /
+ *   16 useStudioIntent（深链接意图；null = 没有待处理的链接）
+ * useRef（14 fileInputRef，以及 usePendingTasks 内部的 ref）与 useCallback 不占 state 槽。
  */
 function renderStage(project, stage, tasks) {
   HOOK.slots = [
+    0,
     ["p1"],
     "p1",
     project,
@@ -767,13 +769,15 @@ function makeSequenceJob(overrides = {}) {
  * 渲染模块②/③。
  *
  * ImageModule 的 useState 顺序：
- *   0 jobs / 1 jobId / 2 job / 3 notice / 4 uploading / 5 promptDraft / 6 suffixDraft /
- *   7 settingsDraft / 8 keyingDraft / 9 useGlobalConfig / 10 usePendingTasks.map /
- *   11 useStudioIntent（深链接意图）
+ *   0 useLocaleTick（语言切换计数器）/ 1 jobs / 2 jobId / 3 job / 4 notice /
+ *   5 uploading / 6 promptDraft / 7 suffixDraft /
+ *   8 settingsDraft / 9 keyingDraft / 10 useGlobalConfig / 11 usePendingTasks.map /
+ *   12 useStudioIntent（深链接意图）
  * SequenceModule 的顺序与之完全相同。
  */
 function renderModule(component, job, tasks) {
   HOOK.slots = [
+    0,
     [job],
     job.id,
     job,

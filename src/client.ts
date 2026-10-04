@@ -29,6 +29,1016 @@
      */
     const GAME_STUDIO_PANEL_ID = "gameStudio";
 
+    // ── 多语言（中 / 英）──────────────────────────────────────────────────
+    /**
+     * 界面文案跟随 DSH 的语言设置（设置 → 通用 → 语言），切换即时生效。
+     *
+     * 词条表的 key 就是**源码里的中文原文**：浏览器半区是经典脚本（不能 import），
+     * 800+ 条文案再维护一张人造 key 表只会多一层对不上号的风险。英文表里没有的
+     * 条目原样返回中文——漏译只会「少翻一条」，不会在界面上露出 key。
+     *
+     * 插值用 `{n0}` 这类占位符（与 @deepseek-ai/dsh-client-locale 同一套规则），
+     * 英文可以自由换语序：`T("第 {n0} 帧", { n0: 3 })`。
+     */
+    const I18N_NS = PACKAGE;
+    /** 中文原文 → 英文译文。key 里可能带 `{nN}` 占位符。 */
+/* i18n-ignore-start */
+    const EN: Record<string, string> = {
+      "南 · 正对镜头": "South · facing the camera",
+      "源图": "Source image",
+      "北 · 背对镜头": "North · back to the camera",
+      "南": "South",
+      "西南 · 四分之三正面": "Southwest · three-quarter front",
+      "东南 · 四分之三正面": "Southeast · three-quarter front",
+      "西北 · 四分之三背面": "Northwest · three-quarter back",
+      "北": "North",
+      "东北 · 四分之三背面": "Northeast · three-quarter back",
+      "西 · 左侧脸": "West · left profile",
+      "东 · 右侧脸": "East · right profile",
+      "功能还不完善：拆件质量取决于生图模型，自动装配与骨骼推导对真实立绘经常需要人工校正，导出的 Spine / DragonBones 产物也还没经足够的引擎侧验证。": "Not finished yet: part segmentation quality depends on the image model, auto placement and bone inference often need manual correction on real character art, and the exported Spine / DragonBones output has not been verified enough on the engine side.",
+      "流程本身能走通（拆件 → 装配 → 骨骼 → 图集，每一步都有手工兜底），但请预期会出现需要反复调整的情况，暂时别把它当成稳定功能用。": "The pipeline itself does work (part segmentation → layout → bones → atlas, with a manual fallback at every step), but expect plenty of back-and-forth adjustment. For now, do not treat it as a stable feature.",
+      "发现问题或有改进想法，欢迎到 GitHub 仓库一起开发。": "Found a problem or have an idea for improvement? Come build it with us in the GitHub repository.",
+      "八方向图生成": "Eight-direction sheet",
+      "一张设定图 → 8 方向 × 8 帧精灵图": "One character sheet → 8 directions × 8 frames sprite sheet",
+      "图片生成": "Image generation",
+      "按提示词出图，可带参考图，支持抠绿幕导出 PNG": "Generate images from a prompt, optionally with reference images, and export PNGs with chroma keying",
+      "序列帧生成": "Sequence frames",
+      "图/视频参考生成视频 → 抽帧 → 抠像 → 合成与播放预览": "Image/video reference → video → frame extraction → keying → compose and playback preview",
+      "骨骼动画生成": "Skeletal animation",
+      "拆件 → 装配定位 → 推骨骼与动画 → 打包 Spine 图集": "Part segmentation → layout → bone and animation inference → pack Spine atlas",
+      "① 八方向绿幕图": "① Eight-direction chroma-key images",
+      "以源图为基准，按依赖顺序生成八个方位的纯绿幕全身图": "Using the source image as the base, generate full-body images on a pure green screen for all eight directions, in dependency order",
+      "② 行走动作视频": "② Walking animation videos",
+      "固定镜头、固定背景，让角色朝原方位原地走三步": "Fixed camera, fixed background: the character walks three steps in place, facing its original direction",
+      "③ 提取序列帧": "③ Extract sequence frames",
+      "可整批等分抽帧，也可对每一段视频手动选帧": "Extract evenly spaced frames for the whole batch, or pick frames manually for each video",
+      "④ 抠绿幕合成整图": "④ Chroma key and compose sheet",
+      "剔除绿幕并按行序拼成一张精灵图": "Remove the green screen and stitch the frames into a single sprite sheet in row order",
+      "⑤ 行走预览": "⑤ Walking preview",
+      "用 WASD 或方向键操控角色，看看八方向接起来顺不顺": "Drive the character with WASD or the arrow keys and see how smoothly the eight directions connect",
+      "未生成": "Not generated",
+      "已通过": "Approved",
+      "进行中": "Running",
+      "失败": "Failed",
+      "需重做": "Needs redo",
+      "已完成": "Done",
+      "跟随即「设置 → 游戏素材大师」": "Follows \"Settings → Game Material Master\"",
+      "双击看大图": "Double-click to view full size",
+      "关闭大图": "Close full size",
+      "关闭（Esc）": "Close (Esc)",
+      "处理中…": "Processing…",
+      "正在生成…": "Generating…",
+      "正在处理…": "Working…",
+      "审核模式": "Review mode",
+      "未设置（对话里会先问）": "Not set (the agent asks first in chat)",
+      "自动审核": "Auto review",
+      "每一步人工审核": "Manual review at every step",
+      "每一步产出后 agent 会贴出验收链接并停下来等你确认": "After each step the agent posts an acceptance link and waits for your confirmation",
+      "agent 自己检查每步产出后继续推进": "The agent checks each step's output itself and keeps going",
+      "还没定：对话里 agent 会先问你要哪种": "Not decided yet: the agent asks which one you want in chat",
+      "通过": "Approve",
+      "远程服务尚未挂载完成，请稍候再试": "The remote service is not mounted yet. Please try again shortly.",
+      "角色 {n0}": "Character {n0}",
+      "已创建新项目": "New project created",
+      "确定删除项目「{n0}」？项目目录会被整个移除，无法撤销。": "Delete project \"{n0}\"? The whole project directory is removed, and this cannot be undone.",
+      "新的项目名": "New project name",
+      "读取文件失败": "Failed to read file",
+      "已上传源图：{n0}": "Source image uploaded: {n0}",
+      "提示词已保存": "Prompt saved",
+      "参数已保存": "Settings saved",
+      "任务没有启动": "The task did not start",
+      "正在挂载游戏素材大师…": "Mounting Game Material Master…",
+      "游戏素材大师": "Game Material Master",
+      "火山方舟 Seedream 生图 · MiniMax 图生视频 · 本地抠绿幕合成": "Volcengine Ark Seedream image gen · MiniMax image-to-video · local chroma keying and compositing",
+      "刷新列表": "Refresh list",
+      "重命名": "Rename",
+      "删除项目": "Delete project",
+      "新建项目": "New project",
+      "实验性": "Experimental",
+      "项目（{n0}）": "Projects ({n0})",
+      "还没有项目，点右上角「新建项目」开始。": "No projects yet. Click \"New project\" in the top right to start.",
+      "图 {n0}/8 · 视频 {n1}/8 · 帧 {n2}/8{n3}": "Images {n0}/8 · Videos {n1}/8 · Frames {n2}/8{n3}",
+      " · 整图✓": " · Sheet ✓",
+      "关闭": "Close",
+      "正在载入…": "Loading…",
+      "请选择或新建一个项目": "Select or create a project",
+      "上传角色的原始设定图。第一步的正面绿幕图会以它为唯一参考。": "Upload the character's original sheet. The first stage's front chroma-key image uses it as its only reference.",
+      "尚未上传源图": "No source image uploaded yet",
+      "正在上传…": "Uploading…",
+      "把图片拖到这里，或": "Drag the image here, or",
+      "选择源图": "Choose source image",
+      "更换源图": "Replace source image",
+      "刷新状态": "Refresh status",
+      "在访达中打开项目目录": "Open the project directory in Finder",
+      "先生成一段「角色原地匀速转一整圈」的绿幕视频，再按时间截出八个方向的帧；下面时间轴上的八个圆圈就是各自的截帧位置，拖动即可改。": "First generate a chroma-key video of the character turning a full circle in place at a constant speed, then cut frames for the eight directions by time. The eight circles on the timeline below mark each direction's frame position; drag them to change it.",
+      "转圈截帧": "Turn-frame capture",
+      "先生成一段「原地匀速转一整圈」的视频，再按时间截出八个方向（默认，一致性最好）": "Generate one video of a full turn in place at a constant speed, then cut the eight directions from it by time (default, best consistency)",
+      "逐方向生图": "Per-direction generation",
+      "每个方向单独生图（备选：单张更清晰，但八个方向容易不一致）": "Generate each direction separately (alternative: each frame is sharper, but the eight directions easily drift apart)",
+      "生成方式": "Generation mode",
+      "默认": "Default",
+      "正在切出「{n0}」第 {n1} 帧…": "Cutting frame {n1} for \"{n0}\"…",
+      "整圈候选帧": "Full-turn candidate frames",
+      "{n0}：第 {n1}/{n2} 帧（{n3} 秒）— 拖动改位置，←/→ 微调": "{n0}: frame {n1}/{n2} ({n3} s) — drag to reposition, ←/→ to nudge",
+      "{n0} 第 {n1} 帧": "{n0} frame {n1}",
+      "0 秒": "0 s",
+      "共 {n0} 张候选帧 · 每张约 {n1} 秒 —— 拖动圆圈调整每个方向截在哪一帧": "{n0} candidate frames · about {n1} s each — drag a circle to choose which frame each direction uses",
+      "还没有候选帧：先点「生成转圈视频」，视频到手会自动抽帧": "No candidate frames yet: click \"Generate turn video\" first, and frames are extracted automatically once the video is ready",
+      "{n0} 秒": "{n0} s",
+      "正在生成转圈视频…": "Generating turn video…",
+      "正在抽取候选帧…": "Extracting candidate frames…",
+      "正在抽取候选帧并切出八个方向…": "Extracting candidate frames and cutting the eight directions…",
+      "先生成一段「角色原地匀速转一整圈」的视频（绿幕、保持原图风格、除旋转外不做任何动作），再按时间截出八个方向的帧。八个方向出自同一段视频，一致性比逐方向生图好得多；下面时间轴上的八个圆圈就是各自的截帧位置，随便拖。": "First generate a video of the character turning a full circle in place at a constant speed (chroma key, keeping the source style, no motion other than the rotation), then cut frames for the eight directions by time. All eight directions come from the same video, so consistency is far better than per-direction generation. The eight circles on the timeline below mark each direction's frame position — drag them freely.",
+      "保存转圈提示词": "Save turn prompt",
+      "转圈提示词已保存": "Turn prompt saved",
+      "转圈提示词已重置为默认模板": "Turn prompt reset to the default template",
+      "重置为默认": "Reset to default",
+      "正在提交…": "Submitting…",
+      "正在提交转圈视频任务…": "Submitting turn video job…",
+      "生成转圈视频（计费一次）": "Generate turn video (charged once)",
+      "转圈视频生成中…": "Generating turn video…",
+      "重新生成转圈视频（计费一次）": "Regenerate turn video (charged once)",
+      "正在抽帧…": "Extracting frames…",
+      "重新抽帧（当前 {n0} 张）": "Re-extract frames (currently {n0})",
+      "抽取候选帧": "Extract candidate frames",
+      "候选帧数（8~64）": "Candidate frame count (8-64)",
+      "已按 {n0} 张重抽候选帧": "Re-extracted {n0} candidate frames",
+      "正在按 {n0} 张重抽候选帧…": "Re-extracting {n0} candidate frames…",
+      "应用帧数": "Apply frame count",
+      "当前 {n0} 张": "Currently {n0}",
+      "未应用（当前 {n0} 张）": "Not applied (currently {n0})",
+      "八个圆圈已回到默认等分位置": "The eight circles are back at their default evenly spaced positions",
+      "重置八个圆圈": "Reset the eight circles",
+      "转圈方向决定默认位置怎么排；拖动过的圆圈以你的位置为准": "The turn direction sets the default layout; circles you dragged keep your positions",
+      "已改为顺时针并重排八个圆圈": "Switched to clockwise and rearranged the eight circles",
+      "已改为逆时针并重排八个圆圈": "Switched to counter-clockwise and rearranged the eight circles",
+      "转圈方向：逆时针（点一下换向）": "Turn direction: counter-clockwise (click to flip)",
+      "转圈方向：顺时针（点一下换向）": "Turn direction: clockwise (click to flip)",
+      "取消全部通过": "Clear all approvals",
+      "全部标记通过": "Approve all",
+      "还没有转圈视频：点上面的「生成转圈视频」": "No turn video yet: click \"Generate turn video\" above",
+      "首帧用的是{n0}：{n1}": "First frame uses the {n0}: {n1}",
+      "已生成的正面绿幕图": "generated front chroma-key image",
+      "上传的源图": "uploaded source image",
+      "候选帧已过期（转圈视频换过了）：点「重新抽帧」": "Candidate frames are out of date (the turn video changed): click \"Re-extract frames\"",
+      "还没有候选帧": "No candidate frames yet",
+      "正在切出这一帧…": "Cutting this frame…",
+      "切帧中": "Cutting frames",
+      "还没有这一方向的图": "No image for this direction yet",
+      "第 {n0}/{n1} 帧 · {n2} 秒": "Frame {n0}/{n1} · {n2}s",
+      "等待候选帧": "Waiting for candidate frames",
+      "正在生成绿幕图…": "Generating chroma-key images…",
+      "正在提交全部方向…": "Submitting all directions…",
+      "一键生成全部（跳过已通过的）": "Generate all (skips approved)",
+      "正在提交全部重做…": "Submitting full regeneration…",
+      "全部重新生成": "Regenerate all",
+      "正在重置…": "Resetting…",
+      "把八个方向的生图提示词和视频提示词都重置为当前默认模板？你手改过的内容会丢失。": "Reset the image and video prompts for all eight directions to the current default templates? Any manual edits you made will be lost.",
+      "提示词已重置为默认模板": "Prompts reset to the default templates",
+      "正在重置提示词…": "Resetting prompts…",
+      "重置提示词为默认": "Reset prompts to default",
+      "请先上传源图": "Upload a source image first",
+      "生成中": "Generating",
+      "参考：{n0}": "Reference: {n0}",
+      "用时 {n0} 秒 · {n1}": "Took {n0}s · {n1}",
+      "收起提示词 ▲": "Collapse prompt ▲",
+      "编辑提示词 ▼": "Edit prompt ▼",
+      "保存改动": "Save changes",
+      "已保存": "Saved",
+      "正在用这段提示词生成「{n0}」…": "Generating \"{n0}\" with this prompt…",
+      "用这段提示词生成": "Generate with this prompt",
+      "正在生成「{n0}」…": "Generating \"{n0}\"…",
+      "生成": "Generate",
+      "重新生成": "Regenerate",
+      "正在提交 8 个方向的视频任务…": "Submitting video jobs for all 8 directions…",
+      "提示词要求「固定镜头、固定背景、原地走三步」。Hailuo 一段通常要 1~6 分钟，提交后可以离开这个页面。": "The prompt asks for \"fixed camera, fixed background, three steps in place\". A Hailuo clip usually takes 1-6 minutes, so you can leave this page after submitting.",
+      "保存视频提示词": "Save video prompt",
+      "视频提示词已保存": "Video prompt saved",
+      "正在提交 8 个方向…": "Submitting all 8 directions…",
+      "生成全部视频（{n0}/8 张绿幕图就绪）": "Generate all videos ({n0}/8 chroma-key images ready)",
+      "正在查询…": "Checking…",
+      "正在查询远端视频进度…": "Checking remote video progress…",
+      "立即刷新进度": "Refresh progress now",
+      "清空所有视频与已抽的帧？绿幕图会保留。": "Clear all videos and extracted frames? Chroma-key images are kept.",
+      "已清空视频与序列帧": "Videos and sequence frames cleared",
+      "清空视频重来": "Clear videos and start over",
+      "{n0} 个任务进行中，界面会自动刷新": "{n0} jobs running, the view refreshes automatically",
+      "正在生成视频…": "Generating video…",
+      "还没有绿幕图": "No chroma-key image yet",
+      "远端状态：{n0}": "Remote status: {n0}",
+      "正在生成「{n0}」视频…": "Generating \"{n0}\" video…",
+      "生成视频": "Generate video",
+      "正在切出第 {n0} 帧…": "Cutting frame {n0}…",
+      "候选帧": "Candidate frames",
+      "第 {n0} 帧：候选第 {n1}/{n2}（{n3} 秒）— 拖动改位置，←/→ 微调": "Frame {n0}: candidate {n1}/{n2} ({n3}s) - drag to move, ←/→ to nudge",
+      "第 {n0} 帧，候选第 {n1}": "Frame {n0}, candidate {n1}",
+      "共 {n0} 张候选帧 · {n1} 个圆圈 —— 拖动圆圈决定每一张输出帧截在哪": "{n0} candidate frames · {n1} circles - drag a circle to set where each output frame is cut",
+      "手动选帧 · {n0}": "Manual frame picking · {n0}",
+      "只影响这一段视频。圆圈个数跟「每段视频抽帧数」走，拖到哪一格就截哪一格。": "Affects only this video clip. The number of circles follows \"frames per video\", and each circle cuts the cell you drop it on.",
+      "正在抽候选帧…": "Extracting candidate frames…",
+      "已按 {n0} 张候选帧重抽「{n1}」": "Re-extracted {n0} candidate frames for \"{n1}\"",
+      "正在抽取「{n0}」的候选帧…": "Extracting candidate frames for \"{n0}\"…",
+      "重新抽取候选帧": "Re-extract candidate frames",
+      "圆圈已回到等分位置": "Circles are back at their evenly spaced positions",
+      "正在重置「{n0}」的选帧…": "Resetting frame picks for \"{n0}\"…",
+      "重置为等分": "Reset to even spacing",
+      "正在抽取全部序列帧…": "Extracting all sequence frames…",
+      "单格宽（px）": "Cell width (px)",
+      "单格高（px）": "Cell height (px)",
+      "每段视频抽帧数": "Frames per video",
+      "抽帧工作尺寸（长边 px）": "Frame extraction working size (long edge, px)",
+      "并发数": "Concurrency",
+      "抽帧抽到的是「工作尺寸」（长边上限），不是最终格子尺寸。自动裁剪、统一缩放和像素量化都在第 4 步做，这样八个方向才能共享同一个裁剪框、脚底对齐同一条基线。改完这里需要重新抽帧。": "Frame extraction produces the \"working size\" (a long-edge cap), not the final cell size. Auto-crop, uniform scaling, and quantization all happen in step 4, so the eight directions share one crop box and land on the same foot baseline. Changing anything here means you must extract frames again.",
+      "「提取全部」对每一段视频用同一套等分；要某一段单独挑帧，点那张卡片上的「手动选帧」，拖圆圈即可（和转圈截帧一样）。": "\"Extract all\" uses the same even spacing for every video; to pick frames for one clip on its own, click \"Manual frame picking\" on that card and drag the circles (same as turn-frame capture).",
+      "预览带是**双击看大图**：格子尺寸只有 256px，看不清动作和抠像质量。": "**Double-click the preview strip to view it larger**: at only 256px per cell you cannot judge motion or keying quality.",
+      "提取全部序列帧（{n0}/8 段视频就绪）": "Extract all sequence frames ({n0}/8 videos ready)",
+      "正在抽取序列帧…": "Extracting sequence frames…",
+      "抽帧中": "Extracting frames",
+      "{n0} 序列帧": "{n0} sequence frames",
+      "{n0} · {n1} 帧 · 视频 {n2} 秒（点「×」/ 背景 / Esc 关闭）": "{n0} · {n1} frames · {n2}s video (click \"×\" / the backdrop / Esc to close)",
+      "尚未抽帧": "Not extracted yet",
+      "{n0} 帧 · 视频 {n1} 秒": "{n0} frames · {n1}s video",
+      "手动选帧 · {n0} 个圆圈 / {n1} 张候选": "Manual frame picking · {n0} circles / {n1} candidates",
+      "正在抽取「{n0}」序列帧…": "Extracting \"{n0}\" sequence frames…",
+      "重新抽帧": "Re-extract frames",
+      "抽取": "Extract",
+      "收起选帧": "Hide frame picker",
+      "调整选帧": "Adjust frame pick",
+      "手动选帧": "Pick frames manually",
+      "正在抠绿幕并合成整图…": "Keying green screen and composing sheet…",
+      "抠像在这里会**再跑一次**：第 3 步那次抠的是每个方向的预览带（顺便把整图合出来），这里重抠是为了让下面这些参数改完立刻生效——两次读的是同一份帧缓存（raw.bin）、同一套参数，所以结果一致。": "Keying runs **one more time** here: step 3 keyed the preview strip for each direction (and composed the sheet along the way), while re-keying here makes the parameters below take effect the moment you change them. Both passes read the same frame cache (raw.bin) with the same settings, so the results always match.",
+      "改完参数会自动重新抠像并合成整图，不需要重新抽帧。": "Changing the parameters re-keys and recomposes the sheet automatically, with no need to re-extract frames.",
+      "整图单格宽（px）": "Sheet cell width (px)",
+      "整图单格高（px）": "Sheet cell height (px)",
+      "像素块边长（0/1 = 关闭）": "Pixel block size (0/1 = off)",
+      "背景分割容差（0 = 只认绿色）": "Background split tolerance (0 = green only)",
+      "抠像下限（绿色优势）": "Key low (green dominance)",
+      "抠像上限（绿色优势）": "Key high (green dominance)",
+      "去绿溢出 0~1": "Despill green 0~1",
+      "边缘收缩（px）": "Edge shrink (px)",
+      "自动裁剪填充比例 0.5~1": "Auto-crop fill ratio 0.5~1",
+      "底部留白（px）": "Bottom padding (px)",
+      "自动裁剪到角色包围盒": "Auto-crop to the character's bounding box",
+      "开启（推荐：角色填满格子，八个方向缩放一致）": "On (recommended: the character fills the cell and all eight directions share one scale)",
+      "关闭（用整帧画面）": "Off (use the full frame)",
+      "正在保存并合成…": "Saving and composing…",
+      "正在保存并重新合成…": "Saving and recomposing…",
+      "保存并重新合成": "Save and recompose",
+      "正在重跑抠像…": "Re-keying…",
+      "正在重跑抠像并重新合成…": "Re-keying and recomposing…",
+      "只重跑抠像并重新合成": "Re-key and recompose only",
+      "正在合成整图…": "Composing sheet…",
+      "合成整图（{n0}/8 组帧就绪）": "Compose sheet ({n0}/8 frame sets ready)",
+      "下载整图": "Download sheet",
+      "整图已通过": "Sheet approved",
+      "整图通过": "Approve sheet",
+      "行序（第 1 行在最上方）": "Row order (row 1 at the top)",
+      "输出 {n0}×{n1} 像素 · 单格 {n2}×{n3} · 每行 {n4} 帧": "Output {n0}×{n1} px · cell {n2}×{n3} · {n4} frames per row",
+      " · 抠掉的背景占 {n0}%": " · keyed background is {n0}%",
+      " · 边框采样排除了 {n0} 个不属于背景主色的点（角色贴边）": " · border sampling excluded {n0} points that are not the dominant background color (character touching the edge)",
+      "整图": "Sheet",
+      "整图 {n0}×{n1} · 单格 {n2}×{n3}（点「×」/ 背景 / Esc 关闭）": "Sheet {n0}×{n1} · cell {n2}×{n3} (click \"×\" / the background / Esc to close)",
+      "本地抠像 + 合成，不上传": "Local keying + compositing, nothing uploaded",
+      "正在生成第一张整图…": "Generating the first sheet…",
+      "请先完成第 3 步的抽帧": "Finish frame extraction in step 3 first",
+      "还没有合成整图": "No sheet composed yet",
+      "正在重新合成整图…": "Recomposing sheet…",
+      "还没有可播放的整图。先完成第 ④ 步合成，再回到这里用 WASD 走一走。": "No sheet to play yet. Finish composing in step ④, then come back here and walk around with WASD.",
+      "角色缩放倍率": "Character scale",
+      "移动速度（像素/秒）": "Movement speed (px/s)",
+      "播放速度（倍，只影响步频）": "Playback speed (×, step rate only)",
+      "背景参考网格": "Background reference grid",
+      "显示（更容易看出在移动）": "Show (motion is easier to see)",
+      "关闭（纯白）": "Off (pure white)",
+      "回到中间": "Recenter",
+      "当前朝向：{n0}（{n1}） · {n2}": "Facing: {n0} ({n1}) · {n2}",
+      "行走中": "Walking",
+      "站立": "Standing",
+      "· 整图是按旧行序生成的，正在重新合成…": "· The sheet was built with the old row order; recomposing…",
+      "已获得键盘焦点": "Keyboard focus acquired",
+      "点击画面后即可操控": "Click the canvas to take control",
+      "点击这里，然后用 WASD 或 ↑↓←→ 操控角色": "Click here, then steer the character with WASD or ↑↓←→",
+      "正在载入整图…": "Loading sheet…",
+      "行走": "Walk",
+      "方向按屏幕方位映射：按 ↑ 向北走（背对镜头）、↓ 向南走（正对镜头）、← 向西、→ 向东；斜向同时按两个键。": "Directions map to screen positions: ↑ walks north (back to camera), ↓ walks south (facing camera), ← walks west, → walks east; hold two keys at once for diagonals.",
+      "「播放速度」只改步频快慢，不影响角色移动速度；「移动速度」只改走得多快，不影响动画帧率。切图用的是整图自己记录的行序，所以改完行序即使还没重新合成，预览也不会取错方向。": "\"Playback speed\" only changes how fast the steps cycle and does not affect how fast the character moves; \"Movement speed\" only changes how fast it walks and does not affect the animation frame rate. Frame switching uses the row order recorded in the sheet itself, so even if you change the row order before recomposing, the preview still picks the right direction.",
+      "选择文件": "Choose file",
+      "{n0}（{n1}）": "{n0} ({n1})",
+      "还没有内容，点右上角新建一个。": "Nothing here yet. Click New in the top right to create one.",
+      "新建": "New",
+      "图片 {n0}": "Image {n0}",
+      "已新建图片任务": "Image task created",
+      "正在新建任务…": "Creating task…",
+      "删除任务「{n0}」？目录会被整个移除。": "Delete task \"{n0}\"? Its whole folder will be removed.",
+      "已删除": "Deleted",
+      "正在上传 {n0} 个文件…": "Uploading {n0} files…",
+      "图片任务": "Image tasks",
+      "{n0} 张 · 抠像 {n1}": "{n0} images · {n1} keyed",
+      "正在新建…": "Creating…",
+      "新建任务": "New task",
+      "删除任务": "Delete task",
+      "正在调用接口…": "Calling the API…",
+      "请选择或新建一个图片任务": "Select or create an image task",
+      "① 提示词": "① Prompt",
+      "统一附加提示词会接在主提示词后面，用来写跨批次的共同要求。": "The shared suffix prompt is appended after the main prompt, for requirements that apply across batches.",
+      "描述你要生成的图片…": "Describe the image you want to generate…",
+      "统一附加提示词（可留空）": "Shared suffix prompt (optional)",
+      "生图模型": "Image model",
+      "尺寸": "Size",
+      "生成张数（1~8）": "Images to generate (1~8)",
+      "正在生成 {n0} 张…": "Generating {n0} images…",
+      "已开始生成 {n0} 张": "Started generating {n0} images",
+      "正在生成 {n0} 张图片…": "Generating {n0} images…",
+      "生成 {n0} 张": "Generate {n0}",
+      "按 Seedream 刊例约 0.2 元/张，实际以方舟账单为准": "About ¥0.2 per image at Seedream list price; your Volcengine Ark bill is authoritative",
+      "② 参考图（可留空）": "② Reference images (optional)",
+      "最多 10 张。有参考图时走图生图；引用多张时可在提示词里写「图一」「图二」。": "Up to 10. With reference images it runs image-to-image; to cite several, write \"image 1\" and \"image 2\" in the prompt.",
+      "把参考图拖到这里": "Drag reference images here",
+      "已移除参考图": "Reference image removed",
+      "移除": "Remove",
+      "③ 绿幕抠图": "③ Green screen keying",
+      "开启后每张生成完会自动抠一遍；也可以上传已有图片只做抠像。": "When on, each image is keyed automatically after it is generated; you can also upload existing images to key them only.",
+      "不抠像": "No keying",
+      "自动抠绿幕输出 PNG": "Auto-key green screen, output PNG",
+      "正在抠像…": "Keying…",
+      "已开始抠像": "Keying started",
+      "正在抠绿幕…": "Keying green screen…",
+      "按当前参数重新抠像": "Re-key with current settings",
+      "上传一张已有图片，直接抠成透明 PNG": "Upload an existing image to key straight to a transparent PNG",
+      "④ 结果（{n0} 张）": "④ Results ({n0} images)",
+      "还没有图片": "No images yet",
+      "第 {n0} 张": "Image {n0}",
+      "上传": "Upload",
+      "抠像结果": "Keying result",
+      "生成结果": "Generation result",
+      "生成中…": "Generating…",
+      "等待生成": "Waiting to generate",
+      "背景占比 {n0}%": "Background {n0}%",
+      "已取消通过": "Approval removed",
+      "已标记通过": "Marked as approved",
+      "下载 PNG": "Download PNG",
+      "已重新生成": "Regenerated",
+      "正在重新生成第 {n0} 张…": "Regenerating image {n0}…",
+      "删除": "Delete",
+      "序列帧 {n0}": "Sequence frames {n0}",
+      "已新建序列帧任务": "Sequence frames job created",
+      "视频生成中…（H3 通常 1~6 分钟，可以离开本页）": "Generating video… (H3 usually takes 1-6 minutes; you can leave this page)",
+      "正在抠像并合成条图…": "Keying and composing strip…",
+      "序列帧任务": "Sequence frames jobs",
+      "{n0} {n1} {n2}": "{n0} {n1} {n2}",
+      "视频✓": "Video✓",
+      "视频·": "Video·",
+      "帧✓": "Frames✓",
+      "帧·": "Frames·",
+      "合成✓": "Compose✓",
+      "合成·": "Compose·",
+      "请选择或新建一个序列帧任务": "Select or create a sequence frames job",
+      "① 视频输入": "① Video input",
+      "平台规定两种模式互斥：首尾帧模式以一张图作为起始画面；多模态参考模式用参考图+参考视频来约束风格与动作。": "The platform does not allow these two modes at once: first/last frame mode uses one image as the opening frame; multimodal reference mode uses reference images plus reference videos to constrain style and motion.",
+      "首尾帧模式（上传首帧图）": "First/last frame mode (upload a first frame)",
+      "多模态参考模式（参考图 / 参考视频）": "Multimodal reference mode (reference images / reference videos)",
+      "首帧图（必填）": "First frame (required)",
+      "尾帧图（选填）": "Last frame (optional)",
+      "把首帧图拖到这里": "Drag the first frame here",
+      "参考图（{n0}/9）": "Reference images ({n0}/9)",
+      "已移除": "Removed",
+      "参考视频（{n0}/3，每段 2~15 秒，单文件 ≤ 40MB）": "Reference videos ({n0}/3, 2-15 s each, ≤ 40MB per file)",
+      "移除 {n0}": "Remove {n0}",
+      "把参考视频拖到这里": "Drag reference videos here",
+      "② 提示词与参数": "② Prompt and parameters",
+      "视频模型": "Video model",
+      "时长（秒，{n0}~{n1}）": "Duration (s, {n0}-{n1})",
+      "分辨率": "Resolution",
+      "正在提交视频任务…": "Submitting video job…",
+      "已提交视频任务，可离开本页": "Video job submitted; you can leave this page",
+      "重新生成视频": "Regenerate video",
+      "正在查询远端进度…": "Checking remote progress…",
+      "已清空视频与帧": "Video and frames cleared",
+      "H3 768P 按 0.5 元/秒刊例计费": "H3 768P is billed at the list price of ¥0.5/second",
+      "状态：{n0} {n1} {n2}": "Status: {n0} {n1} {n2}",
+      "③ 序列帧提取": "③ Sequence frame extraction",
+      "提取张数": "Frames to extract",
+      "已开始抽帧": "Frame extraction started",
+      "按当前张数抽帧（{n0} 张）": "Extract with the current count ({n0} frames)",
+      "参数已变，需重抽": "Parameters changed; extract again",
+      "视频时长 {n0} 秒 · {n1} 帧": "Video duration {n0} s · {n1} frames",
+      "④ 绿幕抠像与合成": "④ Chroma keying and composition",
+      "正在重新抠像…": "Re-keying…",
+      "已开始重新抠像": "Re-keying started",
+      "重新抠像": "Re-key",
+      "正在合成条图…": "Composing strip…",
+      "已合成": "Composed",
+      "正在合成横向条图…": "Composing horizontal strip…",
+      "合成横向条图": "Compose horizontal strip",
+      "下载条图": "Download strip",
+      "正在处理序列帧…": "Processing sequence frames…",
+      "还没有序列帧": "No sequence frames yet",
+      "序列帧条图": "Sequence frames strip",
+      "第 {n0} 帧": "Frame {n0}",
+      "第 {n0} / {n1} 帧（点「×」/ 背景 / Esc 关闭）": "Frame {n0} / {n1} (click \"×\" / the backdrop / Esc to close)",
+      "⑤ 验收": "⑤ Acceptance",
+      "三步各自打「通过」。对话里的 agent 读写同一份标记：选「每一步人工审核」时，它会等你通过才继续。": "Approve each of the three steps. The agent in the conversation reads and writes the same flags: with \"manual review at every step\" selected, it waits for your approval before continuing.",
+      "① 生成视频": "① Generate video",
+      "② 抽帧 + 抠像": "② Frame extraction + keying",
+      "③ 横向条图": "③ Horizontal strip",
+      "未上传": "Not uploaded",
+      "播放帧率（fps）": "Playback frame rate (fps)",
+      "预览缩放": "Preview zoom",
+      "播放": "Play",
+      "播放中": "Playing",
+      "暂停": "Pause",
+      "已载入 {n0}/{n1} 帧。这是抠像后的帧按顺序循环播放的效果，用来判断动作连贯性和抠像边缘是否稳定。": "Loaded {n0}/{n1} frames. This loops the keyed frames in order so you can judge motion continuity and whether the keyed edges are stable.",
+      "{n0} → {n1}": "{n0} → {n1}",
+      "运行日志（{n0} 条{n1}）": "Run log ({n0} entries{n1})",
+      " · {n0} 错误": " · {n0} errors",
+      " · {n0} 警告": " · {n0} warnings",
+      "全部": "All",
+      "警告+（{n0}）": "Warning+ ({n0})",
+      "错误（{n0}）": "Errors ({n0})",
+      "搜关键字…": "Search keywords…",
+      "当前筛选下没有日志。": "No log entries match the current filter.",
+      "（{n0}）": "({n0})",
+      "运行日志": "Run log",
+      "头部": "Head",
+      "脖子": "Neck",
+      "躯干": "Torso",
+      "胯部": "Hips",
+      "上臂": "Upper arm",
+      "小臂": "Forearm",
+      "手": "Hand",
+      "大腿": "Thigh",
+      "小腿": "Calf",
+      "脚": "Foot",
+      "头发": "Hair",
+      "衣料": "Cloth",
+      "配饰": "Accessory",
+      "武器": "Weapon",
+      "① 拆件": "① Part segmentation",
+      "生图模型把角色拆成独立部件（这一步花钱，只跑一次；也可以直接上传部件 PNG）": "The image model splits the character into separate parts (this step is charged and runs once; you can also upload part PNGs directly)",
+      "② 装配定位": "② Layout and placement",
+      "把部件摆回参考姿态；本地计算，免费，可以逐件重跑或手工拖动": "Puts the parts back into the reference pose; local computation, free, and you can rerun it part by part or drag manually",
+      "③ 骨骼与动画": "③ Bones and animation",
+      "自动推骨骼层级 + 待机/行走/奔跑/挥手/跳跃/攻击，直接播放验收": "Infers the bone hierarchy + idle/walk/run/wave/jump/attack, play it right here for acceptance",
+      "④ 图集": "④ Atlas",
+      "打包成 Spine 纹理图集（.png + .atlas），可直接导入引擎": "Packs a Spine texture atlas (.png + .atlas) that imports straight into your engine",
+      "正在刷新…": "Refreshing…",
+      "正在拆件生图…": "Generating part segmentation…",
+      "正在分割部件…": "Splitting parts…",
+      "正在装配定位…": "Placing parts…",
+      "正在生成骨骼…": "Generating bones…",
+      "正在打包图集…": "Packing atlas…",
+      "正在重绘部件…": "Redrawing part…",
+      "正在创建任务…": "Creating job…",
+      " · 已定位": " · Placed",
+      " · 未定位": " · Not placed",
+      " · 相似度 {n0}": " · Similarity {n0}",
+      " · 手工调整": " · Manually adjusted",
+      "自动定位没找到，请手工拖到正确位置": "Auto placement did not find it — drag it to the right position manually",
+      "相似度偏低，建议核对或拖一下": "Low similarity — check it or drag it a little",
+      "选中": "Select",
+      "重新定位": "Reposition",
+      "改名": "Rename",
+      "取消隐藏": "Unhide",
+      "隐藏": "Hide",
+      "已更新「{n0}」的语义": "Updated semantics for \"{n0}\"",
+      "{n0}{n1}": "{n0}{n1}",
+      "近端": "proximal",
+      "远端": "distal",
+      "语义（角色 / 父级 / 锚点）：决定骨骼挂在谁身上、骨骼从部件的哪一端伸到哪一端。改这里不会动②里已经摆好的位置，只会重算③骨骼。": "Semantics (role / parent / anchors): decides which bone each part hangs from and which end of the part the bone runs to. Changing this leaves the placements you already made in ② alone and only recomputes ③ bones.",
+      "语义有 {n0} 处错误：": "Semantics has {n0} errors: ",
+      "{n0} {n1}": "{n0} {n1}",
+      "整体": "Overall",
+      "；": "; ",
+      "提示：": "Note: ",
+      "语义已就绪，无结构问题。": "Semantics is ready, with no structural problems.",
+      "还没有可用部件。": "No usable parts yet.",
+      "部件": "Part",
+      "角色": "Role",
+      "父级": "Parent",
+      "近端锚点": "Proximal anchor",
+      "远端锚点": "Distal anchor",
+      "来源": "Source",
+      "（挂 root）": "(attach to root)",
+      "人工": "Manual",
+      "还没有骨骼。先点上面的「生成骨骼与动画」——生成之后这里可以逐根微调。": "No bones yet. Click \"Generate bones and animation\" above first — after that you can fine-tune each bone here.",
+      "已调整「{n0}」": "Adjusted \"{n0}\"",
+      "骨骼手工偏移（{n0}）": "Manual bone offsets ({n0})",
+      "已调 {n0} 根": "{n0} bone(s) adjusted",
+      "未调整": "Not adjusted",
+      "这里调的是「你相对绑定姿势改了多少」，不会被重新推骨骼覆盖。位移单位是参考图像素，旋转是度。全零即视为未调整。": "What you change here is how far you moved away from the binding pose, and rerunning bone inference will not overwrite it. Translation is in reference-image pixels and rotation is in degrees. All zeros counts as not adjusted.",
+      "骨骼": "Bone",
+      "绑定姿势": "Binding pose",
+      "手工位移 x": "Manual x offset",
+      "手工位移 y": "Manual y offset",
+      "手工旋转": "Manual rotation",
+      "已清除「{n0}」的手工偏移": "Cleared the manual offset for \"{n0}\"",
+      "清除": "Clear",
+      "清除中…": "Clearing…",
+      "已清除全部手工骨骼偏移": "Cleared all manual bone offsets",
+      "清除全部手工偏移（{n0} 根）": "Clear all manual offsets ({n0} bones)",
+      "已调整「{n0}」的动画参数": "Adjusted the animation settings for \"{n0}\"",
+      "动画参数（{n0}）": "Animation settings ({n0})",
+      "已调 {n0} 个": "{n0} adjusted",
+      "全部为预设默认值": "All at preset defaults",
+      "幅度统一缩放旋转与位移（1 = 预设原样）；时长是一个循环的秒数。改完点上面的「生成骨骼与动画」重算。": "Amplitude scales rotation and translation together (1 = preset unchanged); duration is the length of one loop in seconds. When you are done, click \"Generate bones and animation\" above to recompute.",
+      "动作": "Action",
+      "时长（秒）": "Duration (s)",
+      "幅度": "Amplitude",
+      "状态": "Status",
+      "会生成": "Will be generated",
+      "未勾选": "Not selected",
+      " · 预设 {n0}s": " · Preset {n0}s",
+      "已重置「{n0}」": "Reset \"{n0}\"",
+      "重置": "Reset",
+      "重置中…": "Resetting…",
+      "已重置全部动画参数": "Reset all animation settings",
+      "重置全部（{n0} 个）": "Reset all ({n0})",
+      "旋转": "Rotation",
+      "位移": "Translation",
+      "缩放": "Scale",
+      "线性": "Linear",
+      "阶跃": "Stepped",
+      "已在「{n0}/{n1}」加了一帧": "Added a frame to \"{n0}/{n1}\"",
+      "已删除「{n0}/{n1}」的第 {n2} 帧": "Deleted frame {n2} of \"{n0}/{n1}\"",
+      "已为「{n0}」加一条{n1}轨道": "Added a {n1} track to \"{n0}\"",
+      "已删除「{n0}/{n1}」轨道": "Deleted the \"{n0}/{n1}\" track",
+      "已移动「{n0}/{n1}」的关键帧": "Moved the keyframe in \"{n0}/{n1}\"",
+      "时间轴与关键帧": "Timeline and keyframes",
+      "选一台动画后可以加/删/拖关键帧、改数值与缓动。提交后这台动画就以这份数据为准（参数滑杆不再影响它），": "After you pick an animation you can add/delete/drag keyframes and edit values and easing. Once submitted, this animation follows this data (the settings sliders no longer affect it), ",
+      "「还原」可以退回预设。": "and \"Restore\" takes it back to the preset.",
+      " ·已改": " · Edited",
+      "读取中…": "Loading…",
+      "选择一台动画开始编辑。": "Pick an animation to start editing.",
+      "循环时长（秒）": "Loop duration (s)",
+      "已把「{n0}」的时长改为 {n1}s": "Changed the duration of \"{n0}\" to {n1}s",
+      "已设为不循环": "Set to play once",
+      "已设为循环": "Set to loop",
+      "循环": "Loop",
+      "一次性": "Play once",
+      "已改为手工数据": "Switched to manual data",
+      "预设（改动后转为数据）": "Preset (becomes data once changed)",
+      "已还原「{n0}」到预设": "Restored \"{n0}\" to the preset",
+      "还原到预设": "Restore to preset",
+      "这台动画在当前部件集下没有任何轨道（预设依赖的骨骼都不存在）。": "This animation has no tracks with the current part set (none of the bones the preset relies on are present).",
+      "删除这条轨道": "Delete this track",
+      "点一个关键帧来改它；在轨道空白处**双击**加一帧。首帧（0 秒）不能删——它是每条轨道的锚。": "Click a keyframe to edit it; **double-click** an empty spot on the track to add a frame. The first frame (0 s) cannot be deleted — it is the anchor of every track.",
+      "{n0} · {n1} · 第 {n2} 帧": "{n0} · {n1} · Frame {n2}",
+      "时间(s)": "Time (s)",
+      "已改「{n0}」的关键帧时间": "Changed the keyframe time of \"{n0}\"",
+      "角度": "Angle",
+      "已改「{n0}/{n1}」的{n2}": "Changed {n2} of \"{n0}/{n1}\"",
+      "缓动": "Easing",
+      "已把「{n0}」的缓动改为 {n1}": "Changed easing of \"{n0}\" to {n1}",
+      "删除这一帧": "Delete this frame",
+      "首帧是轨道锚点，不能删": "The first frame is the track anchor and cannot be deleted",
+      "每条轨道至少留两帧": "Each track needs at least two frames",
+      "加轨道": "Add track",
+      "改完自动重算预览：开": "Auto-rebuild preview after edits: On",
+      "改完自动重算预览：关": "Auto-rebuild preview after edits: Off",
+      "重新读取": "Reload",
+      "重算是本地计算，免费": "Rebuilding is local computation and is free",
+      "拆件质检": "Segmentation QA",
+      "可信度 {n0}%": "Confidence {n0}%",
+      "不可信（{n0}%）": "Not reliable ({n0}%)",
+      "没有发现重复件，装配相似度也在正常范围。": "No duplicate parts found, and layout similarity is within the normal range.",
+      "质检中…": "Checking…",
+      "已重跑拆件质检": "Segmentation QA re-run",
+      "重新质检": "Re-run QA",
+      "参考图里大约几个部位": "Roughly how many parts in the reference image",
+      "看图填，可留空": "Fill in from the image; optional",
+      "已按「{n0} 个部位」重新质检": "Re-ran QA with \"{n0} parts\"",
+      "填了它就能判断「部件数是不是多出来了」——多出来的多半是重复件": "With this filled in, it can tell whether the part count is too high — extras are usually duplicates",
+      "IK 约束（{n0}）": "IK constraints ({n0})",
+      "{n0} 条": "{n0}",
+      "无": "None",
+      "把一条骨骼链约束到一个**可拖的目标点**：在下面的预览里拖那个青色菱形，手就跟着走。": "Constrain a bone chain to a **draggable target point**: drag the cyan diamond in the preview below and the hand follows.",
+      "链长 1 = 末端骨 + 它的父级（两骨余弦定理）；权重小于 1 是软 IK。": "Chain length 1 = the end bone plus its parent (two-bone law of cosines); a weight below 1 gives soft IK.",
+      "名称": "Name",
+      "链末端骨骼": "Chain end bone",
+      "目标点": "Target point",
+      "链长": "Chain length",
+      "弯曲": "Bend",
+      "权重": "Weight",
+      "已改「{n0}」的链长": "Changed chain length of \"{n0}\"",
+      "已切换弯曲方向": "Bend direction switched",
+      "正向": "Positive",
+      "反向": "Negative",
+      "已把「{n0}」的权重改为 {n1}": "Changed weight of \"{n0}\" to {n1}",
+      "已删除约束「{n0}」": "Deleted constraint \"{n0}\"",
+      "加约束": "Add constraint",
+      "已为「{n0}」加 IK 约束": "Added an IK constraint for \"{n0}\"",
+      "加到这条链上": "Add to this chain",
+      "目标点会自动补一根骨骼，位置就在链末端": "A bone is added automatically for the target point, at the end of the chain",
+      "已清空全部 IK 约束": "All IK constraints cleared",
+      "清空全部": "Clear all",
+      "已更新「{n0}」的网格": "Updated the mesh of \"{n0}\"",
+      "蒙皮网格（{n0}）": "Skinned meshes ({n0})",
+      "{n0} 个部件已细分": "{n0} parts subdivided",
+      "把部件切成网格之后就能对顶点做 FFD 变形——裙摆、披风、长发这类「上缘不动、下缘甩出去」": "Once a part is cut into a mesh you can apply FFD deformation to its vertices — for skirts, capes, and long hair, where the top edge stays put and the bottom swings out",
+      "用刚体骨骼是动不出来的。网格是规则三角化，密度越高越软，预览也越吃性能。": "Rigid bones cannot produce that motion. The mesh is a regular triangulation: the denser it is, the softer it looks, and the more the preview costs in performance.",
+      "列=行": "Cols=Rows",
+      "摆幅": "Amplitude",
+      "循环(s)": "Loop (s)",
+      "固定端": "Fixed end",
+      "加飘动": "Add sway",
+      "上缘": "Top edge",
+      "下缘": "Bottom edge",
+      "已取消「{n0}」的网格": "Mesh removed from \"{n0}\"",
+      "取消": "Remove",
+      "加网格": "Add mesh",
+      "细分这个部件": "Subdivide this part",
+      "给裙摆加飘动": "Add sway to the skirt",
+      "网格与变形都是本地计算，免费": "Meshes and deformation are computed locally and are free",
+      "已清除全部网格与变形": "All meshes and deformation cleared",
+      "Path 约束（{n0}）": "Path constraints ({n0})",
+      "把一串骨骼沿折线按弧长铺开——尾巴、辫子这类「长度远超单根骨」的部件用它。": "Spread a chain of bones along a polyline by arc length — use this for parts like tails and braids, whose length far exceeds a single bone.",
+      "间距 0 表示均匀铺满整条路径；大于 0 就是固定间距，骨骼只覆盖路径的一段。": "Spacing 0 spreads the bones evenly across the whole path; a value above 0 uses a fixed spacing, so the bones cover only part of the path.",
+      "骨链": "Bone chain",
+      "间距": "Spacing",
+      "旋转混合": "Rotate mix",
+      "已改「{n0}」的间距": "Changed spacing of \"{n0}\"",
+      "已改「{n0}」的旋转混合": "Changed rotate mix of \"{n0}\"",
+      "已删除路径「{n0}」": "Deleted path \"{n0}\"",
+      "加路径": "Add path",
+      "已沿「{n0}」加路径": "Added a path along \"{n0}\"",
+      "沿这条链加路径": "Add a path along this chain",
+      "默认路径沿这些部件的近端锚点生成": "The default path is generated along the proximal anchors of these parts",
+      "已清空全部路径约束": "All path constraints cleared",
+      "已给「{n0}」换色（新增一版）": "Tinted \"{n0}\" (new version added)",
+      "贴图变体": "Texture variants",
+      "每一次换色 / 上传替换都新增一个版本，永不覆盖原图；「换回原版」就是切版本。": "Every tint or uploaded replacement adds a new version and never overwrites the original; \"back to the original\" is just a version switch.",
+      "当前 v{n0}{n1}": "Current v{n0}{n1}",
+      "版本": "Version",
+      "已切到 v{n0}": "Switched to v{n0}",
+      "删除这一版": "Delete this version",
+      "已删除 v{n0}": "Deleted v{n0}",
+      "色相": "Hue",
+      "饱和度": "Saturation",
+      "明度": "Lightness",
+      "亮度": "Brightness",
+      "对比": "Contrast",
+      "换色中…": "Tinting…",
+      "应用换色（新增一版）": "Apply tint (adds a version)",
+      "重置滑杆": "Reset sliders",
+      "上传替换": "Upload replacement",
+      "手工上传": "Manual upload",
+      "已上传「{n0}」的新贴图": "Uploaded a new texture for \"{n0}\"",
+      "滑杆只是预览，点「应用换色」才落成新版本": "The sliders are preview only; click \"Apply tint\" to save them as a new version",
+      "想让这块变成什么样？（例如「换成深蓝色布料」「加上金属高光」）": "What should this part become? (e.g. \"dark blue cloth\", \"add metallic highlights\")",
+      "正在重绘…": "Redrawing…",
+      "已提交 AI 重绘（会花钱）": "AI redraw submitted (costs money)",
+      "AI 重绘这一块（会花钱）": "AI redraw this part (costs money)",
+      "重绘结果是一版新的贴图：轮廓按原样裁回，不满意切回上一版即可": "The redraw becomes a new texture version: the silhouette is clipped back as-is, so just switch back to the previous version if you don't like it",
+      "色相{n0}{n1}°": "Hue {n0}{n1}°",
+      "饱和×{n0}": "Saturation ×{n0}",
+      "明度{n0}{n1}": "Lightness {n0}{n1}",
+      "亮度{n0}{n1}": "Brightness {n0}{n1}",
+      "对比×{n0}": "Contrast ×{n0}",
+      "换色": "Tint",
+      "已撤销": "Undone",
+      "已重做": "Redone",
+      "已移动「{n0}」": "Moved \"{n0}\"",
+      "已缩放「{n0}」": "Resized \"{n0}\"",
+      "已微调「{n0}」": "Nudged \"{n0}\"",
+      "已收回「{n0}」": "Unplaced \"{n0}\"",
+      "已放置「{n0}」": "Placed \"{n0}\"",
+      "已调整图层顺序": "Layer order updated",
+      "还没有可用部件，请先在第 ① 步拆件或上传部件 PNG。": "No parts available yet. Run part segmentation in step ① first, or upload part PNGs.",
+      "缩小": "Zoom out",
+      "适应窗口（Ctrl/Cmd+0）": "Fit to window (Ctrl/Cmd+0)",
+      "放大": "Zoom in",
+      "把参考图叠在下面，方便对位": "Overlay the reference image underneath to help with alignment",
+      "参考图底图": "Reference underlay",
+      "显示边框": "Show boxes",
+      "拖动时吸附到其它部件的边与中线": "Snap to other parts' edges and center lines while dragging",
+      "吸附": "Snap",
+      "拖角手柄时保持宽高比": "Keep the aspect ratio when dragging corner handles",
+      "锁等比": "Lock ratio",
+      "撤销{n0}": "Undo{n0}",
+      "重做": "Redo",
+      "已放置 {n0}/{n1}　·　拖部件移动、拖角缩放、方向键微调 1px（Shift 10px）、Delete 收回、滚轮缩放、空格拖动平移": "Placed {n0}/{n1} · Drag a part to move, drag a corner to resize, arrow keys nudge 1px (Shift 10px), Delete to unplace, scroll wheel to zoom, hold Space and drag to pan",
+      "未放置（{n0}）· 拖进画布": "Unplaced ({n0}) · drag onto the canvas",
+      "全部部件都已放置。": "All parts are placed.",
+      "选中：{n0}": "Selected: {n0}",
+      "已修改 x": "x updated",
+      "已修改 y": "y updated",
+      "宽": "W",
+      "已修改宽度": "Width updated",
+      "高": "H",
+      "已修改高度": "Height updated",
+      "已旋转": "Rotation updated",
+      "层级": "Layer",
+      "已修改层级": "Layer updated",
+      "置顶": "Bring to front",
+      "上移": "Move up",
+      "下移": "Move down",
+      "置底": "Send to back",
+      "已交换宽高": "Width and height swapped",
+      "宽高互换": "Swap W/H",
+      "重定位中…": "Repositioning…",
+      "已重新自动定位「{n0}」": "Auto-repositioned \"{n0}\"",
+      "这块重新自动定位": "Re-run auto placement",
+      "收回部件": "Unplace part",
+      "这块目前是「未放置」状态：拖到画布上或点上面的数值确认即可放回。": "This part is currently \"Unplaced\": drag it onto the canvas or confirm the values above to place it back.",
+      "在画布上点一个部件，这里会出现它的精确参数与图层操作。": "Click a part on the canvas and its exact values and layer controls will appear here.",
+      "图层（从下到上）": "Layers (bottom to top)",
+      "骨骼动画生成（实验性）": "Skeletal animation generation (experimental)",
+      "骨骼动画生成仍在开发中": "Skeletal animation generation is still in development",
+      "本次会话不再提示": "Don't show this again this session",
+      "去 GitHub 仓库": "Open the GitHub repo",
+      "我知道了": "Got it",
+      "该模块功能尚不完善，仍在开发中；若你需要它，欢迎到": "This module is not finished yet and is still in development; if you need it, you are welcome to help build it at the ",
+      "GitHub 仓库": "GitHub repo",
+      "一起开发。": ".",
+      "宿主半区版本过旧（缺少骨骼动画模块的字段）。请重启 DSH Desktop 后重试。": "The host-side version is too old (it lacks the skeletal animation module's fields). Restart DSH Desktop and try again.",
+      "正在重新定位…": "Repositioning…",
+      "新骨骼动画任务": "New skeletal animation job",
+      "已新建骨骼动画任务": "Skeletal animation job created",
+      "删除任务「{n0}」？产物文件会一并删除。": "Delete job \"{n0}\"? Its output files will be deleted as well.",
+      "新的任务名": "New job name",
+      "已重命名": "Renamed",
+      "已上传参考图：{n0}": "Reference image uploaded: {n0}",
+      "已上传 {n0} 个部件（文件名即部件名）": "Uploaded {n0} parts (the file name is used as the part name)",
+      "已保存提示词与参数": "Prompt and settings saved",
+      "远程服务尚未挂载完成，请稍候…": "The remote service is not mounted yet, please wait…",
+      "创建中…": "Creating…",
+      "未配置": "Not configured",
+      "（模型在「设置 → 游戏素材大师」里改）": "(change the model in \"Settings → Game Material Master\")",
+      "进行中…": "Running…",
+      "正在读取任务…": "Loading jobs…",
+      "还没有骨骼动画任务，点右上角「新建任务」开始。": "No skeletal animation jobs yet. Click \"New job\" in the top right to get started.",
+      "任务": "Job",
+      "{n0}（部件 {n1}）": "{n0} ({n1} parts)",
+      "本阶段进行中…": "This stage is running…",
+      "角色参考图": "Character reference image",
+      "拆件、装配、骨骼都以这张整图为基准；建议用能看清全身、背景干净的角色立绘。": "Part segmentation, layout, and bones are all based on this sheet; use a character illustration that shows the whole body clearly on a clean background.",
+      "拖入角色整图（PNG / JPG）": "Drag in the character sheet (PNG / JPG)",
+      "拖入部件 PNG（可多选，文件名即部件名）": "Drag in part PNGs (multiple allowed; the file name is used as the part name)",
+      "让生图模型把角色拆成摊平的部件图，再自动分割成逐件透明 PNG。**这一步花钱**，只跑一次；参数改了可以「重新分割」，不额外计费。": "Let the image model split the character into a flattened parts sheet, then automatically segment it into individual transparent PNGs. **This step costs money** and only runs once; if you change the settings you can \"Re-segment\" at no extra cost.",
+      "已提交拆件生图": "Part sheet generation submitted",
+      "重新生成拆件图（会花钱）": "Regenerate part sheet (costs money)",
+      "生成拆件图（会花钱）": "Generate part sheet (costs money)",
+      "正在分割…": "Segmenting…",
+      "已提交重新分割": "Re-segmentation submitted",
+      "用现有拆件图重新分割": "Re-segment the existing part sheet",
+      "网格列": "Grid columns",
+      "网格行": "Grid rows",
+      "底色容差": "Background tolerance",
+      "边缘羽化": "Edge feather",
+      "最小面积": "Min area",
+      "底色容差：与底色多接近算背景。边缘羽化：只决定轮廓最外圈那几个像素的软过渡，部件内部不会变半透明。": "Background tolerance: how close to the background color still counts as background. Edge feather: controls only the soft transition of the few pixels on the outermost edge of the outline, and the inside of a part never becomes semi-transparent.",
+      "保存参数与提示词": "Save settings and prompt",
+      "留空则使用内置的网格拆件提示词（要求模型按 4×4 网格摆放 16 个标准人形部件）": "Leave empty to use the built-in grid part-sheet prompt (it asks the model to lay out 16 standard humanoid parts in a 4×4 grid)",
+      "生图模型正在拆件…": "The image model is generating the part sheet…",
+      "先上传角色参考图。": "Upload the character reference image first.",
+      "还没有拆件图：点上面的「生成拆件图」，或者用上面的上传框直接给现成部件 PNG。": "No part sheet yet: click \"Generate part sheet\" above, or use the upload box above to supply ready-made part PNGs directly.",
+      "部件（{n0}）——逐件验收，摆错的可单独重跑": "Parts ({n0}) — accept them one by one; any misplaced part can be re-run on its own",
+      "把「{n0}」改成什么名字？\n（名字决定骨骼层级，标准名如 head / torso / hip / left-upper-arm / left-lower-leg / right-foot，见拆件提示词里的网格表）": "Rename \"{n0}\" to what?\n(The name determines the bone hierarchy; standard names are head / torso / hip / left-upper-arm / left-lower-leg / right-foot — see the grid table in the part-sheet prompt.)",
+      "已改名为「{n0}」": "Renamed to \"{n0}\"",
+      "已重新定位「{n0}」": "Repositioned \"{n0}\"",
+      "第①步已通过": "Step ① approved",
+      "第①步：已通过": "Step ①: Approved",
+      "第①步：通过": "Step ①: Approve",
+      "取消通过": "Unapprove",
+      "下一步：装配定位 →": "Next: Layout →",
+      "多尺度模板匹配把每个部件摆回参考姿态。**本地计算，免费**：失败或摆错只重跑那几个部件，不用整批重来。": "Multi-scale template matching places each part back into the reference pose. **Local compute, free**: if it fails or lands wrong, re-run just those parts instead of the whole batch.",
+      "已提交装配定位（本地计算）": "Layout submitted (local compute)",
+      "重新装配全部部件": "Re-layout all parts",
+      "正在重试…": "Retrying…",
+      "已提交重试未命中的部件": "Retry of unmatched parts submitted",
+      "只重试未命中的 {n0} 个": "Retry only the {n0} unmatched",
+      "只显示合成图": "Show composite only",
+      "并排显示参考图": "Show reference side by side",
+      "这些部件没匹配上，请手工拖到正确位置：{n0}": "These parts did not match. Drag them into the correct positions manually: {n0}",
+      "、": ", ",
+      "第②步已通过": "Step 2 approved",
+      "第②步：已通过": "Step 2: approved",
+      "第②步：通过": "Step 2: Approve",
+      "下一步：骨骼与动画 →": "Next: Bones & Animation →",
+      "按部件语义自动推骨骼层级，并生成六个动画预设。**本地计算，免费**。下面直接播放验收。": "Derives the bone hierarchy automatically from part semantics and generates six animation presets. **Local compute, free**. Play them below to review.",
+      "已提交骨骼构建": "Bone build submitted",
+      "生成骨骼与动画": "Generate bones and animations",
+      "动画预设": "Animation presets",
+      "保存动画选择": "Save animation selection",
+      "下载 skeleton.json": "Download skeleton.json",
+      "新窗口打开预览": "Open preview in new window",
+      "骨骼告警：{n0}": "Bone warnings: {n0}",
+      "播放动画": "Play animation",
+      "预览里也能拖时间轴、开骨骼网格": "You can also scrub the timeline and toggle the bone mesh in the preview",
+      "骨骼动画预览": "Skeletal animation preview",
+      "点「生成骨骼与动画」得到 skeleton.json 与可播放预览。": "Click \"Generate bones and animations\" to get skeleton.json and a playable preview.",
+      "先完成第②步装配定位。": "Complete step 2 (layout) first.",
+      "DragonBones 骨架": "DragonBones skeleton",
+      "同一份骨架的 DragonBones 5.5 写法（Cocos / Egret / Laya 可直接加载）": "The same skeleton written for DragonBones 5.5 (loads directly in Cocos / Egret / Laya)",
+      "第③步已通过": "Step 3 approved",
+      "第③步：已通过": "Step 3: approved",
+      "第③步：通过": "Step 3: Approve",
+      "下一步：图集 →": "Next: Atlas →",
+      "把部件按装配后的尺寸打包成 Spine 纹理图集。区域尺寸与 skeleton.json 里挂点的 width/height 一致，导入引擎不会错位。": "Packs the parts at their laid-out sizes into a Spine texture atlas. Region sizes match the attachment width/height in skeleton.json, so nothing shifts when you import into an engine.",
+      "正在打包…": "Packing…",
+      "已提交图集打包": "Atlas packing submitted",
+      "打包纹理图集": "Pack texture atlas",
+      "查看 skeleton.atlas": "View skeleton.atlas",
+      "下载 skeleton.png": "Download skeleton.png",
+      "{n0}×{n1} · {n2} 区域{n3}": "{n0}×{n1} · {n2} regions{n3}",
+      " · {n0} 页": " · {n0} pages",
+      "DragonBones 贴图": "DragonBones textures",
+      "图集提示：{n0}": "Atlas notes: {n0}",
+      "点「打包纹理图集」生成 skeleton.png + skeleton.atlas。": "Click \"Pack texture atlas\" to generate skeleton.png + skeleton.atlas.",
+      "先完成第③步骨骼构建。": "Complete step 3 (bone build) first.",
+      "分页": "Pages",
+      "{n0}（{n1}×{n2} · {n3} 区域）": "{n0} ({n1}×{n2} · {n3} regions)",
+      "第④步已通过": "Step 4 approved",
+      "第④步：已通过": "Step 4: approved",
+      "第④步：通过": "Step 4: Approve",
+      "导入 Spine：把 skeleton.json、skeleton.atlas、skeleton.png 三个文件放在同一目录，打开 Spine 时选 skeleton.json 即可。": "Importing into Spine: put skeleton.json, skeleton.atlas and skeleton.png in the same folder, then select skeleton.json when you open Spine.",
+      "导入 DragonBones：把 export/dragonbones/skeleton_ske.json 与 atlas/skeleton_tex.json、atlas/skeleton.png 放同一目录后加载 .json 数据与纹理。": "Importing into DragonBones: put export/dragonbones/skeleton_ske.json in the same folder as atlas/skeleton_tex.json and atlas/skeleton.png, then load the .json data and textures.",
+      "正在载入配置…": "Loading configuration…",
+      "配置已保存": "Configuration saved",
+      "配置两家模型的 API Key 与整条流水线的默认参数。Key 只保存在本机 DSH 数据目录下的 game-material-master/config.json（真实路径见文末「数据位置」），界面里始终脱敏显示。": "Configure the API keys for both models and the default parameters for the whole pipeline. Keys are stored only in game-material-master/config.json under your local DSH data directory (see \"Data location\" at the end for the real path) and are always masked in the UI.",
+      "火山方舟（生图）": "Volcengine Ark (image generation)",
+      "ffmpeg 可用：{n0}": "ffmpeg available: {n0}",
+      "ffmpeg 不可用：{n0}": "ffmpeg unavailable: {n0}",
+      "未知": "Unknown",
+      "API Key {n0}": "API Key {n0}",
+      "（已配置 {n0}）": "(configured {n0})",
+      "（未配置）": "(not configured)",
+      "留空表示不修改": "Leave blank to keep unchanged",
+      "粘贴 ARK_API_KEY": "Paste ARK_API_KEY",
+      "火山方舟 Key 已保存": "Volcengine Ark key saved",
+      "保存 Key": "Save key",
+      "已清除火山方舟 Key": "Volcengine Ark key cleared",
+      "自定义：{n0}": "Custom: {n0}",
+      "部件重绘模型": "Part redraw model",
+      "跟生图模型相同": "Same as the generation model",
+      "输出尺寸": "Output size",
+      "正在生成测试图…": "Generating test image…",
+      "连接正常：{n0} 返回 {n1} 字节图片": "Connection OK: {n0} returned a {n1}-byte image",
+      "测试连接（会真实生成 1 张 1K 小图，产生少量费用）": "Test connection (generates one real 1K image, small charge)",
+      "MiniMax（图生视频）": "MiniMax (image-to-video)",
+      "视频阶段使用图生视频（I2V）。建议用 MiniMax-Hailuo-02，镜头稳定性最好。": "The video stage uses image-to-video (I2V). MiniMax-Hailuo-02 is recommended for the most stable camera.",
+      "粘贴 MiniMax API Key": "Paste MiniMax API Key",
+      "MiniMax Key 已保存": "MiniMax key saved",
+      "已清除 MiniMax Key": "MiniMax key cleared",
+      "Base URL（优云智算版 H3 固定使用，无需修改）": "Base URL (fixed for the CompShare H3 build, no changes needed)",
+      "Base URL（主机根，不含 /v1、/v2）": "Base URL (host root, without /v1 or /v2)",
+      "当前协议：{n0}": "Current protocol: {n0}",
+      "v2（{n0}/v2/video_generation）": "v2 ({n0}/v2/video_generation)",
+      "v1（{n0}/v1/video_generation）": "v1 ({n0}/v1/video_generation)",
+      "正在校验…": "Validating…",
+      "连接正常：{n0}": "Connection OK: {n0}",
+      "测试连接（只校验 Key，不产生费用）": "Test connection (validates the key only, no charge)",
+      "新建项目的默认参数": "Defaults for new projects",
+      "这些值会成为每个新项目的初始设置，之后可在项目里单独调整。": "These values become the initial settings for every new project and can be adjusted per project later.",
+      "抠像下限": "Keying lower bound",
+      "抠像上限": "Keying upper bound",
+      "去绿溢出": "Despill",
+      "自动裁剪填充比例": "Auto-crop fill ratio",
+      "数据位置": "Data location",
+      "所有项目（源图、绿幕图、视频、序列帧、整图）都保存在：": "All projects (source images, chroma-key images, videos, sequence frames, sheets) are stored in:",
+      "已刷新": "Refreshed",
+      "重新读取配置": "Reload configuration",
+      "gameStudio 远程服务不可用，请确认插件已启用": "The gameStudio remote service is unavailable. Make sure the plugin is enabled.",
+      "{n0} 调用失败": "{n0} call failed",
+      "{n0}: 深链接拦截": "{n0}: deep link interception",
+      "{n0}: 深链接引导": "{n0}: deep link guidance"
+    };
+/* i18n-ignore-end */
+
+    /**
+     * 语言切换后必须重算的模块级文案表。
+     *
+     * 这些表在模块加载时就求了值（`T()` 是纯函数，模块级调用不会自己变），
+     * 不重算的话语言切了它们还停在旧语言——页签标题、方向名这类就属于此列。
+     */
+    const staticTextRebuilders: Array<() => void> = [
+      () => {
+        DIRECTIONS = make_DIRECTIONS();
+      },
+      () => {
+        RIG_EXPERIMENTAL_POINTS = make_RIG_EXPERIMENTAL_POINTS();
+      },
+      () => {
+        MODULES = make_MODULES();
+      },
+      () => {
+        STAGES = make_STAGES();
+      },
+      () => {
+        IMAGE_MODES = make_IMAGE_MODES();
+      },
+      () => {
+        RIG_ROLES = make_RIG_ROLES();
+      },
+      () => {
+        RIG_STAGES = make_RIG_STAGES();
+      },
+      () => {
+        RIG_BUSY_LABEL = make_RIG_BUSY_LABEL();
+      },
+      () => {
+        TRACK_LABELS = make_TRACK_LABELS();
+      },
+      () => {
+        EASING_PRESETS = make_EASING_PRESETS();
+      },
+      () => {
+        LABEL_OF = make_LABEL_OF();
+      }
+    ];
+
+    /** 重算全部模块级文案表（幂等；语言切换与首次挂载都会走一次）。 */
+    function rebuildStaticText(): void {
+      for (const rebuild of staticTextRebuilders) rebuild();
+    }
+
+    /**
+     * 中文表是恒等映射。必须写全：locale 服务的回退链是「当前语言 → en」，
+     * 只注册 en 的话中文界面会一路落到英文。
+     */
+    const ZH: Record<string, string> = Object.fromEntries(Object.keys(EN).map((key) => [key, key]));
+    /** DSH locale 服务给的绑定翻译函数；服务还没挂载时是 null。 */
+    let boundTranslate: ((key: string, params?: Record<string, unknown>) => string) | null = null;
+    /** 语言变化时要重渲染的订阅者（各模块顶层组件挂一个，子树跟着重渲染）。 */
+    const localeListeners: Set<() => void> = new Set();
+
+    /** `{name}` 插值；与 locale 服务内部用的是同一条规则。 */
+    function fill(text: string, params?: Record<string, unknown>): string {
+      if (params === undefined) return text;
+      return String(text).replace(/\{(\w+)\}/gu, (match, name) => (name in params ? String(params[name]) : match));
+    }
+
+    /** 翻译。没有 locale 服务时退回中文原文——自检脚本直接渲染组件走的就是这条。 */
+    function T(key: string, params?: Record<string, unknown>): string {
+      return boundTranslate === null ? fill(key, params) : boundTranslate(key, params);
+    }
+
+    /**
+     * 挂上 DSH 的 locale 服务。
+     *
+     * locale 是**可选**依赖：服务不在（或注册失败）时界面继续用中文原文，
+     * 插件不会因为缺这一个服务就整块不挂载。
+     * @returns 是否挂上了。
+     */
+    function installI18n(ctx: any): boolean {
+      const locale = ctx.get("locale");
+      if (locale === undefined || locale === null) return false;
+      try {
+        ctx.effect(() => locale.register(I18N_NS, { zh: ZH, en: EN }), `${PACKAGE}: i18n dictionary`);
+        boundTranslate = locale.bind(I18N_NS);
+        // 模块级文案表是**模块加载时**求值的（那时还没有 locale 服务，全是中文原文），
+        // 所以挂上服务的第一件事就是把它们按当前语言重算一遍。
+        rebuildStaticText();
+        ctx.effect(
+          () =>
+            locale.subscribe(() => {
+              boundTranslate = locale.bind(I18N_NS);
+              rebuildStaticText();
+              for (const listener of [...localeListeners]) {
+                try {
+                  listener();
+                } catch {
+                  // 单个订阅者出错不该拖垮语言切换本身。
+                }
+              }
+            }),
+          `${PACKAGE}: locale switch re-render`
+        );
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    /** 语言切换时重渲染当前组件。挂在各模块顶层即可，子树跟着一起重渲染。 */
+    function useLocaleTick(): number {
+      const [tick, setTick] = React.useState(0);
+      React.useEffect(() => {
+        const listener = () => setTick((value) => value + 1);
+        localeListeners.add(listener);
+        return () => {
+          localeListeners.delete(listener);
+        };
+      }, []);
+      return tick;
+    }
+
+    /**
+     * 把 locale 服务接进来。立刻不是它的锅（服务可能比插件后挂载），
+     * 所以先试一次，没成就等它可用——用 ctx.inject 而不是把它写进 inject 列表：
+     * 写进去会让整个插件卡在这个服务上，缺了它就整个不挂载。
+     */
+    function attachI18n(ctx: any): void {
+      if (installI18n(ctx)) return;
+      try {
+        ctx.inject(["locale"], (child: any) => {
+          installI18n(child);
+        });
+      } catch {
+        // 老版本宿主没有 ctx.inject：那就一直用中文原文，界面仍然是完整的。
+      }
+    }
+
     // ── 远程贡献 ─────────────────────────────────────────────────────────
     // 与宿主 src/wire.ts 的 METHODS 必须一一对应；那份是唯一的真源。
     // 宿主校验在服务端；浏览器半区只声明同一套 strict codec。
@@ -159,18 +1169,26 @@
     // ── 方向元数据（与宿主 src/directions.ts 保持一致）────────────────────
     // 这是 RPG 地图上的八方向行走：约定画面上方为北，角色在地图上朝哪个方位走。
     // 「看不看得见脸」由南北决定——朝北走就是背对镜头，不是抬头。
-    const DIRECTIONS = [
-      { key: "front", compass: "S", label: "南 · 正对镜头", refs: ["源图"] },
-      { key: "back", compass: "N", label: "北 · 背对镜头", refs: ["南"] },
-      { key: "downLeft", compass: "SW", label: "西南 · 四分之三正面", refs: ["南"] },
-      { key: "downRight", compass: "SE", label: "东南 · 四分之三正面", refs: ["南"] },
-      { key: "upLeft", compass: "NW", label: "西北 · 四分之三背面", refs: ["北"] },
-      { key: "upRight", compass: "NE", label: "东北 · 四分之三背面", refs: ["北"] },
-      { key: "left", compass: "W", label: "西 · 左侧脸", refs: ["南", "北"] },
-      { key: "right", compass: "E", label: "东 · 右侧脸", refs: ["南", "北"] }
+    function make_DIRECTIONS() {
+      return [
+      { key: "front", compass: "S", label: T("南 · 正对镜头"), refs: [T("源图")] },
+      { key: "back", compass: "N", label: T("北 · 背对镜头"), refs: [T("南")] },
+      { key: "downLeft", compass: "SW", label: T("西南 · 四分之三正面"), refs: [T("南")] },
+      { key: "downRight", compass: "SE", label: T("东南 · 四分之三正面"), refs: [T("南")] },
+      { key: "upLeft", compass: "NW", label: T("西北 · 四分之三背面"), refs: [T("北")] },
+      { key: "upRight", compass: "NE", label: T("东北 · 四分之三背面"), refs: [T("北")] },
+      { key: "left", compass: "W", label: T("西 · 左侧脸"), refs: [T("南"), T("北")] },
+      { key: "right", compass: "E", label: T("东 · 右侧脸"), refs: [T("南"), T("北")] }
     ];
+    }
+    let DIRECTIONS = make_DIRECTIONS();
+
     const DIRECTION_KEYS = DIRECTIONS.map((d) => d.key);
-    const LABEL_OF = Object.fromEntries(DIRECTIONS.map((d) => [d.key, d.label]));
+    function make_LABEL_OF() {
+      return Object.fromEntries(DIRECTIONS.map((d) => [d.key, d.label]));
+    }
+    let LABEL_OF = make_LABEL_OF();
+
     const COMPASS_OF = Object.fromEntries(DIRECTIONS.map((d) => [d.key, d.compass]));
 
     /** 屏幕位移向量 → 方向 key。dy > 0 是往画面下方走（向南）。 */
@@ -227,27 +1245,39 @@
      * 功能本身一概不拦——链路照常可用，只是要让用户先知道现状，并把共建入口摆出来。
      */
     const RIG_EXPERIMENTAL_REPO = "https://github.com/universe-st/dsh-game-material-master";
-    const RIG_EXPERIMENTAL_POINTS = [
-      "功能还不完善：拆件质量取决于生图模型，自动装配与骨骼推导对真实立绘经常需要人工校正，导出的 Spine / DragonBones 产物也还没经足够的引擎侧验证。",
-      "流程本身能走通（拆件 → 装配 → 骨骼 → 图集，每一步都有手工兜底），但请预期会出现需要反复调整的情况，暂时别把它当成稳定功能用。",
-      "发现问题或有改进想法，欢迎到 GitHub 仓库一起开发。"
+    function make_RIG_EXPERIMENTAL_POINTS() {
+      return [
+      T("功能还不完善：拆件质量取决于生图模型，自动装配与骨骼推导对真实立绘经常需要人工校正，导出的 Spine / DragonBones 产物也还没经足够的引擎侧验证。"),
+      T("流程本身能走通（拆件 → 装配 → 骨骼 → 图集，每一步都有手工兜底），但请预期会出现需要反复调整的情况，暂时别把它当成稳定功能用。"),
+      T("发现问题或有改进想法，欢迎到 GitHub 仓库一起开发。")
     ];
+    }
+    let RIG_EXPERIMENTAL_POINTS = make_RIG_EXPERIMENTAL_POINTS();
+
 
     /** 四个功能模块。插件是「大师」，每个模块管一类素材。 */
-    const MODULES = [
-      { key: "sprite", title: "八方向图生成", hint: "一张设定图 → 8 方向 × 8 帧精灵图" },
-      { key: "image", title: "图片生成", hint: "按提示词出图，可带参考图，支持抠绿幕导出 PNG" },
-      { key: "sequence", title: "序列帧生成", hint: "图/视频参考生成视频 → 抽帧 → 抠像 → 合成与播放预览" },
-      { key: "rig", title: "骨骼动画生成", hint: "拆件 → 装配定位 → 推骨骼与动画 → 打包 Spine 图集", experimental: true }
+    function make_MODULES() {
+      return [
+      { key: "sprite", title: T("八方向图生成"), hint: T("一张设定图 → 8 方向 × 8 帧精灵图") },
+      { key: "image", title: T("图片生成"), hint: T("按提示词出图，可带参考图，支持抠绿幕导出 PNG") },
+      { key: "sequence", title: T("序列帧生成"), hint: T("图/视频参考生成视频 → 抽帧 → 抠像 → 合成与播放预览") },
+      { key: "rig", title: T("骨骼动画生成"), hint: T("拆件 → 装配定位 → 推骨骼与动画 → 打包 Spine 图集"), experimental: true }
     ];
+    }
+    let MODULES = make_MODULES();
 
-    const STAGES = [
-      { key: "images", title: "① 八方向绿幕图", hint: "以源图为基准，按依赖顺序生成八个方位的纯绿幕全身图" },
-      { key: "videos", title: "② 行走动作视频", hint: "固定镜头、固定背景，让角色朝原方位原地走三步" },
-      { key: "frames", title: "③ 提取序列帧", hint: "可整批等分抽帧，也可对每一段视频手动选帧" },
-      { key: "sheet", title: "④ 抠绿幕合成整图", hint: "剔除绿幕并按行序拼成一张精灵图" },
-      { key: "preview", title: "⑤ 行走预览", hint: "用 WASD 或方向键操控角色，看看八方向接起来顺不顺" }
+
+    function make_STAGES() {
+      return [
+      { key: "images", title: T("① 八方向绿幕图"), hint: T("以源图为基准，按依赖顺序生成八个方位的纯绿幕全身图") },
+      { key: "videos", title: T("② 行走动作视频"), hint: T("固定镜头、固定背景，让角色朝原方位原地走三步") },
+      { key: "frames", title: T("③ 提取序列帧"), hint: T("可整批等分抽帧，也可对每一段视频手动选帧") },
+      { key: "sheet", title: T("④ 抠绿幕合成整图"), hint: T("剔除绿幕并按行序拼成一张精灵图") },
+      { key: "preview", title: T("⑤ 行走预览"), hint: T("用 WASD 或方向键操控角色，看看八方向接起来顺不顺") }
     ];
+    }
+    let STAGES = make_STAGES();
+
 
     // ── 深链接：从会话里点一下链接就切到插件对应页面 ─────────────────────
     //
@@ -683,15 +1713,15 @@
     }
 
     function statusKind(node) {
-      if (node === undefined) return { kind: "empty", text: "未生成" };
-      if (node.approved) return { kind: "approved", text: "已通过" };
-      if (node.status === "running") return { kind: "running", text: "进行中" };
-      if (node.status === "error") return { kind: "error", text: "失败" };
+      if (node === undefined) return { kind: "empty", text: T("未生成") };
+      if (node.approved) return { kind: "approved", text: T("已通过") };
+      if (node.status === "running") return { kind: "running", text: T("进行中") };
+      if (node.status === "error") return { kind: "error", text: T("失败") };
       if (node.status === "ready") {
-        if (node.stale) return { kind: "stale", text: "需重做" };
-        return { kind: "ready", text: "已完成" };
+        if (node.stale) return { kind: "stale", text: T("需重做") };
+        return { kind: "ready", text: T("已完成") };
       }
-      return { kind: "empty", text: "未生成" };
+      return { kind: "empty", text: T("未生成") };
     }
 
     function Chip({ kind, text }) {
@@ -825,7 +1855,7 @@
         { className: "SPR_field" },
         h("span", { className: "SPR_fieldLabel" }, label),
         h("input", { className: "SPR_input", value: value ?? "", readOnly: true, disabled: true }),
-        h("span", { className: "SPR_fieldLabel" }, "跟随即「设置 → 游戏素材大师」")
+        h("span", { className: "SPR_fieldLabel" }, T("跟随即「设置 → 游戏素材大师」"))
       );
     }
 
@@ -868,7 +1898,7 @@
           src,
           alt,
           style,
-          title: "双击看大图",
+          title: T("双击看大图"),
           "data-zoomable": "true",
           onDoubleClick: openImage
         }),
@@ -887,8 +1917,8 @@
                 {
                   type: "button",
                   className: "SPR_zoomClose",
-                  "aria-label": "关闭大图",
-                  title: "关闭（Esc）",
+                  "aria-label": T("关闭大图"),
+                  title: T("关闭（Esc）"),
                   "data-testid": "zoom-close",
                   onClick: (event) => {
                     event.stopPropagation();
@@ -996,7 +2026,7 @@
         "div",
         { className: "SPR_ovl", role: "status", "aria-live": "polite", "aria-busy": "true" },
         h("span", { className: "SPR_spin" }),
-        h("span", { className: "SPR_ovlText" }, text ?? "处理中…"),
+        h("span", { className: "SPR_ovlText" }, text ?? T("处理中…")),
         sub === undefined || sub === null ? null : h("span", { className: "SPR_ovlSub" }, sub)
       );
     }
@@ -1011,7 +2041,7 @@
         "div",
         { className: cls("SPR_thumbBox", className) },
         h("div", { style: { visibility: overlay === true ? "hidden" : undefined } }, children),
-        h(LoadingOverlay, { show: overlay === true, text: text ?? "正在生成…" })
+        h(LoadingOverlay, { show: overlay === true, text: text ?? T("正在生成…") })
       );
     }
 
@@ -1021,7 +2051,7 @@
         Btn,
         { ...rest, onClick, disabled: busy === true || rest.disabled === true, busy: busy === true },
         busy === true ? h("span", { className: "SPR_spinSm" }) : null,
-        busy === true ? busyText ?? "处理中…" : children
+        busy === true ? busyText ?? T("处理中…") : children
       );
     }
 
@@ -1032,7 +2062,7 @@
         "span",
         { className: "SPR_busyBadge", role: "status", "aria-live": "polite" },
         h("span", { className: "SPR_spinSm" }),
-        text ?? "正在处理…"
+        text ?? T("正在处理…")
       );
     }
 
@@ -1060,7 +2090,7 @@
       return h(
         "div",
         { className: "SPR_toolbar" },
-        h("span", { className: "SPR_refRow" }, "审核模式"),
+        h("span", { className: "SPR_refRow" }, T("审核模式")),
         h(
           "select",
           {
@@ -1070,18 +2100,18 @@
             disabled: busy || id === null || id === undefined,
             onChange: (event) => void change(event.target.value)
           },
-          h("option", { value: "" }, "未设置（对话里会先问）"),
-          h("option", { value: "auto" }, "自动审核"),
-          h("option", { value: "manual" }, "每一步人工审核")
+          h("option", { value: "" }, T("未设置（对话里会先问）")),
+          h("option", { value: "auto" }, T("自动审核")),
+          h("option", { value: "manual" }, T("每一步人工审核"))
         ),
         h(
           "span",
           { className: "SPR_refRow" },
           mode === "manual"
-            ? "每一步产出后 agent 会贴出验收链接并停下来等你确认"
+            ? T("每一步产出后 agent 会贴出验收链接并停下来等你确认")
             : mode === "auto"
-              ? "agent 自己检查每步产出后继续推进"
-              : "还没定：对话里 agent 会先问你要哪种"
+              ? T("agent 自己检查每步产出后继续推进")
+              : T("还没定：对话里 agent 会先问你要哪种")
         )
       );
     }
@@ -1092,7 +2122,7 @@
       return h(
         Btn,
         { on: approved === true, disabled: disabled === true, onClick: onToggle },
-        approved === true ? "已通过" : idleText ?? "通过"
+        approved === true ? T("已通过") : idleText ?? T("通过")
       );
     }
 
@@ -1117,6 +2147,7 @@
 
     // ── 主体工作台 ───────────────────────────────────────────────────────
     function StudioPanel(props) {
+      useLocaleTick();
       const api = props?.api;
       const [projects, setProjects] = React.useState([]);
       const [projectId, setProjectId] = React.useState(null);
@@ -1229,7 +2260,7 @@
       const withApi = React.useCallback(
         async (fn, options: any = {}) => {
           if (api === undefined) {
-            setNotice({ kind: "error", text: "远程服务尚未挂载完成，请稍候再试" });
+            setNotice({ kind: "error", text: T("远程服务尚未挂载完成，请稍候再试") });
             return undefined;
           }
           try {
@@ -1248,17 +2279,17 @@
       const createProject = () =>
         withApi(
           async () => {
-            const created = await api.createProject({ name: `角色 ${new Date().toLocaleString("zh-CN", { hour12: false })}` });
+            const created = await api.createProject({ name: T("角色 {n0}", { n0: new Date().toLocaleString("zh-CN", { hour12: false }) }) });
             await refreshProjects();
             setProjectId(created.projectId);
           },
-          { notice: "已创建新项目" }
+          { notice: T("已创建新项目") }
         );
 
       const deleteCurrent = async () => {
         if (project === null) return;
         // eslint-disable-next-line no-alert
-        if (typeof window !== "undefined" && !window.confirm(`确定删除项目「${project.name}」？项目目录会被整个移除，无法撤销。`)) return;
+        if (typeof window !== "undefined" && !window.confirm(T("确定删除项目「{n0}」？项目目录会被整个移除，无法撤销。", { n0: project.name }))) return;
         await withApi(async () => {
           await api.deleteProject({ projectId: project.id });
           const list = await refreshProjects();
@@ -1270,7 +2301,7 @@
       const renameCurrent = async () => {
         if (project === null) return;
         // eslint-disable-next-line no-alert
-        const next = typeof window === "undefined" ? null : window.prompt("新的项目名", project.name);
+        const next = typeof window === "undefined" ? null : window.prompt(T("新的项目名"), project.name);
         if (next === null || next.trim() === "") return;
         await withApi(async () => {
           await api.renameProject({ projectId: project.id, name: next.trim() });
@@ -1289,11 +2320,11 @@
                 const text = String(reader.result ?? "");
                 resolve(text.slice(text.indexOf(",") + 1));
               };
-              reader.onerror = () => reject(new Error("读取文件失败"));
+              reader.onerror = () => reject(new Error(T("读取文件失败")));
               reader.readAsDataURL(file);
             });
             await api.uploadSource({ projectId: project.id, name: file.name, data: base64 });
-            setNotice({ kind: "ok", text: `已上传源图：${file.name}` });
+            setNotice({ kind: "ok", text: T("已上传源图：{n0}", { n0: file.name }) });
             await loadProject(project.id);
           } catch (error) {
             setNotice({ kind: "error", text: msg(error) });
@@ -1307,14 +2338,14 @@
       const savePrompts = (patch) =>
         withApi(() => api.savePrompts({ projectId: project.id, ...patch }), {
           reload: true,
-          notice: "提示词已保存",
+          notice: T("提示词已保存"),
           noticeKind: "ok"
         });
 
       const saveSettings = (patch) =>
         withApi(() => api.saveSettings({ projectId: project.id, settings: patch }), {
           reload: true,
-          notice: "参数已保存",
+          notice: T("参数已保存"),
           noticeKind: "ok"
         });
 
@@ -1333,13 +2364,13 @@
             ? await invoke()
             : await tasks.run(feedback.key, feedback.label, invoke);
         if (result !== null && typeof result === "object" && result.started === false) {
-          setNotice({ kind: "info", text: result.reason ?? "任务没有启动" });
+          setNotice({ kind: "info", text: result.reason ?? T("任务没有启动") });
         }
         return result;
       };
 
       if (api === undefined) {
-        return h("div", { className: "SPR_root" }, h("p", { className: "SPR_empty" }, "正在挂载游戏素材大师…"));
+        return h("div", { className: "SPR_root" }, h("p", { className: "SPR_empty" }, T("正在挂载游戏素材大师…")));
       }
 
       const activeStageIndex = STAGES.findIndex((s) => s.key === stage);
@@ -1351,17 +2382,17 @@
         h(
           "div",
           { className: "SPR_head" },
-          h("h2", null, "游戏素材大师"),
-          h("span", { className: "SPR_headSub" }, "火山方舟 Seedream 生图 · MiniMax 图生视频 · 本地抠绿幕合成"),
+          h("h2", null, T("游戏素材大师")),
+          h("span", { className: "SPR_headSub" }, T("火山方舟 Seedream 生图 · MiniMax 图生视频 · 本地抠绿幕合成")),
           h("span", { className: "SPR_spacer" }),
           module === "sprite"
             ? h(
                 React.Fragment,
                 null,
-                h(Btn, { onClick: () => void refreshProjects(), disabled: loading }, "刷新列表"),
-                project !== null ? h(Btn, { onClick: renameCurrent }, "重命名") : null,
-                project !== null ? h(Btn, { onClick: deleteCurrent, danger: true }, "删除项目") : null,
-                h(Btn, { onClick: createProject, primary: true }, "新建项目")
+                h(Btn, { onClick: () => void refreshProjects(), disabled: loading }, T("刷新列表")),
+                project !== null ? h(Btn, { onClick: renameCurrent }, T("重命名")) : null,
+                project !== null ? h(Btn, { onClick: deleteCurrent, danger: true }, T("删除项目")) : null,
+                h(Btn, { onClick: createProject, primary: true }, T("新建项目"))
               )
             : null
         ),
@@ -1382,7 +2413,7 @@
                 "span",
                 { className: "SPR_moduleTitleRow" },
                 h("span", { className: "SPR_moduleTitle" }, entry.title),
-                entry.experimental === true ? h("span", { className: "SPR_expTag" }, "实验性") : null
+                entry.experimental === true ? h("span", { className: "SPR_expTag" }, T("实验性")) : null
               ),
               h("span", { className: "SPR_moduleHint" }, entry.hint)
             )
@@ -1395,9 +2426,9 @@
           h(
             "div",
             { className: "SPR_side" },
-            h("div", { className: "SPR_sideTitle" }, `项目（${projects.length}）`),
+            h("div", { className: "SPR_sideTitle" }, T("项目（{n0}）", { n0: projects.length })),
             projects.length === 0
-              ? h("p", { className: "SPR_hint" }, "还没有项目，点右上角「新建项目」开始。")
+              ? h("p", { className: "SPR_hint" }, T("还没有项目，点右上角「新建项目」开始。"))
               : projects.map((summary) =>
                   h(
                     "button",
@@ -1412,7 +2443,7 @@
                     h(
                       "span",
                       { className: "SPR_projMeta" },
-                      `图 ${summary.imageReady}/8 · 视频 ${summary.videoReady}/8 · 帧 ${summary.framesReady}/8${summary.sheetReady ? " · 整图✓" : ""}`
+                      T("图 {n0}/8 · 视频 {n1}/8 · 帧 {n2}/8{n3}", { n0: summary.imageReady, n1: summary.videoReady, n2: summary.framesReady, n3: summary.sheetReady ? T(" · 整图✓") : "" })
                     )
                   )
                 )
@@ -1428,12 +2459,12 @@
                   h(
                     "span",
                     { style: { marginLeft: 10 } },
-                    h("button", { type: "button", className: "SPR_miniBtn", onClick: () => setNotice(null) }, "关闭")
+                    h("button", { type: "button", className: "SPR_miniBtn", onClick: () => setNotice(null) }, T("关闭"))
                   )
                 )
               : null,
             project === null
-              ? h("p", { className: "SPR_empty" }, loading ? "正在载入…" : "请选择或新建一个项目")
+              ? h("p", { className: "SPR_empty" }, loading ? T("正在载入…") : T("请选择或新建一个项目"))
               : h(
                   React.Fragment,
                   null,
@@ -1520,8 +2551,8 @@
                   h(
                     "div",
                     { className: "SPR_card" },
-                    h("div", { className: "SPR_cardHead" }, h("h3", null, "源图")),
-                    h("p", { className: "SPR_hint" }, "上传角色的原始设定图。第一步的正面绿幕图会以它为唯一参考。"),
+                    h("div", { className: "SPR_cardHead" }, h("h3", null, T("源图"))),
+                    h("p", { className: "SPR_hint" }, T("上传角色的原始设定图。第一步的正面绿幕图会以它为唯一参考。")),
                     h(
                       "div",
                       { className: "SPR_sourceRow" },
@@ -1529,9 +2560,9 @@
                         ? h("img", {
                             className: "SPR_sourcePreview",
                             src: assetUrl(project, project.source.file, project.updatedAt),
-                            alt: "源图"
+                            alt: T("源图")
                           })
-                        : h("div", { className: "SPR_thumbEmpty", style: { width: 132, height: 132, flex: "none" } }, "尚未上传源图"),
+                        : h("div", { className: "SPR_thumbEmpty", style: { width: 132, height: 132, flex: "none" } }, T("尚未上传源图")),
                       h(
                         "div",
                         { style: { flex: 1, minWidth: 240 } },
@@ -1552,7 +2583,7 @@
                               void uploadSource(file);
                             }
                           },
-                          sourceBusy ? "正在上传…" : "把图片拖到这里，或"
+                          sourceBusy ? T("正在上传…") : T("把图片拖到这里，或")
                         ),
                         h(
                           "div",
@@ -1560,7 +2591,7 @@
                           h(
                             Btn,
                             { onClick: () => fileInputRef.current?.click(), disabled: sourceBusy, primary: project.source === null },
-                            project.source === null ? "选择源图" : "更换源图"
+                            project.source === null ? T("选择源图") : T("更换源图")
                           ),
                           project.source !== null
                             ? h("span", { className: "SPR_refRow" }, project.source.name)
@@ -1584,8 +2615,8 @@
                   h(
                     "div",
                     { className: "SPR_toolbar" },
-                    h(Btn, { onClick: () => void loadProject(project.id) }, "刷新状态"),
-                    h(Btn, { onClick: () => void withApi(() => api.revealProject({ projectId: project.id })) }, "在访达中打开项目目录")
+                    h(Btn, { onClick: () => void loadProject(project.id) }, T("刷新状态")),
+                    h(Btn, { onClick: () => void withApi(() => api.revealProject({ projectId: project.id })) }, T("在访达中打开项目目录"))
                   )
                 )
           )
@@ -1601,7 +2632,7 @@
     /** 阶段卡片下方的说明文字（阶段①有两种生成方式，各说各的）。 */
     function stageHint(project, stage, activeStage) {
       if (stage === "images" && imageModeOf(project) === "turn") {
-        return "先生成一段「角色原地匀速转一整圈」的绿幕视频，再按时间截出八个方向的帧；下面时间轴上的八个圆圈就是各自的截帧位置，拖动即可改。";
+        return T("先生成一段「角色原地匀速转一整圈」的绿幕视频，再按时间截出八个方向的帧；下面时间轴上的八个圆圈就是各自的截帧位置，拖动即可改。");
       }
       return activeStage.hint;
     }
@@ -1627,10 +2658,14 @@
     // 容易在八个方向之间漂移。转圈截帧只生成**一段**「原地匀速转一整圈」的视频，
     // 八个方向是它时间轴上的八个截帧位置——八个方向天生同源，一致性最好。
     // 这条是默认路径，逐方向生图保留为备选（单张更清晰，但一致性看运气）。
-    const IMAGE_MODES = [
-      { key: "turn", title: "转圈截帧", hint: "先生成一段「原地匀速转一整圈」的视频，再按时间截出八个方向（默认，一致性最好）" },
-      { key: "direct", title: "逐方向生图", hint: "每个方向单独生图（备选：单张更清晰，但八个方向容易不一致）" }
+    function make_IMAGE_MODES() {
+      return [
+      { key: "turn", title: T("转圈截帧"), hint: T("先生成一段「原地匀速转一整圈」的视频，再按时间截出八个方向（默认，一致性最好）") },
+      { key: "direct", title: T("逐方向生图"), hint: T("每个方向单独生图（备选：单张更清晰，但八个方向容易不一致）") }
     ];
+    }
+    let IMAGE_MODES = make_IMAGE_MODES();
+
     const KEY_TURN_VIDEO = "turn:*video";
     const KEY_TURN_FRAMES = "turn:*frames";
     const KEY_TURN_PICK = (key) => `turn:pick:${key}`;
@@ -1666,7 +2701,7 @@
       return h(
         "div",
         { className: "SPR_modeBar" },
-        h("span", { className: "SPR_modeBarLabel" }, "生成方式"),
+        h("span", { className: "SPR_modeBarLabel" }, T("生成方式")),
         IMAGE_MODES.map((entry) =>
           h(
             "button",
@@ -1681,7 +2716,7 @@
                 void start(() => api.setImageMode({ projectId: project.id, mode: entry.key }), { reload: true })
             },
             h("span", { className: "SPR_modeTitle" }, entry.title),
-            entry.key === "turn" ? h("span", { className: "SPR_modeTag" }, "默认") : null
+            entry.key === "turn" ? h("span", { className: "SPR_modeTag" }, T("默认")) : null
           )
         ),
         h("span", { className: "SPR_modeBarHint" }, (IMAGE_MODES.find((entry) => entry.key === mode) ?? IMAGE_MODES[0]).hint)
@@ -1717,7 +2752,7 @@
         void start(
           () => api.setTurnPick({ projectId: project.id, key, index }),
           { reload: true },
-          { key: KEY_TURN_PICK(key), label: `正在切出「${LABEL_OF[key] ?? key}」第 ${index + 1} 帧…` }
+          { key: KEY_TURN_PICK(key), label: T("正在切出「{n0}」第 {n1} 帧…", { n0: LABEL_OF[key] ?? key, n1: index + 1 }) }
         );
       };
       const nudge = (key, delta) => {
@@ -1767,7 +2802,7 @@
           h("img", {
             className: "SPR_axisStrip",
             src: assetUrl(project, project.turn?.frames?.strip, project.turn?.frames?.updatedAt),
-            alt: "整圈候选帧",
+            alt: T("整圈候选帧"),
             draggable: false
           }),
           DIRECTION_KEYS.map((key) => {
@@ -1786,8 +2821,8 @@
                 "data-dragging": busy === true ? "true" : undefined,
                 "data-testid": `turn-dot-${key}`,
                 style: { left: `${((index + 0.5) / Math.max(1, total)) * 100}%`, top: `${6 + (lanes[key] ?? 0) * 26}px` },
-                title: `${LABEL_OF[key] ?? key}：第 ${index + 1}/${total} 帧（${time.toFixed(2)} 秒）— 拖动改位置，←/→ 微调`,
-                "aria-label": `${LABEL_OF[key] ?? key} 第 ${index + 1} 帧`,
+                title: T("{n0}：第 {n1}/{n2} 帧（{n3} 秒）— 拖动改位置，←/→ 微调", { n0: LABEL_OF[key] ?? key, n1: index + 1, n2: total, n3: time.toFixed(2) }),
+                "aria-label": T("{n0} 第 {n1} 帧", { n0: LABEL_OF[key] ?? key, n1: index + 1 }),
                 onPointerDown: (event) => {
                   event.preventDefault();
                   setDrag({ key, index });
@@ -1811,15 +2846,15 @@
         h(
           "div",
           { className: "SPR_axisRuler" },
-          h("span", null, "0 秒"),
+          h("span", null, T("0 秒")),
           h(
             "span",
             { className: "SPR_axisRulerMid" },
             total > 0
-              ? `共 ${total} 张候选帧 · 每张约 ${(duration / total).toFixed(2)} 秒 —— 拖动圆圈调整每个方向截在哪一帧`
-              : "还没有候选帧：先点「生成转圈视频」，视频到手会自动抽帧"
+              ? T("共 {n0} 张候选帧 · 每张约 {n1} 秒 —— 拖动圆圈调整每个方向截在哪一帧", { n0: total, n1: (duration / total).toFixed(2) })
+              : T("还没有候选帧：先点「生成转圈视频」，视频到手会自动抽帧")
           ),
-          h("span", null, `${duration.toFixed(2)} 秒`)
+          h("span", null, T("{n0} 秒", { n0: duration.toFixed(2) }))
         )
       );
     }
@@ -1838,12 +2873,12 @@
       }, [project.prompts?.turn]);
 
       const videoRunning = video.status === "running" || tasks.has(KEY_TURN_VIDEO);
-      const videoLabel = tasks.label(KEY_TURN_VIDEO) ?? (video.remoteStatus ?? "正在生成转圈视频…");
+      const videoLabel = tasks.label(KEY_TURN_VIDEO) ?? (video.remoteStatus ?? T("正在生成转圈视频…"));
       // 「在切帧」= 本地刚点下去 / 宿主那批抽帧还在跑。抽帧是 kick 型调用，
       // 一提交就返回，真正的活（抽 32 张 + 切 8 张图）在后台，所以两者都要看。
       const hostFrames = hostJob(project, "turn:frames");
       const cutting = frames.status === "running" || tasks.has(KEY_TURN_FRAMES) || hostFrames !== undefined;
-      const cutLabel = tasks.label(KEY_TURN_FRAMES) ?? (frames.status === "running" ? "正在抽取候选帧…" : "正在抽取候选帧并切出八个方向…");
+      const cutLabel = tasks.label(KEY_TURN_FRAMES) ?? (frames.status === "running" ? T("正在抽取候选帧…") : T("正在抽取候选帧并切出八个方向…"));
       const promptDirty = promptDraft !== (project.prompts?.turn ?? "");
       const frameCount = Number(countDraft ?? project.settings?.turnFrameCount ?? 32);
       const allApproved = DIRECTION_KEYS.every((key) => project.images?.[key]?.approved);
@@ -1856,7 +2891,7 @@
         h(
           "p",
           { className: "SPR_hint" },
-          "先生成一段「角色原地匀速转一整圈」的视频（绿幕、保持原图风格、除旋转外不做任何动作），再按时间截出八个方向的帧。八个方向出自同一段视频，一致性比逐方向生图好得多；下面时间轴上的八个圆圈就是各自的截帧位置，随便拖。"
+          T("先生成一段「角色原地匀速转一整圈」的视频（绿幕、保持原图风格、除旋转外不做任何动作），再按时间截出八个方向的帧。八个方向出自同一段视频，一致性比逐方向生图好得多；下面时间轴上的八个圆圈就是各自的截帧位置，随便拖。")
         ),
         h("textarea", {
           className: "SPR_area",
@@ -1867,18 +2902,18 @@
         h(
           "div",
           { className: "SPR_toolbar" },
-          h(Btn, { disabled: !promptDirty, onClick: () => void savePrompts({ turn: promptDraft }) }, promptDirty ? "保存转圈提示词" : "转圈提示词已保存"),
+          h(Btn, { disabled: !promptDirty, onClick: () => void savePrompts({ turn: promptDraft }) }, promptDirty ? T("保存转圈提示词") : T("转圈提示词已保存")),
           h(
             Btn,
             {
               onClick: () =>
                 void start(() => api.savePrompts({ projectId: project.id, resetTurnToDefault: true }), {
                   reload: true,
-                  notice: "转圈提示词已重置为默认模板",
+                  notice: T("转圈提示词已重置为默认模板"),
                   noticeKind: "ok"
                 })
             },
-            "重置为默认"
+            T("重置为默认")
           )
         ),
         h(
@@ -1889,36 +2924,36 @@
             {
               primary: video.file === undefined,
               busy: tasks.has(KEY_TURN_VIDEO),
-              busyText: "正在提交…",
+              busyText: T("正在提交…"),
               disabled: project.source === null || videoRunning,
               onClick: () =>
                 void start(() => api.runTurnVideo({ projectId: project.id }), { reload: true }, {
                   key: KEY_TURN_VIDEO,
-                  label: "正在提交转圈视频任务…"
+                  label: T("正在提交转圈视频任务…")
                 })
             },
             video.file === undefined
-              ? "生成转圈视频（计费一次）"
+              ? T("生成转圈视频（计费一次）")
               : videoRunning
-                ? "转圈视频生成中…"
-                : "重新生成转圈视频（计费一次）"
+                ? T("转圈视频生成中…")
+                : T("重新生成转圈视频（计费一次）")
           ),
           h(
             BusyBtn,
             {
               busy: tasks.has(KEY_TURN_FRAMES),
-              busyText: "正在抽帧…",
+              busyText: T("正在抽帧…"),
               disabled: video.file === undefined || cutting,
               onClick: () =>
                 void start(() => api.runTurnFrames({ projectId: project.id }), { reload: true }, {
                   key: KEY_TURN_FRAMES,
-                  label: "正在抽取候选帧并切出八个方向…"
+                  label: T("正在抽取候选帧并切出八个方向…")
                 })
             },
-            total > 0 ? `重新抽帧（当前 ${total} 张）` : "抽取候选帧"
+            total > 0 ? T("重新抽帧（当前 {n0} 张）", { n0: total }) : T("抽取候选帧")
           ),
           h(NumField, {
-            label: "候选帧数（8~64）",
+            label: T("候选帧数（8~64）"),
             value: frameCount,
             min: TURN_FRAME_MIN,
             max: TURN_FRAME_MAX,
@@ -1928,17 +2963,17 @@
             BusyBtn,
             {
               busy: tasks.has(KEY_TURN_FRAMES),
-              busyText: "正在抽帧…",
+              busyText: T("正在抽帧…"),
               disabled: video.file === undefined || cutting || countDraft === null || countDraft === project.settings?.turnFrameCount,
               onClick: () =>
-                void start(() => api.runTurnFrames({ projectId: project.id, count: frameCount }), { reload: true, notice: `已按 ${frameCount} 张重抽候选帧`, noticeKind: "ok" }, {
+                void start(() => api.runTurnFrames({ projectId: project.id, count: frameCount }), { reload: true, notice: T("已按 {n0} 张重抽候选帧", { n0: frameCount }), noticeKind: "ok" }, {
                   key: KEY_TURN_FRAMES,
-                  label: `正在按 ${frameCount} 张重抽候选帧…`
+                  label: T("正在按 {n0} 张重抽候选帧…", { n0: frameCount })
                 })
             },
-            "应用帧数"
+            T("应用帧数")
           ),
-          h("span", { className: "SPR_refRow" }, project.settings?.turnFrameCount === frameCount ? `当前 ${project.settings?.turnFrameCount ?? "—"} 张` : `未应用（当前 ${project.settings?.turnFrameCount ?? "—"} 张）`)
+          h("span", { className: "SPR_refRow" }, project.settings?.turnFrameCount === frameCount ? T("当前 {n0} 张", { n0: project.settings?.turnFrameCount ?? "—" }) : T("未应用（当前 {n0} 张）", { n0: project.settings?.turnFrameCount ?? "—" }))
         ),
         h(
           "div",
@@ -1948,23 +2983,23 @@
             {
               disabled: total === 0 || cutting,
               onClick: () =>
-                void start(() => api.resetTurnPicks({ projectId: project.id }), { reload: true, notice: "八个圆圈已回到默认等分位置", noticeKind: "ok" })
+                void start(() => api.resetTurnPicks({ projectId: project.id }), { reload: true, notice: T("八个圆圈已回到默认等分位置"), noticeKind: "ok" })
             },
-            "重置八个圆圈"
+            T("重置八个圆圈")
           ),
           h(
             Btn,
             {
               disabled: total === 0 || cutting,
-              title: "转圈方向决定默认位置怎么排；拖动过的圆圈以你的位置为准",
+              title: T("转圈方向决定默认位置怎么排；拖动过的圆圈以你的位置为准"),
               onClick: () =>
                 void start(() => api.resetTurnPicks({ projectId: project.id, direction: project.turn?.direction === "ccw" ? "cw" : "ccw" }), {
                   reload: true,
-                  notice: project.turn?.direction === "ccw" ? "已改为顺时针并重排八个圆圈" : "已改为逆时针并重排八个圆圈",
+                  notice: project.turn?.direction === "ccw" ? T("已改为顺时针并重排八个圆圈") : T("已改为逆时针并重排八个圆圈"),
                   noticeKind: "ok"
                 })
             },
-            project.turn?.direction === "ccw" ? "转圈方向：逆时针（点一下换向）" : "转圈方向：顺时针（点一下换向）"
+            project.turn?.direction === "ccw" ? T("转圈方向：逆时针（点一下换向）") : T("转圈方向：顺时针（点一下换向）")
           ),
           h(
             Btn,
@@ -1973,7 +3008,7 @@
               disabled: readyImages === 0,
               onClick: () => void start(() => api.setApproved({ projectId: project.id, stage: "images", approved: !allApproved }), { reload: true })
             },
-            allApproved ? "取消全部通过" : "全部标记通过"
+            allApproved ? T("取消全部通过") : T("全部标记通过")
           ),
           h(BusyBadge, { show: videoRunning || cutting, text: videoRunning ? videoLabel : cutLabel })
         ),
@@ -1996,13 +3031,13 @@
           : h(
               "div",
               { className: "SPR_thumbEmpty", style: { aspectRatio: "16/9" } },
-              videoRunning ? "正在生成转圈视频…" : "还没有转圈视频：点上面的「生成转圈视频」"
+              videoRunning ? T("正在生成转圈视频…") : T("还没有转圈视频：点上面的「生成转圈视频」")
             ),
         video.error !== undefined ? h("p", { className: "SPR_error" }, video.error) : null,
         h(
           "div",
           { className: "SPR_refRow" },
-          `首帧用的是${video.firstFrame !== undefined && String(video.firstFrame).startsWith("images/") ? "已生成的正面绿幕图" : "上传的源图"}：${video.firstFrame ?? "—"}`
+          T("首帧用的是{n0}：{n1}", { n0: video.firstFrame !== undefined && String(video.firstFrame).startsWith("images/") ? T("已生成的正面绿幕图") : T("上传的源图"), n1: video.firstFrame ?? "—" })
         ),
         total > 0
           ? h(TurnAxis, {
@@ -2018,7 +3053,7 @@
           : h(
               "div",
               { className: "SPR_thumbEmpty", style: { marginTop: 10 } },
-              cutting ? "正在抽取候选帧…" : stale ? "候选帧已过期（转圈视频换过了）：点「重新抽帧」" : "还没有候选帧"
+              cutting ? T("正在抽取候选帧…") : stale ? T("候选帧已过期（转圈视频换过了）：点「重新抽帧」") : T("还没有候选帧")
             ),
         frames.error !== undefined ? h("p", { className: "SPR_error" }, frames.error) : null,
         h(
@@ -2029,7 +3064,7 @@
             const index = Math.min(Math.max(0, total - 1), Math.max(0, Number(picks[key] ?? 0)));
             const queued = (tasks.has(KEY_TURN_FRAMES) || jobCovers(hostFrames, key)) && node?.status !== "error";
             const nodeBusy = node?.status === "running" || tasks.has(KEY_TURN_PICK(key)) || queued;
-            const overlayText = tasks.label(KEY_TURN_PICK(key)) ?? (queued ? cutLabel : "正在切出这一帧…");
+            const overlayText = tasks.label(KEY_TURN_PICK(key)) ?? (queued ? cutLabel : T("正在切出这一帧…"));
             return h(
               "div",
               { key, className: "SPR_node", "data-busy": nodeBusy ? "true" : undefined },
@@ -2037,7 +3072,7 @@
                 "div",
                 { className: "SPR_nodeTop" },
                 h("span", { className: "SPR_nodeTitle" }, LABEL_OF[key] ?? key),
-                nodeBusy ? h(Chip, { kind: "running", text: "切帧中" }) : h(StatusChip, { node })
+                nodeBusy ? h(Chip, { kind: "running", text: T("切帧中") }) : h(StatusChip, { node })
               ),
               node?.file !== undefined
                 ? h(
@@ -2045,14 +3080,14 @@
                     { overlay: nodeBusy, text: overlayText },
                     h("img", { className: "SPR_thumb", src: assetUrl(project, node.file, node.updatedAt ?? project.updatedAt), alt: LABEL_OF[key] ?? key })
                   )
-                : h("div", { className: "SPR_thumbEmpty" }, nodeBusy ? "正在切出这一帧…" : "还没有这一方向的图"),
+                : h("div", { className: "SPR_thumbEmpty" }, nodeBusy ? T("正在切出这一帧…") : T("还没有这一方向的图")),
               node?.error !== undefined ? h("p", { className: "SPR_error" }, node.error) : null,
               h(
                 "span",
                 { className: "SPR_refRow" },
                 total > 0
-                  ? `第 ${index + 1}/${total} 帧 · ${((index * duration) / Math.max(1, total)).toFixed(2)} 秒`
-                  : "等待候选帧"
+                  ? T("第 {n0}/{n1} 帧 · {n2} 秒", { n0: index + 1, n1: total, n2: ((index * duration) / Math.max(1, total)).toFixed(2) })
+                  : T("等待候选帧")
               ),
               h(
                 "div",
@@ -2071,7 +3106,7 @@
                           approved: node?.approved !== true
                         }), { reload: true })
                   },
-                  node?.approved === true ? "已通过" : "通过"
+                  node?.approved === true ? T("已通过") : T("通过")
                 )
               )
             );
@@ -2097,7 +3132,7 @@
       // 「一键生成全部」/「全部重新生成」提交后，八个方向都可能要重出图，
       // 在宿主状态回来之前先整体盖住，别让用户以为按钮没生效。
       const batch = tasks.has(KEY_IMG_ALL) || tasks.has(KEY_IMG_REGENERATE);
-      const batchLabel = tasks.label(KEY_IMG_REGENERATE) ?? tasks.label(KEY_IMG_ALL) ?? "正在生成绿幕图…";
+      const batchLabel = tasks.label(KEY_IMG_REGENERATE) ?? tasks.label(KEY_IMG_ALL) ?? T("正在生成绿幕图…");
       // 宿主侧那批生成还在跑（一次两个方向地慢慢做）：本地 pending 只多留 700ms，
       // 撑不住整批，按钮的置灰与徽章要看宿主这张表。
       const hostAll = hostJob(project, "images:all");
@@ -2116,31 +3151,31 @@
             {
               primary: true,
               busy: tasks.has(KEY_IMG_ALL),
-              busyText: "正在提交全部方向…",
+              busyText: T("正在提交全部方向…"),
               // 宿主的这一批还在跑时按钮置灰：重复点只会被宿主拒绝，
               // 用户却会以为没反应（工具栏徽章已经写明在跑什么）。
               disabled: project.source === null || batchBusy,
               onClick: () =>
                 void start(() => api.runImages({ projectId: project.id }), { reload: true }, {
                   key: KEY_IMG_ALL,
-                  label: "正在提交全部方向…"
+                  label: T("正在提交全部方向…")
                 })
             },
-            "一键生成全部（跳过已通过的）"
+            T("一键生成全部（跳过已通过的）")
           ),
           h(
             BusyBtn,
             {
               busy: tasks.has(KEY_IMG_REGENERATE),
-              busyText: "正在提交全部重做…",
+              busyText: T("正在提交全部重做…"),
               disabled: batchBusy,
               onClick: () =>
                 void start(() => api.runImages({ projectId: project.id, force: true }), { reload: true }, {
                   key: KEY_IMG_REGENERATE,
-                  label: "正在提交全部重做…"
+                  label: T("正在提交全部重做…")
                 })
             },
-            "全部重新生成"
+            T("全部重新生成")
           ),
           h(
             Btn,
@@ -2149,27 +3184,27 @@
               disabled: batchBusy,
               onClick: () => void start(() => api.setApproved({ projectId: project.id, stage: "images", approved: !allApproved }), { reload: true })
             },
-            allApproved ? "取消全部通过" : "全部标记通过"
+            allApproved ? T("取消全部通过") : T("全部标记通过")
           ),
           h(
             BusyBtn,
             {
               busy: resetting,
-              busyText: "正在重置…",
+              busyText: T("正在重置…"),
               disabled: batchBusy,
               onClick: () => {
-                if (typeof window !== "undefined" && !window.confirm("把八个方向的生图提示词和视频提示词都重置为当前默认模板？你手改过的内容会丢失。")) return;
+                if (typeof window !== "undefined" && !window.confirm(T("把八个方向的生图提示词和视频提示词都重置为当前默认模板？你手改过的内容会丢失。"))) return;
                 void start(
                   () => api.savePrompts({ projectId: project.id, resetImagesToDefault: true, resetVideoToDefault: true }),
-                  { reload: true, notice: "提示词已重置为默认模板", noticeKind: "ok" },
-                  { key: KEY_PROMPT_RESET, label: "正在重置提示词…" }
+                  { reload: true, notice: T("提示词已重置为默认模板"), noticeKind: "ok" },
+                  { key: KEY_PROMPT_RESET, label: T("正在重置提示词…") }
                 );
               }
             },
-            "重置提示词为默认"
+            T("重置提示词为默认")
           ),
           h(BusyBadge, { show: batchBusy, text: batchLabel }),
-          project.source === null ? h("span", { className: "SPR_refRow" }, "请先上传源图") : null
+          project.source === null ? h("span", { className: "SPR_refRow" }, T("请先上传源图")) : null
         ),
         h(
           "div",
@@ -2188,7 +3223,7 @@
               (jobCovers(hostAll, direction.key) && node?.status !== "error");
             const nodeBusy = node?.status === "running" || tasks.has(taskKey) || waiting;
             const withPromptKey = `${taskKey}:prompt`;
-            const overlayText = tasks.label(taskKey) ?? (waiting ? batchLabel : "正在生成…");
+            const overlayText = tasks.label(taskKey) ?? (waiting ? batchLabel : T("正在生成…"));
             return h(
               "div",
               { key: direction.key, className: "SPR_node", "data-stale": node?.stale === true ? "true" : "false", "data-busy": nodeBusy ? "true" : undefined },
@@ -2196,7 +3231,7 @@
                 "div",
                 { className: "SPR_nodeTop" },
                 h("span", { className: "SPR_nodeTitle" }, direction.label),
-                nodeBusy ? h(Chip, { kind: "running", text: "生成中" }) : h(StatusChip, { node })
+                nodeBusy ? h(Chip, { kind: "running", text: T("生成中") }) : h(StatusChip, { node })
               ),
               node?.file !== undefined
                 ? h(
@@ -2211,13 +3246,13 @@
                 : h(
                     "div",
                     { className: "SPR_thumbEmpty" },
-                    nodeBusy ? "正在生成…" : `参考：${direction.refs.join(" + ")}`
+                    nodeBusy ? T("正在生成…") : T("参考：{n0}", { n0: direction.refs.join(" + ") })
                   ),
               nodeBusy ? h(BusyBadge, { show: true, text: overlayText }) : null,
               node?.error !== undefined ? h("p", { className: "SPR_error" }, node.error) : null,
               node?.status === "ready" && node.elapsedMs !== undefined
-                ? h("span", { className: "SPR_refRow" }, `用时 ${(node.elapsedMs / 1000).toFixed(1)} 秒 · ${node.model ?? ""}`)
-                : h("span", { className: "SPR_refRow" }, `参考：${direction.refs.join(" + ")}`),
+                ? h("span", { className: "SPR_refRow" }, T("用时 {n0} 秒 · {n1}", { n0: (node.elapsedMs / 1000).toFixed(1), n1: node.model ?? "" }))
+                : h("span", { className: "SPR_refRow" }, T("参考：{n0}", { n0: direction.refs.join(" + ") })),
               h(
                 "button",
                 {
@@ -2225,7 +3260,7 @@
                   className: "SPR_miniBtn",
                   onClick: () => setPromptOpen({ ...promptOpen, [direction.key]: !open })
                 },
-                open ? "收起提示词 ▲" : "编辑提示词 ▼"
+                open ? T("收起提示词 ▲") : T("编辑提示词 ▼")
               ),
               open
                 ? h(
@@ -2245,21 +3280,21 @@
                           disabled: !dirty,
                           onClick: () => void savePrompts({ images: { [direction.key]: draft } })
                         },
-                        dirty ? "保存改动" : "已保存"
+                        dirty ? T("保存改动") : T("已保存")
                       ),
                       h(
                         BusyBtn,
                         {
                           busy: tasks.has(withPromptKey),
-                          busyText: "正在提交…",
+                          busyText: T("正在提交…"),
                           onClick: () =>
                             void start(
                               () => api.runImage({ projectId: project.id, key: direction.key, prompt: draft }),
                               { reload: true },
-                              { key: withPromptKey, label: `正在用这段提示词生成「${direction.label}」…` }
+                              { key: withPromptKey, label: T("正在用这段提示词生成「{n0}」…", { n0: direction.label }) }
                             )
                         },
-                        "用这段提示词生成"
+                        T("用这段提示词生成")
                       )
                     )
                   )
@@ -2272,14 +3307,14 @@
                   {
                     primary: node?.file === undefined,
                     busy: tasks.has(taskKey),
-                    busyText: "正在提交…",
+                    busyText: T("正在提交…"),
                     onClick: () =>
                       void start(() => api.runImage({ projectId: project.id, key: direction.key }), { reload: true }, {
                         key: taskKey,
-                        label: `正在生成「${direction.label}」…`
+                        label: T("正在生成「{n0}」…", { n0: direction.label })
                       })
                   },
-                  node?.file === undefined ? "生成" : "重新生成"
+                  node?.file === undefined ? T("生成") : T("重新生成")
                 ),
                 h(
                   Btn,
@@ -2295,7 +3330,7 @@
                           approved: node?.approved !== true
                         }), { reload: true })
                   },
-                  node?.approved === true ? "已通过" : "通过"
+                  node?.approved === true ? T("已通过") : T("通过")
                 )
               )
             );
@@ -2321,12 +3356,12 @@
       const submitting = tasks.any("video:*") || hostSubmit !== undefined;
       // 批量提交视频时八个方向都会重新出片，提交阶段先把预览整体盖住。
       const allBusy = tasks.has(KEY_VIDEO_ALL);
-      const allLabel = tasks.label(KEY_VIDEO_ALL) ?? "正在提交 8 个方向的视频任务…";
+      const allLabel = tasks.label(KEY_VIDEO_ALL) ?? T("正在提交 8 个方向的视频任务…");
 
       return h(
         React.Fragment,
         null,
-        h("p", { className: "SPR_hint" }, "提示词要求「固定镜头、固定背景、原地走三步」。Hailuo 一段通常要 1~6 分钟，提交后可以离开这个页面。"),
+        h("p", { className: "SPR_hint" }, T("提示词要求「固定镜头、固定背景、原地走三步」。Hailuo 一段通常要 1~6 分钟，提交后可以离开这个页面。")),
         h("textarea", {
           className: "SPR_area",
           value: videoPromptDraft,
@@ -2335,34 +3370,34 @@
         h(
           "div",
           { className: "SPR_toolbar" },
-          h(Btn, { disabled: !promptDirty, onClick: () => void savePrompts({ video: videoPromptDraft }) }, promptDirty ? "保存视频提示词" : "视频提示词已保存"),
+          h(Btn, { disabled: !promptDirty, onClick: () => void savePrompts({ video: videoPromptDraft }) }, promptDirty ? T("保存视频提示词") : T("视频提示词已保存")),
           h(
             BusyBtn,
             {
               primary: true,
               busy: tasks.has(KEY_VIDEO_ALL),
-              busyText: "正在提交 8 个方向…",
+              busyText: T("正在提交 8 个方向…"),
               disabled: readyImages.length === 0 || submitting,
               onClick: () =>
                 void start(() => api.runVideos({ projectId: project.id }), { reload: true }, {
                   key: KEY_VIDEO_ALL,
-                  label: "正在提交全部方向…"
+                  label: T("正在提交全部方向…")
                 })
             },
-            `生成全部视频（${readyImages.length}/8 张绿幕图就绪）`
+            T("生成全部视频（{n0}/8 张绿幕图就绪）", { n0: readyImages.length })
           ),
           h(
             BusyBtn,
             {
               busy: tasks.has(KEY_VIDEO_POLL),
-              busyText: "正在查询…",
+              busyText: T("正在查询…"),
               onClick: () =>
                 void start(() => api.pollVideos({ projectId: project.id }), { reload: true }, {
                   key: KEY_VIDEO_POLL,
-                  label: "正在查询远端视频进度…"
+                  label: T("正在查询远端视频进度…")
                 })
             },
-            "立即刷新进度"
+            T("立即刷新进度")
           ),
           h(
             Btn,
@@ -2371,7 +3406,7 @@
               disabled: submitting,
               onClick: () => void start(() => api.setApproved({ projectId: project.id, stage: "videos", approved: !allApproved }), { reload: true })
             },
-            allApproved ? "取消全部通过" : "全部标记通过"
+            allApproved ? T("取消全部通过") : T("全部标记通过")
           ),
           h(
             Btn,
@@ -2379,13 +3414,13 @@
               danger: true,
               disabled: submitting,
               onClick: () => {
-                if (typeof window !== "undefined" && !window.confirm("清空所有视频与已抽的帧？绿幕图会保留。")) return;
-                void start(() => api.clearVideos({ projectId: project.id }), { reload: true, notice: "已清空视频与序列帧", noticeKind: "ok" });
+                if (typeof window !== "undefined" && !window.confirm(T("清空所有视频与已抽的帧？绿幕图会保留。"))) return;
+                void start(() => api.clearVideos({ projectId: project.id }), { reload: true, notice: T("已清空视频与序列帧"), noticeKind: "ok" });
               }
             },
-            "清空视频重来"
+            T("清空视频重来")
           ),
-          running.length > 0 ? h("span", { className: "SPR_refRow" }, `${running.length} 个任务进行中，界面会自动刷新`) : null
+          running.length > 0 ? h("span", { className: "SPR_refRow" }, T("{n0} 个任务进行中，界面会自动刷新", { n0: running.length })) : null
         ),
         h(
           "div",
@@ -2399,7 +3434,7 @@
               (allBusy && video?.status !== "running" && !tasks.has(taskKey)) ||
               (jobCovers(hostSubmit, direction.key) && video?.status !== "error");
             const nodeBusy = video?.status === "running" || tasks.has(taskKey) || waiting;
-            const overlayText = tasks.label(taskKey) ?? (waiting ? allLabel : "正在生成视频…");
+            const overlayText = tasks.label(taskKey) ?? (waiting ? allLabel : T("正在生成视频…"));
             return h(
               "div",
               { key: direction.key, className: "SPR_node", "data-busy": nodeBusy ? "true" : undefined },
@@ -2407,7 +3442,7 @@
                 "div",
                 { className: "SPR_nodeTop" },
                 h("span", { className: "SPR_nodeTitle" }, direction.label),
-                nodeBusy ? h(Chip, { kind: "running", text: "生成中" }) : h(StatusChip, { node: video })
+                nodeBusy ? h(Chip, { kind: "running", text: T("生成中") }) : h(StatusChip, { node: video })
               ),
               video?.file !== undefined
                 ? h(
@@ -2426,9 +3461,9 @@
                       { overlay: nodeBusy || waiting, text: overlayText },
                       h("img", { className: "SPR_thumb", src: assetUrl(project, image.file, image.updatedAt), alt: direction.label })
                     )
-                  : h("div", { className: "SPR_thumbEmpty" }, "还没有绿幕图"),
+                  : h("div", { className: "SPR_thumbEmpty" }, T("还没有绿幕图")),
               nodeBusy || waiting ? h(BusyBadge, { show: true, text: overlayText }) : null,
-              video?.remoteStatus !== undefined ? h("span", { className: "SPR_refRow" }, `远端状态：${video.remoteStatus}`) : null,
+              video?.remoteStatus !== undefined ? h("span", { className: "SPR_refRow" }, T("远端状态：{n0}", { n0: video.remoteStatus })) : null,
               video?.error !== undefined ? h("p", { className: "SPR_error" }, video.error) : null,
               h(
                 "div",
@@ -2438,7 +3473,7 @@
                   {
                     primary: video?.file === undefined && image?.file !== undefined,
                     busy: tasks.has(taskKey),
-                    busyText: "正在提交…",
+                    busyText: T("正在提交…"),
                     disabled: image?.file === undefined,
                     onClick: () =>
                       void start(
@@ -2455,11 +3490,11 @@
                         { reload: true },
                         {
                           key: taskKey,
-                          label: `正在生成「${direction.label}」视频…`
+                          label: T("正在生成「{n0}」视频…", { n0: direction.label })
                         }
                       )
                   },
-                  video?.file === undefined ? "生成视频" : "重新生成"
+                  video?.file === undefined ? T("生成视频") : T("重新生成")
                 ),
                 h(
                   Btn,
@@ -2475,7 +3510,7 @@
                           approved: video?.approved !== true
                         }), { reload: true })
                   },
-                  video?.approved === true ? "已通过" : "通过"
+                  video?.approved === true ? T("已通过") : T("通过")
                 )
               )
             );
@@ -2510,7 +3545,7 @@
         void start(
           () => api.setFramePick({ projectId: project.id, key: directionKey, slot, index }),
           { reload: true },
-          { key: `frames:slot:${directionKey}:${slot}`, label: `正在切出第 ${slot + 1} 帧…` }
+          { key: `frames:slot:${directionKey}:${slot}`, label: T("正在切出第 {n0} 帧…", { n0: slot + 1 }) }
         );
       };
       const nudge = (slot, delta) => {
@@ -2556,7 +3591,7 @@
           h("img", {
             className: "SPR_axisStrip",
             src: assetUrl(project, candidates.strip, candidates.updatedAt),
-            alt: "候选帧",
+            alt: T("候选帧"),
             draggable: false
           }),
           picks.map((_, slot) => {
@@ -2572,8 +3607,8 @@
                 "data-active": active ? "true" : "false",
                 "data-testid": `frame-dot-${directionKey}-${slot}`,
                 style: { left: `${((index + 0.5) / Math.max(1, total)) * 100}%`, top: `${6 + (lanes[slot] ?? 0) * 26}px` },
-                title: `第 ${slot + 1} 帧：候选第 ${index + 1}/${total}（${time.toFixed(2)} 秒）— 拖动改位置，←/→ 微调`,
-                "aria-label": `第 ${slot + 1} 帧，候选第 ${index + 1}`,
+                title: T("第 {n0} 帧：候选第 {n1}/{n2}（{n3} 秒）— 拖动改位置，←/→ 微调", { n0: slot + 1, n1: index + 1, n2: total, n3: time.toFixed(2) }),
+                "aria-label": T("第 {n0} 帧，候选第 {n1}", { n0: slot + 1, n1: index + 1 }),
                 onPointerDown: (event) => {
                   if (busy === true) return;
                   event.preventDefault();
@@ -2598,13 +3633,13 @@
         h(
           "div",
           { className: "SPR_axisRuler" },
-          h("span", null, "0 秒"),
+          h("span", null, T("0 秒")),
           h(
             "span",
             { className: "SPR_axisRulerMid" },
-            `共 ${total} 张候选帧 · ${picks.length} 个圆圈 —— 拖动圆圈决定每一张输出帧截在哪`
+            T("共 {n0} 张候选帧 · {n1} 个圆圈 —— 拖动圆圈决定每一张输出帧截在哪", { n0: total, n1: picks.length })
           ),
-          h("span", null, `${duration.toFixed(2)} 秒`)
+          h("span", null, T("{n0} 秒", { n0: duration.toFixed(2) }))
         )
       );
     }
@@ -2626,8 +3661,8 @@
         h(
           "div",
           { className: "SPR_pickHead" },
-          h("span", { className: "SPR_nodeTitle" }, `手动选帧 · ${direction.label}`),
-          h("span", { className: "SPR_refRow" }, "只影响这一段视频。圆圈个数跟「每段视频抽帧数」走，拖到哪一格就截哪一格。")
+          h("span", { className: "SPR_nodeTitle" }, T("手动选帧 · {n0}", { n0: direction.label })),
+          h("span", { className: "SPR_refRow" }, T("只影响这一段视频。圆圈个数跟「每段视频抽帧数」走，拖到哪一格就截哪一格。"))
         ),
         video?.file !== undefined
           ? h("video", {
@@ -2641,7 +3676,7 @@
           "div",
           { className: "SPR_toolbar" },
           h(NumField, {
-            label: "候选帧数（8~64）",
+            label: T("候选帧数（8~64）"),
             value: frameCount,
             min: TURN_FRAME_MIN,
             max: TURN_FRAME_MAX,
@@ -2651,33 +3686,33 @@
             BusyBtn,
             {
               busy: tasks.has(taskKey),
-              busyText: "正在抽候选帧…",
+              busyText: T("正在抽候选帧…"),
               disabled: cutting && !tasks.has(taskKey),
               onClick: () =>
                 void start(
                   () => api.prepareFramePick({ projectId: project.id, key: direction.key, count: frameCount }),
-                  { reload: true, notice: `已按 ${frameCount} 张候选帧重抽「${direction.label}」`, noticeKind: "ok" },
-                  { key: taskKey, label: `正在抽取「${direction.label}」的候选帧…` }
+                  { reload: true, notice: T("已按 {n0} 张候选帧重抽「{n1}」", { n0: frameCount, n1: direction.label }), noticeKind: "ok" },
+                  { key: taskKey, label: T("正在抽取「{n0}」的候选帧…", { n0: direction.label }) }
                 )
             },
-            total > 0 ? "重新抽取候选帧" : "抽取候选帧"
+            total > 0 ? T("重新抽取候选帧") : T("抽取候选帧")
           ),
           h(
             BusyBtn,
             {
               busy: tasks.has(`frames:slot:${direction.key}:reset`),
-              busyText: "正在重置…",
+              busyText: T("正在重置…"),
               disabled: total === 0 || cutting,
               onClick: () =>
                 void start(
                   () => api.resetFramePicks({ projectId: project.id, key: direction.key }),
-                  { reload: true, notice: "圆圈已回到等分位置", noticeKind: "ok" },
-                  { key: `frames:slot:${direction.key}:reset`, label: `正在重置「${direction.label}」的选帧…` }
+                  { reload: true, notice: T("圆圈已回到等分位置"), noticeKind: "ok" },
+                  { key: `frames:slot:${direction.key}:reset`, label: T("正在重置「{n0}」的选帧…", { n0: direction.label }) }
                 )
             },
-            "重置为等分"
+            T("重置为等分")
           ),
-          h(BusyBadge, { show: cutting, text: tasks.label(taskKey) ?? "正在抽取候选帧…" })
+          h(BusyBadge, { show: cutting, text: tasks.label(taskKey) ?? T("正在抽取候选帧…") })
         ),
         total > 0
           ? h(FramePickAxis, {
@@ -2690,7 +3725,7 @@
               start,
               busy: cutting
             })
-          : h("div", { className: "SPR_thumbEmpty" }, cutting ? "正在抽取候选帧…" : "还没有候选帧"),
+          : h("div", { className: "SPR_thumbEmpty" }, cutting ? T("正在抽取候选帧…") : T("还没有候选帧")),
         candidates.error !== undefined ? h("p", { className: "SPR_error" }, candidates.error) : null
       );
     }
@@ -2719,7 +3754,7 @@
       const hostExtract = hostJob(project, "frames:extract");
       const hostPicking = Array.isArray(project.jobs) && project.jobs.some((job) => typeof job?.key === "string" && job.key.startsWith("frames:pick:"));
       const extracting = tasks.any("frames:*") || tasks.any("frames:pick:") || hostExtract !== undefined || hostPicking;
-      const batchLabel = tasks.label(KEY_FRAMES_ALL) ?? "正在抽取全部序列帧…";
+      const batchLabel = tasks.label(KEY_FRAMES_ALL) ?? T("正在抽取全部序列帧…");
 
       return h(
         React.Fragment,
@@ -2728,35 +3763,35 @@
           "div",
           { className: "SPR_fields" },
           h(NumField, {
-            label: "单格宽（px）",
+            label: T("单格宽（px）"),
             value: draft.cellWidth ?? 256,
             min: 16,
             max: 2048,
             onChange: (value) => saveSettings({ cellWidth: value })
           }),
           h(NumField, {
-            label: "单格高（px）",
+            label: T("单格高（px）"),
             value: draft.cellHeight ?? 256,
             min: 16,
             max: 2048,
             onChange: (value) => saveSettings({ cellHeight: value })
           }),
           h(NumField, {
-            label: "每段视频抽帧数",
+            label: T("每段视频抽帧数"),
             value: draft.frameCount ?? 8,
             min: 1,
             max: 64,
             onChange: (value) => saveSettings({ frameCount: value })
           }),
           h(NumField, {
-            label: "抽帧工作尺寸（长边 px）",
+            label: T("抽帧工作尺寸（长边 px）"),
             value: draft.workingLongEdge ?? 768,
             min: 128,
             max: 2048,
             onChange: (value) => saveSettings({ workingLongEdge: value })
           }),
           h(NumField, {
-            label: "并发数",
+            label: T("并发数"),
             value: draft.concurrency ?? 3,
             min: 1,
             max: 8,
@@ -2766,9 +3801,9 @@
         h(
           "p",
           { className: "SPR_hint" },
-          "抽帧抽到的是「工作尺寸」（长边上限），不是最终格子尺寸。自动裁剪、统一缩放和像素量化都在第 4 步做，这样八个方向才能共享同一个裁剪框、脚底对齐同一条基线。改完这里需要重新抽帧。" +
-            "「提取全部」对每一段视频用同一套等分；要某一段单独挑帧，点那张卡片上的「手动选帧」，拖圆圈即可（和转圈截帧一样）。" +
-            "预览带是**双击看大图**：格子尺寸只有 256px，看不清动作和抠像质量。"
+          T("抽帧抽到的是「工作尺寸」（长边上限），不是最终格子尺寸。自动裁剪、统一缩放和像素量化都在第 4 步做，这样八个方向才能共享同一个裁剪框、脚底对齐同一条基线。改完这里需要重新抽帧。") +
+            T("「提取全部」对每一段视频用同一套等分；要某一段单独挑帧，点那张卡片上的「手动选帧」，拖圆圈即可（和转圈截帧一样）。") +
+            T("预览带是**双击看大图**：格子尺寸只有 256px，看不清动作和抠像质量。")
         ),
         h(
           "div",
@@ -2778,15 +3813,15 @@
             {
               primary: true,
               busy: tasks.has(KEY_FRAMES_ALL),
-              busyText: "正在抽取全部序列帧…",
+              busyText: T("正在抽取全部序列帧…"),
               disabled: readyVideos.length === 0 || extracting,
               onClick: () =>
                 void start(() => api.runFrames({ projectId: project.id }), { reload: true }, {
                   key: KEY_FRAMES_ALL,
-                  label: "正在抽取全部序列帧…"
+                  label: T("正在抽取全部序列帧…")
                 })
             },
-            `提取全部序列帧（${readyVideos.length}/8 段视频就绪）`
+            T("提取全部序列帧（{n0}/8 段视频就绪）", { n0: readyVideos.length })
           ),
           h(
             Btn,
@@ -2795,9 +3830,9 @@
               disabled: extracting,
               onClick: () => void start(() => api.setApproved({ projectId: project.id, stage: "frames", approved: !allApproved }), { reload: true })
             },
-            allApproved ? "取消全部通过" : "全部标记通过"
+            allApproved ? T("取消全部通过") : T("全部标记通过")
           ),
-          h(BusyBadge, { show: extracting, text: tasks.label(KEY_FRAMES_ALL) ?? "正在抽帧…" })
+          h(BusyBadge, { show: extracting, text: tasks.label(KEY_FRAMES_ALL) ?? T("正在抽帧…") })
         ),
         h(
           "div",
@@ -2813,7 +3848,7 @@
             const queued =
               (tasks.has(KEY_FRAMES_ALL) || jobCovers(hostExtract, direction.key) || jobCovers(hostPick, direction.key)) && node?.status !== "error";
             const nodeBusy = node?.status === "running" || tasks.has(taskKey) || tasks.has(KEY_FRAMES_PICK(direction.key)) || tasks.any(`frames:slot:${direction.key}:`) || queued;
-            const overlayText = tasks.label(taskKey) ?? (queued ? batchLabel : undefined) ?? "正在抽取序列帧…";
+            const overlayText = tasks.label(taskKey) ?? (queued ? batchLabel : undefined) ?? T("正在抽取序列帧…");
             return [
               h(
               "div",
@@ -2822,7 +3857,7 @@
                 "div",
                 { className: "SPR_nodeTop" },
                 h("span", { className: "SPR_nodeTitle" }, direction.label),
-                nodeBusy ? h(Chip, { kind: "running", text: "抽帧中" }) : h(StatusChip, { node })
+                nodeBusy ? h(Chip, { kind: "running", text: T("抽帧中") }) : h(StatusChip, { node })
               ),
               node?.strip !== undefined
                 ? h(
@@ -2831,21 +3866,21 @@
                     h(ZoomableImage, {
                       className: "SPR_thumb",
                       src: assetUrl(project, node.strip, node.updatedAt),
-                      alt: `${direction.label} 序列帧`,
-                      caption: `${direction.label} · ${node.frames?.length ?? 0} 帧 · 视频 ${(node.duration ?? 0).toFixed(2)} 秒（点「×」/ 背景 / Esc 关闭）`
+                      alt: T("{n0} 序列帧", { n0: direction.label }),
+                      caption: T("{n0} · {n1} 帧 · 视频 {n2} 秒（点「×」/ 背景 / Esc 关闭）", { n0: direction.label, n1: node.frames?.length ?? 0, n2: (node.duration ?? 0).toFixed(2) })
                     })
                   )
                 : h(
                     "div",
                     { className: "SPR_thumbEmpty" },
-                    nodeBusy ? "正在抽帧…" : "尚未抽帧"
+                    nodeBusy ? T("正在抽帧…") : T("尚未抽帧")
                   ),
               nodeBusy ? h(BusyBadge, { show: true, text: overlayText }) : null,
               node?.duration !== undefined
-                ? h("span", { className: "SPR_refRow" }, `${node.frames?.length ?? 0} 帧 · 视频 ${node.duration.toFixed(2)} 秒`)
+                ? h("span", { className: "SPR_refRow" }, T("{n0} 帧 · 视频 {n1} 秒", { n0: node.frames?.length ?? 0, n1: node.duration.toFixed(2) }))
                 : null,
               (node?.candidates?.frames?.length ?? 0) > 0
-                ? h("span", { className: "SPR_refRow" }, `手动选帧 · ${node.candidates.picks?.length ?? 0} 个圆圈 / ${node.candidates.frames.length} 张候选`)
+                ? h("span", { className: "SPR_refRow" }, T("手动选帧 · {n0} 个圆圈 / {n1} 张候选", { n0: node.candidates.picks?.length ?? 0, n1: node.candidates.frames.length }))
                 : null,
               node?.error !== undefined ? h("p", { className: "SPR_error" }, node.error) : null,
               h(
@@ -2856,21 +3891,21 @@
                   {
                     primary: node?.status !== "ready",
                     busy: tasks.has(taskKey),
-                    busyText: "正在抽帧…",
+                    busyText: T("正在抽帧…"),
                     disabled: project.videos?.[direction.key]?.file === undefined || tasks.has(KEY_FRAMES_PICK(direction.key)) || hostPick !== undefined,
                     onClick: () =>
                       void start(() => api.runFrames({ projectId: project.id, keys: [direction.key] }), { reload: true }, {
                         key: taskKey,
-                        label: `正在抽取「${direction.label}」序列帧…`
+                        label: T("正在抽取「{n0}」序列帧…", { n0: direction.label })
                       })
                   },
-                  node?.status === "ready" ? "重新抽帧" : "抽取"
+                  node?.status === "ready" ? T("重新抽帧") : T("抽取")
                 ),
                 h(
                   BusyBtn,
                   {
                     busy: tasks.has(KEY_FRAMES_PICK(direction.key)),
-                    busyText: "正在抽候选帧…",
+                    busyText: T("正在抽候选帧…"),
                     disabled: project.videos?.[direction.key]?.file === undefined || (nodeBusy && !tasks.has(KEY_FRAMES_PICK(direction.key))),
                     onClick: () => {
                       if (pickKey === direction.key) {
@@ -2883,12 +3918,12 @@
                       if (!ready) {
                         void start(() => api.prepareFramePick({ projectId: project.id, key: direction.key }), { reload: true }, {
                           key: KEY_FRAMES_PICK(direction.key),
-                          label: `正在抽取「${direction.label}」的候选帧…`
+                          label: T("正在抽取「{n0}」的候选帧…", { n0: direction.label })
                         });
                       }
                     }
                   },
-                  pickKey === direction.key ? "收起选帧" : (node?.candidates?.frames?.length ?? 0) > 0 ? "调整选帧" : "手动选帧"
+                  pickKey === direction.key ? T("收起选帧") : (node?.candidates?.frames?.length ?? 0) > 0 ? T("调整选帧") : T("手动选帧")
                 ),
                 h(
                   Btn,
@@ -2904,7 +3939,7 @@
                           approved: node?.approved !== true
                         }), { reload: true })
                   },
-                  node?.approved === true ? "已通过" : "通过"
+                  node?.approved === true ? T("已通过") : T("通过")
                 )
               )
             ),
@@ -2943,7 +3978,7 @@
       // 合成整图是本地 CPU 重活，宿主侧会标 running；重抠像同样走这个状态。
       const composing = project.sheet?.status === "running" || tasks.has(KEY_SHEET_COMPOSE) || tasks.has(KEY_SHEET_REKEY);
       const keyed = project.sheet?.backgroundFraction;
-      const composeLabel = tasks.label(KEY_SHEET_REKEY) ?? tasks.label(KEY_SHEET_COMPOSE) ?? "正在抠绿幕并合成整图…";
+      const composeLabel = tasks.label(KEY_SHEET_REKEY) ?? tasks.label(KEY_SHEET_COMPOSE) ?? T("正在抠绿幕并合成整图…");
 
       const moveRow = (index, delta) => {
         const next = [...rowOrder];
@@ -2962,14 +3997,14 @@
         h(
           "p",
           { className: "SPR_hint" },
-          "抠像在这里会**再跑一次**：第 3 步那次抠的是每个方向的预览带（顺便把整图合出来），这里重抠是为了让下面这些参数改完立刻生效——两次读的是同一份帧缓存（raw.bin）、同一套参数，所以结果一致。" +
-            "改完参数会自动重新抠像并合成整图，不需要重新抽帧。"
+          T("抠像在这里会**再跑一次**：第 3 步那次抠的是每个方向的预览带（顺便把整图合出来），这里重抠是为了让下面这些参数改完立刻生效——两次读的是同一份帧缓存（raw.bin）、同一套参数，所以结果一致。") +
+            T("改完参数会自动重新抠像并合成整图，不需要重新抽帧。")
         ),
         h(
           "div",
           { className: "SPR_fields" },
           h(NumField, {
-            label: "整图单格宽（px）",
+            label: T("整图单格宽（px）"),
             value: draft.cellWidth ?? 256,
             min: 16,
             max: 2048,
@@ -2979,7 +4014,7 @@
             }
           }),
           h(NumField, {
-            label: "整图单格高（px）",
+            label: T("整图单格高（px）"),
             value: draft.cellHeight ?? 256,
             min: 16,
             max: 2048,
@@ -2989,35 +4024,35 @@
             }
           }),
           h(NumField, {
-            label: "像素块边长（0/1 = 关闭）",
+            label: T("像素块边长（0/1 = 关闭）"),
             value: draft.pixelSize ?? 0,
             min: 0,
             max: 32,
             onChange: (value) => setSettingsDraft({ ...draft, pixelSize: value })
           }),
           h(NumField, {
-            label: "背景分割容差（0 = 只认绿色）",
+            label: T("背景分割容差（0 = 只认绿色）"),
             value: draft.bgTolerance ?? 90,
             min: 0,
             max: 120,
             onChange: (value) => setSettingsDraft({ ...draft, bgTolerance: value })
           }),
           h(NumField, {
-            label: "抠像下限（绿色优势）",
+            label: T("抠像下限（绿色优势）"),
             value: draft.keyLow ?? 14,
             min: 0,
             max: 255,
             onChange: (value) => setSettingsDraft({ ...draft, keyLow: value })
           }),
           h(NumField, {
-            label: "抠像上限（绿色优势）",
+            label: T("抠像上限（绿色优势）"),
             value: draft.keyHigh ?? 80,
             min: 1,
             max: 255,
             onChange: (value) => setSettingsDraft({ ...draft, keyHigh: value })
           }),
           h(NumField, {
-            label: "去绿溢出 0~1",
+            label: T("去绿溢出 0~1"),
             value: draft.despill ?? 0.65,
             min: 0,
             max: 1,
@@ -3025,14 +4060,14 @@
             onChange: (value) => setSettingsDraft({ ...draft, despill: value })
           }),
           h(NumField, {
-            label: "边缘收缩（px）",
+            label: T("边缘收缩（px）"),
             value: draft.edgeShrink ?? 0,
             min: 0,
             max: 8,
             onChange: (value) => setSettingsDraft({ ...draft, edgeShrink: value })
           }),
           h(NumField, {
-            label: "自动裁剪填充比例 0.5~1",
+            label: T("自动裁剪填充比例 0.5~1"),
             value: draft.fillRatio ?? 0.94,
             min: 0.5,
             max: 1,
@@ -3040,7 +4075,7 @@
             onChange: (value) => setSettingsDraft({ ...draft, fillRatio: value })
           }),
           h(NumField, {
-            label: "底部留白（px）",
+            label: T("底部留白（px）"),
             value: draft.bottomMargin ?? 2,
             min: 0,
             max: 64,
@@ -3049,7 +4084,7 @@
           h(
             "label",
             { className: "SPR_field" },
-            h("span", { className: "SPR_fieldLabel" }, "自动裁剪到角色包围盒"),
+            h("span", { className: "SPR_fieldLabel" }, T("自动裁剪到角色包围盒")),
             h(
               "select",
               {
@@ -3061,8 +4096,8 @@
                   void saveSettings({ autoCrop });
                 }
               },
-              h("option", { value: "on" }, "开启（推荐：角色填满格子，八个方向缩放一致）"),
-              h("option", { value: "off" }, "关闭（用整帧画面）")
+              h("option", { value: "on" }, T("开启（推荐：角色填满格子，八个方向缩放一致）")),
+              h("option", { value: "off" }, T("关闭（用整帧画面）"))
             )
           )
         ),
@@ -3073,7 +4108,7 @@
             BusyBtn,
             {
               busy: tasks.has(KEY_SHEET_SAVE),
-              busyText: "正在保存并合成…",
+              busyText: T("正在保存并合成…"),
               disabled: framesReady === 0 || composing,
               onClick: () =>
                 void start(
@@ -3091,39 +4126,39 @@
                     cellHeight: draft.cellHeight
                   }),
                   { reload: true },
-                  { key: KEY_SHEET_SAVE, label: "正在保存并重新合成…" }
+                  { key: KEY_SHEET_SAVE, label: T("正在保存并重新合成…") }
                 )
             },
-            "保存并重新合成"
+            T("保存并重新合成")
           ),
           h(
             BusyBtn,
             {
               busy: tasks.has(KEY_SHEET_REKEY),
-              busyText: "正在重跑抠像…",
+              busyText: T("正在重跑抠像…"),
               disabled: framesReady === 0 || composing,
               onClick: () =>
                 void start(() => api.rekey({ projectId: project.id }), { reload: true }, {
                   key: KEY_SHEET_REKEY,
-                  label: "正在重跑抠像并重新合成…"
+                  label: T("正在重跑抠像并重新合成…")
                 })
             },
-            "只重跑抠像并重新合成"
+            T("只重跑抠像并重新合成")
           ),
           h(
             BusyBtn,
             {
               primary: true,
               busy: tasks.has(KEY_SHEET_COMPOSE),
-              busyText: "正在合成整图…",
+              busyText: T("正在合成整图…"),
               disabled: framesReady === 0 || composing,
               onClick: () =>
                 void start(() => api.compose({ projectId: project.id }), { reload: true }, {
                   key: KEY_SHEET_COMPOSE,
-                  label: "正在抠绿幕并合成整图…"
+                  label: T("正在抠绿幕并合成整图…")
                 })
             },
-            `合成整图（${framesReady}/8 组帧就绪）`
+            T("合成整图（{n0}/8 组帧就绪）", { n0: framesReady })
           ),
           h(BusyBadge, { show: composing, text: composeLabel }),
           project.sheet?.file !== undefined
@@ -3137,7 +4172,7 @@
                   "aria-disabled": composing ? "true" : undefined,
                   onClick: composing ? (event) => event.preventDefault() : undefined
                 },
-                "下载整图"
+                T("下载整图")
               )
             : null,
           h(
@@ -3149,7 +4184,7 @@
                 void start(() =>
                   api.setApproved({ projectId: project.id, stage: "sheet", approved: project.sheet?.approved !== true }), { reload: true })
             },
-            project.sheet?.approved === true ? "整图已通过" : "整图通过"
+            project.sheet?.approved === true ? T("整图已通过") : T("整图通过")
           )
         ),
         project.sheet?.error !== undefined ? h("p", { className: "SPR_error" }, project.sheet.error) : null,
@@ -3159,7 +4194,7 @@
           h(
             "div",
             { className: "SPR_rowOrder" },
-            h("span", { className: "SPR_fieldLabel" }, "行序（第 1 行在最上方）"),
+            h("span", { className: "SPR_fieldLabel" }, T("行序（第 1 行在最上方）")),
             rowOrder.map((key, index) =>
               h(
                 "div",
@@ -3181,10 +4216,10 @@
                   h(
                     "p",
                     { className: "SPR_hint" },
-                    `输出 ${project.sheet.width}×${project.sheet.height} 像素 · 单格 ${draft.cellWidth}×${draft.cellHeight} · 每行 ${draft.frameCount ?? 8} 帧` +
-                      (keyed === undefined ? "" : ` · 抠掉的背景占 ${(keyed * 100).toFixed(1)}%`) +
+                    T("输出 {n0}×{n1} 像素 · 单格 {n2}×{n3} · 每行 {n4} 帧", { n0: project.sheet.width, n1: project.sheet.height, n2: draft.cellWidth, n3: draft.cellHeight, n4: draft.frameCount ?? 8 }) +
+                      (keyed === undefined ? "" : T(" · 抠掉的背景占 {n0}%", { n0: (keyed * 100).toFixed(1) })) +
                       ((project.sheet?.borderSamplesDropped ?? 0) > 0
-                        ? ` · 边框采样排除了 ${project.sheet.borderSamplesDropped} 个不属于背景主色的点（角色贴边）`
+                        ? T(" · 边框采样排除了 {n0} 个不属于背景主色的点（角色贴边）", { n0: project.sheet.borderSamplesDropped })
                         : "")
                   ),
                   h(
@@ -3193,17 +4228,17 @@
                     h(ZoomableImage, {
                       className: "SPR_sheet",
                       src: assetUrl(project, project.sheet.file, project.sheet.generatedAt),
-                      alt: "整图",
+                      alt: T("整图"),
                       style: { visibility: composing ? "hidden" : undefined },
-                      caption: `整图 ${project.sheet.width}×${project.sheet.height} · 单格 ${draft.cellWidth}×${draft.cellHeight}（点「×」/ 背景 / Esc 关闭）`
+                      caption: T("整图 {n0}×{n1} · 单格 {n2}×{n3}（点「×」/ 背景 / Esc 关闭）", { n0: project.sheet.width, n1: project.sheet.height, n2: draft.cellWidth, n3: draft.cellHeight })
                     }),
-                    h(LoadingOverlay, { show: composing, text: composeLabel, sub: "本地抠像 + 合成，不上传" })
+                    h(LoadingOverlay, { show: composing, text: composeLabel, sub: T("本地抠像 + 合成，不上传") })
                   )
                 )
               : h(
                   "div",
                   { style: { position: "relative", minHeight: 160 } },
-                  h("p", { className: "SPR_empty" }, composing ? "正在生成第一张整图…" : framesReady === 0 ? "请先完成第 3 步的抽帧" : "还没有合成整图"),
+                  h("p", { className: "SPR_empty" }, composing ? T("正在生成第一张整图…") : framesReady === 0 ? T("请先完成第 3 步的抽帧") : T("还没有合成整图")),
                   h(LoadingOverlay, { show: composing, text: composeLabel })
                 )
           )
@@ -3268,7 +4303,7 @@
         tasks?.has(KEY_SHEET_COMPOSE) === true ||
         tasks?.has(KEY_SHEET_REKEY) === true ||
         tasks?.has(KEY_SHEET_SAVE) === true;
-      const rebuildingText = tasks?.label(KEY_SHEET_REKEY) ?? tasks?.label(KEY_SHEET_COMPOSE) ?? "正在重新合成整图…";
+      const rebuildingText = tasks?.label(KEY_SHEET_REKEY) ?? tasks?.label(KEY_SHEET_COMPOSE) ?? T("正在重新合成整图…");
       const [sheetLoaded, setSheetLoaded] = React.useState(false);
 
       liveRef.current.scale = scale;
@@ -3404,7 +4439,7 @@
         return h(
           "p",
           { className: "SPR_empty" },
-          "还没有可播放的整图。先完成第 ④ 步合成，再回到这里用 WASD 走一走。"
+          T("还没有可播放的整图。先完成第 ④ 步合成，再回到这里用 WASD 走一走。")
         );
       }
 
@@ -3415,7 +4450,7 @@
           "div",
           { className: "SPR_fields" },
           h(NumField, {
-            label: "角色缩放倍率",
+            label: T("角色缩放倍率"),
             value: scale,
             min: 0.3,
             max: 4,
@@ -3423,7 +4458,7 @@
             onChange: setScale
           }),
           h(NumField, {
-            label: "移动速度（像素/秒）",
+            label: T("移动速度（像素/秒）"),
             value: speed,
             min: 40,
             max: 600,
@@ -3431,7 +4466,7 @@
             onChange: setSpeed
           }),
           h(NumField, {
-            label: "播放速度（倍，只影响步频）",
+            label: T("播放速度（倍，只影响步频）"),
             value: animSpeed,
             min: 0.25,
             max: 4,
@@ -3441,29 +4476,29 @@
           h(
             "label",
             { className: "SPR_field" },
-            h("span", { className: "SPR_fieldLabel" }, "背景参考网格"),
+            h("span", { className: "SPR_fieldLabel" }, T("背景参考网格")),
             h(
               "select",
               { className: "SPR_input", value: grid ? "on" : "off", onChange: (event) => setGrid(event.target.value === "on") },
-              h("option", { value: "on" }, "显示（更容易看出在移动）"),
-              h("option", { value: "off" }, "关闭（纯白）")
+              h("option", { value: "on" }, T("显示（更容易看出在移动）")),
+              h("option", { value: "off" }, T("关闭（纯白）"))
             )
           )
         ),
         h(
           "div",
           { className: "SPR_toolbar" },
-          h(Btn, { onClick: reset }, "回到中间"),
+          h(Btn, { onClick: reset }, T("回到中间")),
           h(
             "span",
             { className: "SPR_refRow" },
-            `当前朝向：${hud.compass}（${LABEL_OF[posRef.current.dirKey] ?? ""}） · ${hud.moving ? "行走中" : "站立"}`
+            T("当前朝向：{n0}（{n1}） · {n2}", { n0: hud.compass, n1: LABEL_OF[posRef.current.dirKey] ?? "", n2: hud.moving ? T("行走中") : T("站立") })
           ),
           orderStale
-            ? h("span", { className: "SPR_refRow" }, "· 整图是按旧行序生成的，正在重新合成…")
+            ? h("span", { className: "SPR_refRow" }, T("· 整图是按旧行序生成的，正在重新合成…"))
             : null,
           h("span", { className: "SPR_spacer" }),
-          h("span", { className: "SPR_refRow" }, focused ? "已获得键盘焦点" : "点击画面后即可操控")
+          h("span", { className: "SPR_refRow" }, focused ? T("已获得键盘焦点") : T("点击画面后即可操控"))
         ),
         h(
           "div",
@@ -3484,24 +4519,24 @@
             onKeyUp: handleKey(false)
           },
           h("canvas", { ref: canvasRef, className: "SPR_canvas", width: STAGE_W, height: STAGE_H }),
-          focused ? null : h("div", { className: "SPR_stageHint" }, "点击这里，然后用 WASD 或 ↑↓←→ 操控角色"),
+          focused ? null : h("div", { className: "SPR_stageHint" }, T("点击这里，然后用 WASD 或 ↑↓←→ 操控角色")),
           h(LoadingOverlay, {
             show: rebuilding || (ready && !sheetLoaded),
-            text: rebuilding ? rebuildingText : "正在载入整图…"
+            text: rebuilding ? rebuildingText : T("正在载入整图…")
           }),
           h(
             "div",
             { className: "SPR_hud" },
             h("span", { className: "SPR_hudDir" }, hud.compass),
-            h("span", null, hud.moving ? "行走" : "站立")
+            h("span", null, hud.moving ? T("行走") : T("站立"))
           )
         ),
         h(
           "p",
           { className: "SPR_hint" },
-          "方向按屏幕方位映射：按 ↑ 向北走（背对镜头）、↓ 向南走（正对镜头）、← 向西、→ 向东；斜向同时按两个键。",
+          T("方向按屏幕方位映射：按 ↑ 向北走（背对镜头）、↓ 向南走（正对镜头）、← 向西、→ 向东；斜向同时按两个键。"),
           h("br"),
-          "「播放速度」只改步频快慢，不影响角色移动速度；「移动速度」只改走得多快，不影响动画帧率。切图用的是整图自己记录的行序，所以改完行序即使还没重新合成，预览也不会取错方向。"
+          T("「播放速度」只改步频快慢，不影响角色移动速度；「移动速度」只改走得多快，不影响动画帧率。切图用的是整图自己记录的行序，所以改完行序即使还没重新合成，预览也不会取错方向。")
         )
       );
     }
@@ -3516,7 +4551,7 @@
           const text = String(reader.result ?? "");
           resolve(text.slice(text.indexOf(",") + 1));
         };
-        reader.onerror = () => reject(new Error("读取文件失败"));
+        reader.onerror = () => reject(new Error(T("读取文件失败")));
         reader.readAsDataURL(file);
       });
     }
@@ -3554,14 +4589,14 @@
                 "span",
                 { style: { display: "inline-flex", alignItems: "center", gap: 7, justifyContent: "center" } },
                 h("span", { className: "SPR_spinSm" }),
-                "正在上传…"
+                T("正在上传…")
               )
             : label
         ),
         h(
           "div",
           { className: "SPR_toolbar" },
-          h(BusyBtn, { onClick: () => inputRef.current?.click(), busy: busy === true, busyText: "正在上传…" }, "选择文件"),
+          h(BusyBtn, { onClick: () => inputRef.current?.click(), busy: busy === true, busyText: T("正在上传…") }, T("选择文件")),
           h("input", {
             ref: inputRef,
             type: "file",
@@ -3582,11 +4617,11 @@
       return h(
         "div",
         { className: "SPR_fields" },
-        h(NumField, { label: "抠像下限（绿色优势）", value: draft.keyLow ?? 14, min: 0, max: 255, onChange: (v) => onChange({ keyLow: v }) }),
-        h(NumField, { label: "抠像上限（绿色优势）", value: draft.keyHigh ?? 80, min: 1, max: 255, onChange: (v) => onChange({ keyHigh: v }) }),
-        h(NumField, { label: "去绿溢出 0~1", value: draft.despill ?? 0.65, min: 0, max: 1, step: 0.05, onChange: (v) => onChange({ despill: v }) }),
-        h(NumField, { label: "背景分割容差（0 = 只认绿色）", value: draft.bgTolerance ?? 90, min: 0, max: 160, onChange: (v) => onChange({ bgTolerance: v }) }),
-        h(NumField, { label: "边缘收缩（px）", value: draft.edgeShrink ?? 0, min: 0, max: 8, onChange: (v) => onChange({ edgeShrink: v }) })
+        h(NumField, { label: T("抠像下限（绿色优势）"), value: draft.keyLow ?? 14, min: 0, max: 255, onChange: (v) => onChange({ keyLow: v }) }),
+        h(NumField, { label: T("抠像上限（绿色优势）"), value: draft.keyHigh ?? 80, min: 1, max: 255, onChange: (v) => onChange({ keyHigh: v }) }),
+        h(NumField, { label: T("去绿溢出 0~1"), value: draft.despill ?? 0.65, min: 0, max: 1, step: 0.05, onChange: (v) => onChange({ despill: v }) }),
+        h(NumField, { label: T("背景分割容差（0 = 只认绿色）"), value: draft.bgTolerance ?? 90, min: 0, max: 160, onChange: (v) => onChange({ bgTolerance: v }) }),
+        h(NumField, { label: T("边缘收缩（px）"), value: draft.edgeShrink ?? 0, min: 0, max: 8, onChange: (v) => onChange({ edgeShrink: v }) })
       );
     }
 
@@ -3595,8 +4630,8 @@
       return h(
         "div",
         { className: "SPR_side" },
-        h("div", { className: "SPR_sideTitle" }, `${title}（${items.length}）`),
-        items.length === 0 ? h("p", { className: "SPR_hint" }, "还没有内容，点右上角新建一个。") : null,
+        h("div", { className: "SPR_sideTitle" }, T("{n0}（{n1}）", { n0: title, n1: items.length })),
+        items.length === 0 ? h("p", { className: "SPR_hint" }, T("还没有内容，点右上角新建一个。")) : null,
         items.map((item) =>
           h(
             "button",
@@ -3611,7 +4646,7 @@
             h("span", { className: "SPR_projMeta" }, renderMeta(item))
           )
         ),
-        items.length === 0 ? h(Btn, { onClick: onCreate, primary: true }, "新建") : null
+        items.length === 0 ? h(Btn, { onClick: onCreate, primary: true }, T("新建")) : null
       );
     }
 
@@ -3624,6 +4659,7 @@
     const K_IMG_CREATE = "img:create";
 
     function ImageModule(props) {
+      useLocaleTick();
       const api = props.api;
       const [jobs, setJobs] = React.useState([]);
       const [jobId, setJobId] = React.useState(null);
@@ -3712,28 +4748,28 @@
 
       const create = () =>
         run(async () => {
-          const created = await api.createImageJob({ name: `图片 ${new Date().toLocaleString("zh-CN", { hour12: false })}` });
+          const created = await api.createImageJob({ name: T("图片 {n0}", { n0: new Date().toLocaleString("zh-CN", { hour12: false }) }) });
           await refresh();
           setJobId(created.jobId);
-        }, "已新建图片任务", { key: K_IMG_CREATE, label: "正在新建任务…" });
+        }, T("已新建图片任务"), { key: K_IMG_CREATE, label: T("正在新建任务…") });
 
-      const saveJob = (patch) => run(() => api.saveImageJob({ jobId: job.id, ...patch }), "已保存");
+      const saveJob = (patch) => run(() => api.saveImageJob({ jobId: job.id, ...patch }), T("已保存"));
 
       const del = async () => {
         if (job === null) return;
-        if (typeof window !== "undefined" && !window.confirm(`删除任务「${job.name}」？目录会被整个移除。`)) return;
+        if (typeof window !== "undefined" && !window.confirm(T("删除任务「{n0}」？目录会被整个移除。", { n0: job.name }))) return;
         await run(async () => {
           await api.deleteImageJob({ jobId: job.id });
           const list = await refresh();
           setJobId(list.length > 0 ? list[0].id : null);
           if (list.length === 0) setJob(null);
-        }, "已删除");
+        }, T("已删除"));
       };
 
       const upload = async (files, kind) => {
         setUploading(true);
         // 上传本身也要有反馈：走同一个 tasks 表，key 固定成上传中的那批。
-        await tasks.run(K_IMG_UPLOAD, `正在上传 ${files.length} 个文件…`, async () => {
+        await tasks.run(K_IMG_UPLOAD, T("正在上传 {n0} 个文件…", { n0: files.length }), async () => {
           try {
             for (const file of files) {
               const data = await readFileBase64(file);
@@ -3756,40 +4792,40 @@
           "div",
           { className: "SPR_body" },
           h(JobSidebar, {
-            title: "图片任务",
+            title: T("图片任务"),
             items: jobs,
             activeId: jobId,
             onSelect: setJobId,
             onCreate: create,
-            renderMeta: (item) => `${item.ready} 张 · 抠像 ${item.keyed}`
+            renderMeta: (item) => T("{n0} 张 · 抠像 {n1}", { n0: item.ready, n1: item.keyed })
           }),
           h(
             "div",
             { className: "SPR_main" },
             notice !== null
               ? h("div", { className: "SPR_note", "data-kind": notice.kind }, notice.text,
-                  h("span", { style: { marginLeft: 10 } }, h("button", { type: "button", className: "SPR_miniBtn", onClick: () => setNotice(null) }, "关闭")))
+                  h("span", { style: { marginLeft: 10 } }, h("button", { type: "button", className: "SPR_miniBtn", onClick: () => setNotice(null) }, T("关闭"))))
               : null,
             h(
               "div",
               { className: "SPR_toolbar" },
-              h(BusyBtn, { onClick: create, primary: true, busy: tasks.has(K_IMG_CREATE), busyText: "正在新建…" }, "新建任务"),
-              job !== null ? h(Btn, { onClick: del, danger: true }, "删除任务") : null,
-              h(BusyBadge, { show: tasks.active, text: tasks.label(K_IMG_JOB) ?? tasks.label(K_IMG_KEY) ?? tasks.label(K_IMG_UPLOAD) ?? tasks.firstLabel ?? "正在调用接口…" })
+              h(BusyBtn, { onClick: create, primary: true, busy: tasks.has(K_IMG_CREATE), busyText: T("正在新建…") }, T("新建任务")),
+              job !== null ? h(Btn, { onClick: del, danger: true }, T("删除任务")) : null,
+              h(BusyBadge, { show: tasks.active, text: tasks.label(K_IMG_JOB) ?? tasks.label(K_IMG_KEY) ?? tasks.label(K_IMG_UPLOAD) ?? tasks.firstLabel ?? T("正在调用接口…") })
             ),
             job === null
-              ? h("p", { className: "SPR_empty" }, "请选择或新建一个图片任务")
+              ? h("p", { className: "SPR_empty" }, T("请选择或新建一个图片任务"))
               : h(
                   React.Fragment,
                   null,
                   h(
                     "div",
                     { className: "SPR_card" },
-                    h("div", { className: "SPR_cardHead" }, h("h3", null, "① 提示词")),
-                    h("p", { className: "SPR_hint" }, "统一附加提示词会接在主提示词后面，用来写跨批次的共同要求。"),
+                    h("div", { className: "SPR_cardHead" }, h("h3", null, T("① 提示词"))),
+                    h("p", { className: "SPR_hint" }, T("统一附加提示词会接在主提示词后面，用来写跨批次的共同要求。")),
                     h("textarea", {
                       className: "SPR_area",
-                      placeholder: "描述你要生成的图片…",
+                      placeholder: T("描述你要生成的图片…"),
                       value: promptDraft,
                       onChange: (event) => setPromptDraft(event.target.value),
                       onBlur: () => {
@@ -3799,7 +4835,7 @@
                     h("textarea", {
                       className: "SPR_area",
                       style: { minHeight: 60 },
-                      placeholder: "统一附加提示词（可留空）",
+                      placeholder: T("统一附加提示词（可留空）"),
                       value: suffixDraft,
                       onChange: (event) => setSuffixDraft(event.target.value),
                       onBlur: () => {
@@ -3809,14 +4845,14 @@
                     h(
                       "div",
                       { className: "SPR_fields" },
-                      h(GlobalModelField, { label: "生图模型", value: globalConfig?.arkModel ?? settingsDraft.model }),
+                      h(GlobalModelField, { label: T("生图模型"), value: globalConfig?.arkModel ?? settingsDraft.model }),
                       h(
                         "label",
                         { className: "SPR_field" },
-                        h("span", { className: "SPR_fieldLabel" }, "尺寸"),
+                        h("span", { className: "SPR_fieldLabel" }, T("尺寸")),
                         h("input", { className: "SPR_input", value: settingsDraft.size ?? "", onChange: (event) => setSettingsDraft({ ...settingsDraft, size: event.target.value }), onBlur: () => void saveJob({ settings: settingsDraft }) })
                       ),
-                      h(NumField, { label: "生成张数（1~8）", value: settingsDraft.count ?? 1, min: 1, max: 8, onChange: (v) => { setSettingsDraft({ ...settingsDraft, count: v }); void saveJob({ settings: { ...settingsDraft, count: v } }); } })
+                      h(NumField, { label: T("生成张数（1~8）"), value: settingsDraft.count ?? 1, min: 1, max: 8, onChange: (v) => { setSettingsDraft({ ...settingsDraft, count: v }); void saveJob({ settings: { ...settingsDraft, count: v } }); } })
                     ),
                     h(
                       "div",
@@ -3826,26 +4862,26 @@
                         {
                           primary: true,
                           busy: tasks.has(K_IMG_JOB),
-                          busyText: `正在生成 ${settingsDraft.count ?? 1} 张…`,
+                          busyText: T("正在生成 {n0} 张…", { n0: settingsDraft.count ?? 1 }),
                           disabled: promptDraft.trim() === "" || tasks.has(K_IMG_JOB),
                           onClick: () =>
                             void run(
                               () => api.runImageJob({ jobId: job.id }),
-                              `已开始生成 ${settingsDraft.count ?? 1} 张`,
-                              { key: K_IMG_JOB, label: `正在生成 ${settingsDraft.count ?? 1} 张图片…` }
+                              T("已开始生成 {n0} 张", { n0: settingsDraft.count ?? 1 }),
+                              { key: K_IMG_JOB, label: T("正在生成 {n0} 张图片…", { n0: settingsDraft.count ?? 1 }) }
                             )
                         },
-                        `生成 ${settingsDraft.count ?? 1} 张`
+                        T("生成 {n0} 张", { n0: settingsDraft.count ?? 1 })
                       ),
-                      h("span", { className: "SPR_refRow" }, "按 Seedream 刊例约 0.2 元/张，实际以方舟账单为准")
+                      h("span", { className: "SPR_refRow" }, T("按 Seedream 刊例约 0.2 元/张，实际以方舟账单为准"))
                     )
                   ),
                   h(
                     "div",
                     { className: "SPR_card" },
-                    h("div", { className: "SPR_cardHead" }, h("h3", null, "② 参考图（可留空）")),
-                    h("p", { className: "SPR_hint" }, "最多 10 张。有参考图时走图生图；引用多张时可在提示词里写「图一」「图二」。" ),
-                    h(UploadBox, { label: "把参考图拖到这里", accept: "image/*", multiple: true, busy: uploading || tasks.has(K_IMG_UPLOAD), onFiles: (files) => void upload(files, "ref") }),
+                    h("div", { className: "SPR_cardHead" }, h("h3", null, T("② 参考图（可留空）"))),
+                    h("p", { className: "SPR_hint" }, T("最多 10 张。有参考图时走图生图；引用多张时可在提示词里写「图一」「图二」。") ),
+                    h(UploadBox, { label: T("把参考图拖到这里"), accept: "image/*", multiple: true, busy: uploading || tasks.has(K_IMG_UPLOAD), onFiles: (files) => void upload(files, "ref") }),
                     (job.refs ?? []).length === 0
                       ? null
                       : h(
@@ -3857,7 +4893,7 @@
                               { key: ref.file, className: "SPR_node" },
                               h("img", { className: "SPR_thumb", src: `${job.assetBase}${ref.file}?v=${job.updatedAt}`, alt: ref.name }),
                               h("span", { className: "SPR_refRow" }, ref.name),
-                              h("div", { className: "SPR_btnRow" }, h(Btn, { danger: true, onClick: () => void run(() => api.removeImageRef({ jobId: job.id, file: ref.file }), "已移除参考图") }, "移除"))
+                              h("div", { className: "SPR_btnRow" }, h(Btn, { danger: true, onClick: () => void run(() => api.removeImageRef({ jobId: job.id, file: ref.file }), T("已移除参考图")) }, T("移除")))
                             )
                           )
                         )
@@ -3865,8 +4901,8 @@
                   h(
                     "div",
                     { className: "SPR_card" },
-                    h("div", { className: "SPR_cardHead" }, h("h3", null, "③ 绿幕抠图")),
-                    h("p", { className: "SPR_hint" }, "开启后每张生成完会自动抠一遍；也可以上传已有图片只做抠像。" ),
+                    h("div", { className: "SPR_cardHead" }, h("h3", null, T("③ 绿幕抠图"))),
+                    h("p", { className: "SPR_hint" }, T("开启后每张生成完会自动抠一遍；也可以上传已有图片只做抠像。") ),
                     h(
                       "div",
                       { className: "SPR_toolbar" },
@@ -3882,34 +4918,34 @@
                             void saveJob({ keying: { enabled } });
                           }
                         },
-                        h("option", { value: "off" }, "不抠像"),
-                        h("option", { value: "on" }, "自动抠绿幕输出 PNG")
+                        h("option", { value: "off" }, T("不抠像")),
+                        h("option", { value: "on" }, T("自动抠绿幕输出 PNG"))
                       ),
                       h(
                         BusyBtn,
                         {
                           busy: tasks.has(K_IMG_KEY),
-                          busyText: "正在抠像…",
+                          busyText: T("正在抠像…"),
                           onClick: () =>
-                            void run(() => api.keyImageJob({ jobId: job.id }), "已开始抠像", {
+                            void run(() => api.keyImageJob({ jobId: job.id }), T("已开始抠像"), {
                               key: K_IMG_KEY,
-                              label: "正在抠绿幕…"
+                              label: T("正在抠绿幕…")
                             })
                         },
-                        "按当前参数重新抠像"
+                        T("按当前参数重新抠像")
                       )
                     ),
                     h(KeyingFields, { draft: keyingDraft, onChange: (patch) => { const next = { ...keyingDraft, ...patch }; setKeyingDraft(next); void saveJob({ keying: patch }); } }),
-                    h(UploadBox, { label: "上传一张已有图片，直接抠成透明 PNG", accept: "image/*", multiple: false, busy: uploading || tasks.has(K_IMG_UPLOAD), onFiles: (files) => void upload(files, "item") }),
+                    h(UploadBox, { label: T("上传一张已有图片，直接抠成透明 PNG"), accept: "image/*", multiple: false, busy: uploading || tasks.has(K_IMG_UPLOAD), onFiles: (files) => void upload(files, "item") }),
                     tasks.has(K_IMG_UPLOAD) ? h(BusyBadge, { show: true, text: tasks.label(K_IMG_UPLOAD) }) : null
                   ),
                   h(
                     "div",
                     { className: "SPR_card" },
-                    h("div", { className: "SPR_cardHead" }, h("h3", null, `④ 结果（${(job.items ?? []).length} 张）`)),
+                    h("div", { className: "SPR_cardHead" }, h("h3", null, T("④ 结果（{n0} 张）", { n0: (job.items ?? []).length }))),
                     h(ReviewModeBar, { api, module: "image", id: job.id, mode: job.reviewMode, onChanged: () => void load(job.id) }),
                     (job.items ?? []).length === 0
-                      ? h("p", { className: "SPR_empty" }, "还没有图片")
+                      ? h("p", { className: "SPR_empty" }, T("还没有图片"))
                       : h(
                           "div",
                           { className: "SPR_grid" },
@@ -3922,29 +4958,29 @@
                             const overlay = itemBusy || keyingNow || waiting;
                             const overlayText =
                               tasks.label(itemKey) ??
-                              (keyingNow ? "正在抠绿幕…" : waiting ? tasks.label(K_IMG_JOB) ?? "正在生成…" : "正在生成…");
+                              (keyingNow ? T("正在抠绿幕…") : waiting ? tasks.label(K_IMG_JOB) ?? T("正在生成…") : T("正在生成…"));
                             return h(
                               "div",
                               { key: index, className: "SPR_node", "data-busy": overlay ? "true" : undefined },
                               h(
                                 "div",
                                 { className: "SPR_nodeTop" },
-                                h("span", { className: "SPR_nodeTitle" }, `第 ${index + 1} 张`),
-                                overlay ? h(Chip, { kind: "running", text: "生成中" }) : h(StatusChip, { node: item }),
-                                item.source === "uploaded" ? h(Chip, { kind: "empty", text: "上传" }) : null
+                                h("span", { className: "SPR_nodeTitle" }, T("第 {n0} 张", { n0: index + 1 })),
+                                overlay ? h(Chip, { kind: "running", text: T("生成中") }) : h(StatusChip, { node: item }),
+                                item.source === "uploaded" ? h(Chip, { kind: "empty", text: T("上传") }) : null
                               ),
                               h(
                                 MediaBox,
                                 { overlay, text: overlayText },
                                 item.keyedFile !== undefined
-                                  ? h("img", { className: "SPR_thumb", src: `${job.assetBase}${item.keyedFile}?v=${item.updatedAt}`, alt: "抠像结果" })
+                                  ? h("img", { className: "SPR_thumb", src: `${job.assetBase}${item.keyedFile}?v=${item.updatedAt}`, alt: T("抠像结果") })
                                   : item.file !== undefined
-                                    ? h("img", { className: "SPR_thumb", src: `${job.assetBase}${item.file}?v=${item.updatedAt}`, alt: "生成结果" })
-                                    : h("div", { className: "SPR_thumbEmpty" }, overlay ? "生成中…" : "等待生成")
+                                    ? h("img", { className: "SPR_thumb", src: `${job.assetBase}${item.file}?v=${item.updatedAt}`, alt: T("生成结果") })
+                                    : h("div", { className: "SPR_thumbEmpty" }, overlay ? T("生成中…") : T("等待生成"))
                               ),
                               overlay ? h(BusyBadge, { show: true, text: overlayText }) : null,
                               item.backgroundFraction !== undefined
-                                ? h("span", { className: "SPR_refRow" }, `背景占比 ${(item.backgroundFraction * 100).toFixed(0)}%`)
+                                ? h("span", { className: "SPR_refRow" }, T("背景占比 {n0}%", { n0: (item.backgroundFraction * 100).toFixed(0) }))
                                 : null,
                               item.error !== undefined ? h("p", { className: "SPR_error" }, item.error) : null,
                               h(
@@ -3956,28 +4992,28 @@
                                   onToggle: () =>
                                     void run(
                                       () => api.saveImageJob({ jobId: job.id, index, approved: item.approved !== true }),
-                                      item.approved === true ? "已取消通过" : "已标记通过"
+                                      item.approved === true ? T("已取消通过") : T("已标记通过")
                                     )
                                 }),
                                 item.keyedFile !== undefined
-                                  ? h("a", { className: "SPR_btn", href: `${job.assetBase}${item.keyedFile}`, download: `keyed-${index + 1}.png`, style: { textDecoration: "none" } }, "下载 PNG")
+                                  ? h("a", { className: "SPR_btn", href: `${job.assetBase}${item.keyedFile}`, download: `keyed-${index + 1}.png`, style: { textDecoration: "none" } }, T("下载 PNG"))
                                   : null,
                                 item.source === "generated"
                                   ? h(
                                       BusyBtn,
                                       {
                                         busy: tasks.has(itemKey),
-                                        busyText: "正在提交…",
+                                        busyText: T("正在提交…"),
                                         onClick: () =>
-                                          void run(() => api.runImageJob({ jobId: job.id, count: index + 1 }), "已重新生成", {
+                                          void run(() => api.runImageJob({ jobId: job.id, count: index + 1 }), T("已重新生成"), {
                                             key: itemKey,
-                                            label: `正在重新生成第 ${index + 1} 张…`
+                                            label: T("正在重新生成第 {n0} 张…", { n0: index + 1 })
                                           })
                                       },
-                                      "重新生成"
+                                      T("重新生成")
                                     )
                                   : null,
-                                h(Btn, { danger: true, disabled: overlay, onClick: () => void run(() => api.removeImageItem({ jobId: job.id, index }), "已删除") }, "删除")
+                                h(Btn, { danger: true, disabled: overlay, onClick: () => void run(() => api.removeImageItem({ jobId: job.id, index }), T("已删除")) }, T("删除"))
                               )
                             );
                           })
@@ -4001,6 +5037,7 @@
     const K_SEQ_POLL = "seq:poll";
 
     function SequenceModule(props) {
+      useLocaleTick();
       const api = props.api;
       const [jobs, setJobs] = React.useState([]);
       const [jobId, setJobId] = React.useState(null);
@@ -4128,27 +5165,27 @@
 
       const create = () =>
         run(async () => {
-          const created = await api.createSequenceJob({ name: `序列帧 ${new Date().toLocaleString("zh-CN", { hour12: false })}` });
+          const created = await api.createSequenceJob({ name: T("序列帧 {n0}", { n0: new Date().toLocaleString("zh-CN", { hour12: false }) }) });
           await refresh();
           setJobId(created.jobId);
-        }, "已新建序列帧任务", { key: K_SEQ_CREATE, label: "正在新建任务…" });
+        }, T("已新建序列帧任务"), { key: K_SEQ_CREATE, label: T("正在新建任务…") });
 
       const saveJob = (patch) => run(() => api.saveSequenceJob({ jobId: job.id, ...patch }), undefined);
 
       const del = async () => {
         if (job === null) return;
-        if (typeof window !== "undefined" && !window.confirm(`删除任务「${job.name}」？目录会被整个移除。`)) return;
+        if (typeof window !== "undefined" && !window.confirm(T("删除任务「{n0}」？目录会被整个移除。", { n0: job.name }))) return;
         await run(async () => {
           await api.deleteSequenceJob({ jobId: job.id });
           const list = await refresh();
           setJobId(list.length > 0 ? list[0].id : null);
           if (list.length === 0) setJob(null);
-        }, "已删除");
+        }, T("已删除"));
       };
 
       const uploadRef = async (files, kind) => {
         setUploading(true);
-        await tasks.run(K_SEQ_UPLOAD, `正在上传 ${files.length} 个文件…`, async () => {
+        await tasks.run(K_SEQ_UPLOAD, T("正在上传 {n0} 个文件…", { n0: files.length }), async () => {
           try {
             for (const file of files) {
               const data = await readFileBase64(file);
@@ -4172,12 +5209,12 @@
       // ── 「正在调用接口」的派生状态 ──────────────────────────────────────
       // 三段各有一块要盖遮罩的预览区：视频、序列帧/条图、合成结果。
       const videoBusy = job?.video?.status === "running" || tasks.has(K_SEQ_VIDEO);
-      const videoText = tasks.label(K_SEQ_VIDEO) ?? "视频生成中…（H3 通常 1~6 分钟，可以离开本页）";
+      const videoText = tasks.label(K_SEQ_VIDEO) ?? T("视频生成中…（H3 通常 1~6 分钟，可以离开本页）");
       const framesBusy = job?.frames?.status === "running" || tasks.has(K_SEQ_FRAMES);
-      const framesText = tasks.label(K_SEQ_FRAMES) ?? "正在抽帧…";
+      const framesText = tasks.label(K_SEQ_FRAMES) ?? T("正在抽帧…");
       const composing =
         job?.sheet?.status === "running" || tasks.has(K_SEQ_KEY) || tasks.has(K_SEQ_COMPOSE);
-      const composeText = tasks.label(K_SEQ_KEY) ?? tasks.label(K_SEQ_COMPOSE) ?? "正在抠像并合成条图…";
+      const composeText = tasks.label(K_SEQ_KEY) ?? tasks.label(K_SEQ_COMPOSE) ?? T("正在抠像并合成条图…");
 
       return h(
         React.Fragment,
@@ -4186,37 +5223,37 @@
           "div",
           { className: "SPR_body" },
           h(JobSidebar, {
-            title: "序列帧任务",
+            title: T("序列帧任务"),
             items: jobs,
             activeId: jobId,
             onSelect: setJobId,
             onCreate: create,
-            renderMeta: (item) => `${item.videoReady ? "视频✓" : "视频·"} ${item.frameReady ? "帧✓" : "帧·"} ${item.sheetReady ? "合成✓" : "合成·"}`
+            renderMeta: (item) => T("{n0} {n1} {n2}", { n0: item.videoReady ? T("视频✓") : T("视频·"), n1: item.frameReady ? T("帧✓") : T("帧·"), n2: item.sheetReady ? T("合成✓") : T("合成·") })
           }),
           h(
             "div",
             { className: "SPR_main" },
             notice !== null
               ? h("div", { className: "SPR_note", "data-kind": notice.kind }, notice.text,
-                  h("span", { style: { marginLeft: 10 } }, h("button", { type: "button", className: "SPR_miniBtn", onClick: () => setNotice(null) }, "关闭")))
+                  h("span", { style: { marginLeft: 10 } }, h("button", { type: "button", className: "SPR_miniBtn", onClick: () => setNotice(null) }, T("关闭"))))
               : null,
             h(
               "div",
               { className: "SPR_toolbar" },
-              h(BusyBtn, { onClick: create, primary: true, busy: tasks.has(K_SEQ_CREATE), busyText: "正在新建…" }, "新建任务"),
-              job !== null ? h(Btn, { onClick: del, danger: true }, "删除任务") : null,
-              h(BusyBadge, { show: tasks.active, text: tasks.firstLabel ?? "正在调用接口…" })
+              h(BusyBtn, { onClick: create, primary: true, busy: tasks.has(K_SEQ_CREATE), busyText: T("正在新建…") }, T("新建任务")),
+              job !== null ? h(Btn, { onClick: del, danger: true }, T("删除任务")) : null,
+              h(BusyBadge, { show: tasks.active, text: tasks.firstLabel ?? T("正在调用接口…") })
             ),
             job === null
-              ? h("p", { className: "SPR_empty" }, "请选择或新建一个序列帧任务")
+              ? h("p", { className: "SPR_empty" }, T("请选择或新建一个序列帧任务"))
               : h(
                   React.Fragment,
                   null,
                   h(
                     "div",
                     { className: "SPR_card" },
-                    h("div", { className: "SPR_cardHead" }, h("h3", null, "① 视频输入")),
-                    h("p", { className: "SPR_hint" }, "平台规定两种模式互斥：首尾帧模式以一张图作为起始画面；多模态参考模式用参考图+参考视频来约束风格与动作。" ),
+                    h("div", { className: "SPR_cardHead" }, h("h3", null, T("① 视频输入"))),
+                    h("p", { className: "SPR_hint" }, T("平台规定两种模式互斥：首尾帧模式以一张图作为起始画面；多模态参考模式用参考图+参考视频来约束风格与动作。") ),
                     h(
                       "div",
                       { className: "SPR_toolbar" },
@@ -4228,24 +5265,24 @@
                           value: job.mode,
                           onChange: (event) => void run(() => api.saveSequenceJob({ jobId: job.id, mode: event.target.value }), undefined)
                         },
-                        h("option", { value: "frames" }, "首尾帧模式（上传首帧图）"),
-                        h("option", { value: "reference" }, "多模态参考模式（参考图 / 参考视频）")
+                        h("option", { value: "frames" }, T("首尾帧模式（上传首帧图）")),
+                        h("option", { value: "reference" }, T("多模态参考模式（参考图 / 参考视频）"))
                       )
                     ),
                     job.mode === "frames"
                       ? h(
                           React.Fragment,
                           null,
-                          h("span", { className: "SPR_fieldLabel" }, "首帧图（必填）"),
+                          h("span", { className: "SPR_fieldLabel" }, T("首帧图（必填）")),
                           h(RefRow, { job, frame: job.refs.firstFrame, kind: "firstFrame", api, reload: load, setNotice }),
-                          h("span", { className: "SPR_fieldLabel" }, "尾帧图（选填）"),
+                          h("span", { className: "SPR_fieldLabel" }, T("尾帧图（选填）")),
                           h(RefRow, { job, frame: job.refs.lastFrame, kind: "lastFrame", api, reload: load, setNotice }),
-                          h(UploadBox, { label: "把首帧图拖到这里", accept: "image/*", busy: uploading || tasks.has(K_SEQ_UPLOAD), onFiles: (files) => void uploadRef(files, "firstFrame") })
+                          h(UploadBox, { label: T("把首帧图拖到这里"), accept: "image/*", busy: uploading || tasks.has(K_SEQ_UPLOAD), onFiles: (files) => void uploadRef(files, "firstFrame") })
                         )
                       : h(
                           React.Fragment,
                           null,
-                          h("span", { className: "SPR_fieldLabel" }, `参考图（${(job.refs.referenceImages ?? []).length}/9）`),
+                          h("span", { className: "SPR_fieldLabel" }, T("参考图（{n0}/9）", { n0: (job.refs.referenceImages ?? []).length })),
                           h(
                             "div",
                             { className: "SPR_grid" },
@@ -4254,26 +5291,26 @@
                                 "div",
                                 { key: ref.file, className: "SPR_node" },
                                 h("img", { className: "SPR_thumb", src: `${job.assetBase}${ref.file}?v=${job.updatedAt}`, alt: ref.name }),
-                                h("div", { className: "SPR_btnRow" }, h(Btn, { danger: true, onClick: () => void run(() => api.removeSequenceRef({ jobId: job.id, kind: "referenceImage", file: ref.file }), "已移除") }, "移除"))
+                                h("div", { className: "SPR_btnRow" }, h(Btn, { danger: true, onClick: () => void run(() => api.removeSequenceRef({ jobId: job.id, kind: "referenceImage", file: ref.file }), T("已移除")) }, T("移除")))
                               )
                             )
                           ),
-                          h(UploadBox, { label: "把参考图拖到这里", accept: "image/*", multiple: true, busy: uploading || tasks.has(K_SEQ_UPLOAD), onFiles: (files) => void uploadRef(files, "referenceImage") }),
-                          h("span", { className: "SPR_fieldLabel" }, `参考视频（${(job.refs.referenceVideos ?? []).length}/3，每段 2~15 秒，单文件 ≤ 40MB）`),
+                          h(UploadBox, { label: T("把参考图拖到这里"), accept: "image/*", multiple: true, busy: uploading || tasks.has(K_SEQ_UPLOAD), onFiles: (files) => void uploadRef(files, "referenceImage") }),
+                          h("span", { className: "SPR_fieldLabel" }, T("参考视频（{n0}/3，每段 2~15 秒，单文件 ≤ 40MB）", { n0: (job.refs.referenceVideos ?? []).length })),
                           h(
                             "div",
                             { className: "SPR_toolbar" },
                             (job.refs.referenceVideos ?? []).map((ref) =>
-                              h(Btn, { key: ref.file, danger: true, onClick: () => void run(() => api.removeSequenceRef({ jobId: job.id, kind: "referenceVideo", file: ref.file }), "已移除") }, `移除 ${ref.name}`)
+                              h(Btn, { key: ref.file, danger: true, onClick: () => void run(() => api.removeSequenceRef({ jobId: job.id, kind: "referenceVideo", file: ref.file }), T("已移除")) }, T("移除 {n0}", { n0: ref.name }))
                             )
                           ),
-                          h(UploadBox, { label: "把参考视频拖到这里", accept: "video/*", multiple: true, busy: uploading || tasks.has(K_SEQ_UPLOAD), onFiles: (files) => void uploadRef(files, "referenceVideo") })
+                          h(UploadBox, { label: T("把参考视频拖到这里"), accept: "video/*", multiple: true, busy: uploading || tasks.has(K_SEQ_UPLOAD), onFiles: (files) => void uploadRef(files, "referenceVideo") })
                         )
                   ),
                   h(
                     "div",
                     { className: "SPR_card" },
-                    h("div", { className: "SPR_cardHead" }, h("h3", null, "② 提示词与参数")),
+                    h("div", { className: "SPR_cardHead" }, h("h3", null, T("② 提示词与参数"))),
                     h("textarea", {
                       className: "SPR_area",
                       value: promptDraft,
@@ -4283,7 +5320,7 @@
                     h("textarea", {
                       className: "SPR_area",
                       style: { minHeight: 60 },
-                      placeholder: "统一附加提示词（可留空）",
+                      placeholder: T("统一附加提示词（可留空）"),
                       value: suffixDraft,
                       onChange: (event) => setSuffixDraft(event.target.value),
                       onBlur: () => { if (suffixDraft !== (job.suffix ?? "")) void saveJob({ suffix: suffixDraft }); }
@@ -4291,12 +5328,12 @@
                     h(
                       "div",
                       { className: "SPR_fields" },
-                      h(GlobalModelField, { label: "视频模型", value: effectiveModel }),
-                      h(NumField, { label: `时长（秒，${modelCaps.durationMin}~${modelCaps.durationMax}）`, value: settingsDraft.duration ?? 5, min: modelCaps.durationMin, max: modelCaps.durationMax, onChange: (v) => { setSettingsDraft({ ...settingsDraft, duration: v }); void saveJob({ settings: { ...settingsDraft, duration: v } }); } }),
+                      h(GlobalModelField, { label: T("视频模型"), value: effectiveModel }),
+                      h(NumField, { label: T("时长（秒，{n0}~{n1}）", { n0: modelCaps.durationMin, n1: modelCaps.durationMax }), value: settingsDraft.duration ?? 5, min: modelCaps.durationMin, max: modelCaps.durationMax, onChange: (v) => { setSettingsDraft({ ...settingsDraft, duration: v }); void saveJob({ settings: { ...settingsDraft, duration: v } }); } }),
                       h(
                         "label",
                         { className: "SPR_field" },
-                        h("span", { className: "SPR_fieldLabel" }, "分辨率"),
+                        h("span", { className: "SPR_fieldLabel" }, T("分辨率")),
                         h(
                           "select",
                           { className: "SPR_input", value: effectiveResolution, onChange: (event) => { setSettingsDraft({ ...settingsDraft, resolution: event.target.value }); void saveJob({ settings: { ...settingsDraft, resolution: event.target.value } }); } },
@@ -4312,37 +5349,37 @@
                         {
                           primary: true,
                           busy: tasks.has(K_SEQ_VIDEO),
-                          busyText: "正在提交视频任务…",
+                          busyText: T("正在提交视频任务…"),
                           disabled: promptDraft.trim() === "" || tasks.has(K_SEQ_VIDEO),
                           onClick: () =>
-                            void kickAndWatch(() => api.runSequenceVideo({ jobId: job.id }), "已提交视频任务，可离开本页", {
+                            void kickAndWatch(() => api.runSequenceVideo({ jobId: job.id }), T("已提交视频任务，可离开本页"), {
                               key: K_SEQ_VIDEO,
-                              label: "正在提交视频任务…"
+                              label: T("正在提交视频任务…")
                             })
                         },
-                        job.video?.status === "ready" ? "重新生成视频" : "生成视频"
+                        job.video?.status === "ready" ? T("重新生成视频") : T("生成视频")
                       ),
                       h(
                         BusyBtn,
                         {
                           busy: tasks.has(K_SEQ_POLL),
-                          busyText: "正在查询…",
+                          busyText: T("正在查询…"),
                           onClick: () =>
                             void kickAndWatch(
                               () => run(() => api.pollSequenceVideo({ jobId: job.id })),
                               undefined,
-                              { key: K_SEQ_POLL, label: "正在查询远端进度…" }
+                              { key: K_SEQ_POLL, label: T("正在查询远端进度…") }
                             )
                         },
-                        "立即刷新进度"
+                        T("立即刷新进度")
                       ),
-                      h(Btn, { danger: true, disabled: videoBusy, onClick: () => void run(() => api.clearSequenceVideo({ jobId: job.id }), "已清空视频与帧") }, "清空视频重来"),
-                      h("span", { className: "SPR_refRow" }, "H3 768P 按 0.5 元/秒刊例计费")
+                      h(Btn, { danger: true, disabled: videoBusy, onClick: () => void run(() => api.clearSequenceVideo({ jobId: job.id }), T("已清空视频与帧")) }, T("清空视频重来")),
+                      h("span", { className: "SPR_refRow" }, T("H3 768P 按 0.5 元/秒刊例计费"))
                     ),
                     h(
                       "div",
                       { className: "SPR_toolbar" },
-                      h("span", { className: "SPR_refRow" }, `状态：${job.video?.status ?? "empty"} ${job.video?.remoteStatus ?? ""} ${job.video?.error ?? ""}`),
+                      h("span", { className: "SPR_refRow" }, T("状态：{n0} {n1} {n2}", { n0: job.video?.status ?? "empty", n1: job.video?.remoteStatus ?? "", n2: job.video?.error ?? "" })),
                       h(BusyBadge, { show: videoBusy, text: videoText })
                     ),
                     h(
@@ -4363,15 +5400,15 @@
                   h(
                     "div",
                     { className: "SPR_card" },
-                    h("div", { className: "SPR_cardHead" }, h("h3", null, "③ 序列帧提取")),
+                    h("div", { className: "SPR_cardHead" }, h("h3", null, T("③ 序列帧提取"))),
                     h(
                       "div",
                       { className: "SPR_fields" },
-                      h(NumField, { label: "提取张数", value: settingsDraft.frameCount ?? 8, min: 1, max: 64, onChange: (v) => { setSettingsDraft({ ...settingsDraft, frameCount: v }); void saveJob({ settings: { ...settingsDraft, frameCount: v } }); } }),
-                      h(NumField, { label: "抽帧工作尺寸（长边 px）", value: settingsDraft.longEdge ?? 768, min: 128, max: 2048, onChange: (v) => { setSettingsDraft({ ...settingsDraft, longEdge: v }); void saveJob({ settings: { ...settingsDraft, longEdge: v } }); } }),
-                      h(NumField, { label: "单格宽（px）", value: settingsDraft.cellWidth ?? 256, min: 16, max: 2048, onChange: (v) => { setSettingsDraft({ ...settingsDraft, cellWidth: v }); void saveJob({ settings: { ...settingsDraft, cellWidth: v } }); } }),
-                      h(NumField, { label: "单格高（px）", value: settingsDraft.cellHeight ?? 256, min: 16, max: 2048, onChange: (v) => { setSettingsDraft({ ...settingsDraft, cellHeight: v }); void saveJob({ settings: { ...settingsDraft, cellHeight: v } }); } }),
-                      h(NumField, { label: "像素块边长（0/1 = 关闭）", value: settingsDraft.pixelSize ?? 0, min: 0, max: 32, onChange: (v) => { setSettingsDraft({ ...settingsDraft, pixelSize: v }); void saveJob({ settings: { ...settingsDraft, pixelSize: v } }); } })
+                      h(NumField, { label: T("提取张数"), value: settingsDraft.frameCount ?? 8, min: 1, max: 64, onChange: (v) => { setSettingsDraft({ ...settingsDraft, frameCount: v }); void saveJob({ settings: { ...settingsDraft, frameCount: v } }); } }),
+                      h(NumField, { label: T("抽帧工作尺寸（长边 px）"), value: settingsDraft.longEdge ?? 768, min: 128, max: 2048, onChange: (v) => { setSettingsDraft({ ...settingsDraft, longEdge: v }); void saveJob({ settings: { ...settingsDraft, longEdge: v } }); } }),
+                      h(NumField, { label: T("单格宽（px）"), value: settingsDraft.cellWidth ?? 256, min: 16, max: 2048, onChange: (v) => { setSettingsDraft({ ...settingsDraft, cellWidth: v }); void saveJob({ settings: { ...settingsDraft, cellWidth: v } }); } }),
+                      h(NumField, { label: T("单格高（px）"), value: settingsDraft.cellHeight ?? 256, min: 16, max: 2048, onChange: (v) => { setSettingsDraft({ ...settingsDraft, cellHeight: v }); void saveJob({ settings: { ...settingsDraft, cellHeight: v } }); } }),
+                      h(NumField, { label: T("像素块边长（0/1 = 关闭）"), value: settingsDraft.pixelSize ?? 0, min: 0, max: 32, onChange: (v) => { setSettingsDraft({ ...settingsDraft, pixelSize: v }); void saveJob({ settings: { ...settingsDraft, pixelSize: v } }); } })
                     ),
                     h(
                       "div",
@@ -4381,25 +5418,25 @@
                         {
                           primary: true,
                           busy: tasks.has(K_SEQ_FRAMES),
-                          busyText: "正在抽帧…",
+                          busyText: T("正在抽帧…"),
                           disabled: job.video?.file === undefined || framesBusy,
                           onClick: () =>
-                            void kickAndWatch(() => api.runSequenceFrames({ jobId: job.id }), "已开始抽帧", {
+                            void kickAndWatch(() => api.runSequenceFrames({ jobId: job.id }), T("已开始抽帧"), {
                               key: K_SEQ_FRAMES,
-                              label: "正在抽帧…"
+                              label: T("正在抽帧…")
                             })
                         },
-                        `按当前张数抽帧（${settingsDraft.frameCount ?? 8} 张）`
+                        T("按当前张数抽帧（{n0} 张）", { n0: settingsDraft.frameCount ?? 8 })
                       ),
-                      job.frames?.stale === true ? h(Chip, { kind: "stale", text: "参数已变，需重抽" }) : null,
+                      job.frames?.stale === true ? h(Chip, { kind: "stale", text: T("参数已变，需重抽") }) : null,
                       h(BusyBadge, { show: framesBusy, text: framesText }),
-                      h("span", { className: "SPR_refRow" }, job.frames?.duration !== undefined ? `视频时长 ${job.frames.duration.toFixed(2)} 秒 · ${job.frames.files.length} 帧` : "")
+                      h("span", { className: "SPR_refRow" }, job.frames?.duration !== undefined ? T("视频时长 {n0} 秒 · {n1} 帧", { n0: job.frames.duration.toFixed(2), n1: job.frames.files.length }) : "")
                     )
                   ),
                   h(
                     "div",
                     { className: "SPR_card" },
-                    h("div", { className: "SPR_cardHead" }, h("h3", null, "④ 绿幕抠像与合成")),
+                    h("div", { className: "SPR_cardHead" }, h("h3", null, T("④ 绿幕抠像与合成"))),
                     h(KeyingFields, { draft: keyingDraft, onChange: (patch) => { const next = { ...keyingDraft, ...patch }; setKeyingDraft(next); void saveJob({ keying: patch }); } }),
                     h(
                       "div",
@@ -4408,39 +5445,39 @@
                         BusyBtn,
                         {
                           busy: tasks.has(K_SEQ_KEY),
-                          busyText: "正在重新抠像…",
+                          busyText: T("正在重新抠像…"),
                           disabled: framesBusy,
                           onClick: () =>
-                            void kickAndWatch(() => api.keySequenceFrames({ jobId: job.id }), "已开始重新抠像", {
+                            void kickAndWatch(() => api.keySequenceFrames({ jobId: job.id }), T("已开始重新抠像"), {
                               key: K_SEQ_KEY,
-                              label: "正在重新抠像…"
+                              label: T("正在重新抠像…")
                             })
                         },
-                        "重新抠像"
+                        T("重新抠像")
                       ),
                       h(
                         BusyBtn,
                         {
                           busy: tasks.has(K_SEQ_COMPOSE),
-                          busyText: "正在合成条图…",
+                          busyText: T("正在合成条图…"),
                           disabled: framesBusy,
                           onClick: () =>
-                            void kickAndWatch(() => api.composeSequence({ jobId: job.id }), "已合成", {
+                            void kickAndWatch(() => api.composeSequence({ jobId: job.id }), T("已合成"), {
                               key: K_SEQ_COMPOSE,
-                              label: "正在合成横向条图…"
+                              label: T("正在合成横向条图…")
                             })
                         },
-                        "合成横向条图"
+                        T("合成横向条图")
                       ),
                       job.sheet?.file !== undefined
-                        ? h("a", { className: "SPR_btn", href: `${job.assetBase}${job.sheet.file}?v=${job.sheet.updatedAt}`, download: `${job.name}-strip.png`, style: { textDecoration: "none" } }, "下载条图")
+                        ? h("a", { className: "SPR_btn", href: `${job.assetBase}${job.sheet.file}?v=${job.sheet.updatedAt}`, download: `${job.name}-strip.png`, style: { textDecoration: "none" } }, T("下载条图"))
                         : null
                     ),
                     h(
                       "div",
                       { style: { position: "relative" } },
                       frameUrls.length === 0
-                        ? h("p", { className: "SPR_empty" }, framesBusy ? "正在处理序列帧…" : "还没有序列帧")
+                        ? h("p", { className: "SPR_empty" }, framesBusy ? T("正在处理序列帧…") : T("还没有序列帧"))
                         : h(SequencePlayer, { urls: frameUrls }),
                       h(LoadingOverlay, { show: framesBusy, text: framesText })
                     ),
@@ -4448,7 +5485,7 @@
                       ? h(
                           "div",
                           { className: "SPR_sheetWrap", style: { position: "relative" } },
-                          h("img", { className: "SPR_sheet", src: `${job.assetBase}${job.sheet.file}?v=${job.sheet.updatedAt}`, alt: "序列帧条图", style: { visibility: composing ? "hidden" : undefined } }),
+                          h("img", { className: "SPR_sheet", src: `${job.assetBase}${job.sheet.file}?v=${job.sheet.updatedAt}`, alt: T("序列帧条图"), style: { visibility: composing ? "hidden" : undefined } }),
                           h(LoadingOverlay, { show: composing, text: composeText })
                         )
                       : null,
@@ -4462,8 +5499,8 @@
                               key: index,
                               className: "SPR_frame",
                               src: url,
-                              alt: `第 ${index + 1} 帧`,
-                              caption: `第 ${index + 1} / ${frameUrls.length} 帧（点「×」/ 背景 / Esc 关闭）`
+                              alt: T("第 {n0} 帧", { n0: index + 1 }),
+                              caption: T("第 {n0} / {n1} 帧（点「×」/ 背景 / Esc 关闭）", { n0: index + 1, n1: frameUrls.length })
                             })
                           )
                         )
@@ -4471,13 +5508,13 @@
                   h(
                     "div",
                     { className: "SPR_card" },
-                    h("div", { className: "SPR_cardHead" }, h("h3", null, "⑤ 验收")),
-                    h("p", { className: "SPR_hint" }, "三步各自打「通过」。对话里的 agent 读写同一份标记：选「每一步人工审核」时，它会等你通过才继续。" ),
+                    h("div", { className: "SPR_cardHead" }, h("h3", null, T("⑤ 验收"))),
+                    h("p", { className: "SPR_hint" }, T("三步各自打「通过」。对话里的 agent 读写同一份标记：选「每一步人工审核」时，它会等你通过才继续。") ),
                     h(ReviewModeBar, { api, module: "sequence", id: job.id, mode: job.reviewMode, onChanged: () => void load(job.id) }),
                     [
-                      { step: "video", title: "① 生成视频", node: job.video },
-                      { step: "frames", title: "② 抽帧 + 抠像", node: job.frames },
-                      { step: "sheet", title: "③ 横向条图", node: job.sheet }
+                      { step: "video", title: T("① 生成视频"), node: job.video },
+                      { step: "frames", title: T("② 抽帧 + 抠像"), node: job.frames },
+                      { step: "sheet", title: T("③ 横向条图"), node: job.sheet }
                     ].map((entry) =>
                       h(
                         "div",
@@ -4490,7 +5527,7 @@
                           onToggle: () =>
                             void run(
                               () => api.saveSequenceJob({ jobId: job.id, step: entry.step, approved: entry.node?.approved !== true }),
-                              entry.node?.approved === true ? "已取消通过" : "已标记通过"
+                              entry.node?.approved === true ? T("已取消通过") : T("已标记通过")
                             )
                         })
                       )
@@ -4509,7 +5546,7 @@
       // 函数组件里 `props.ref` 恒为 undefined，界面就会永远显示「未上传」——
       // 看起来像「选了图没反应」，实测踩过。
       const { job, frame, kind, api, reload, setNotice } = props;
-      if (frame === undefined) return h("span", { className: "SPR_refRow" }, "未上传");
+      if (frame === undefined) return h("span", { className: "SPR_refRow" }, T("未上传"));
       return h(
         "div",
         { className: "SPR_toolbar" },
@@ -4528,7 +5565,7 @@
               }
             }
           },
-          "移除"
+          T("移除")
         )
       );
     }
@@ -4612,21 +5649,21 @@
         h(
           "div",
           { className: "SPR_fields" },
-          h(NumField, { label: "播放帧率（fps）", value: fps, min: 1, max: 30, onChange: setFps }),
-          h(NumField, { label: "预览缩放", value: scale, min: 0.2, max: 2, step: 0.1, onChange: setScale }),
+          h(NumField, { label: T("播放帧率（fps）"), value: fps, min: 1, max: 30, onChange: setFps }),
+          h(NumField, { label: T("预览缩放"), value: scale, min: 0.2, max: 2, step: 0.1, onChange: setScale }),
           h(
             "label",
             { className: "SPR_field" },
-            h("span", { className: "SPR_fieldLabel" }, "播放"),
+            h("span", { className: "SPR_fieldLabel" }, T("播放")),
             h(
               "select",
               { className: "SPR_input", value: playing ? "on" : "off", onChange: (event) => setPlaying(event.target.value === "on") },
-              h("option", { value: "on" }, "播放中"),
-              h("option", { value: "off" }, "暂停")
+              h("option", { value: "on" }, T("播放中")),
+              h("option", { value: "off" }, T("暂停"))
             )
           )
         ),
-        h("p", { className: "SPR_hint" }, `已载入 ${loaded}/${urls.length} 帧。这是抠像后的帧按顺序循环播放的效果，用来判断动作连贯性和抠像边缘是否稳定。`),
+        h("p", { className: "SPR_hint" }, T("已载入 {n0}/{n1} 帧。这是抠像后的帧按顺序循环播放的效果，用来判断动作连贯性和抠像边缘是否稳定。", { n0: loaded, n1: urls.length })),
         h("div", { className: "SPR_player" }, h("canvas", { ref: canvasRef, className: "SPR_canvasPlayer" }))
       );
     }
@@ -4663,7 +5700,7 @@
           paired.push({
             at: entry.at,
             level: entry.level,
-            message: `${open.message.replace(/^开始/, "")} → ${entry.message}`,
+            message: T("{n0} → {n1}", { n0: open.message.replace(/^开始/, ""), n1: entry.message }),
             startedAt: open.at,
             elapsed: Math.max(0, entry.at - open.at)
           });
@@ -4684,15 +5721,15 @@
         "div",
         { className: "SPR_log", "data-testid": "rig-log" },
         h("div", { className: "SPR_logHead" },
-          h("span", { className: "SPR_fieldLabel" }, `运行日志（${paired.length} 条${counts.error ? ` · ${counts.error} 错误` : counts.warn ? ` · ${counts.warn} 警告` : ""}）`),
+          h("span", { className: "SPR_fieldLabel" }, T("运行日志（{n0} 条{n1}）", { n0: paired.length, n1: counts.error ? T(" · {n0} 错误", { n0: counts.error }) : counts.warn ? T(" · {n0} 警告", { n0: counts.warn }) : "" })),
           h("span", { className: "SPR_logFilters" },
-            h(Btn, { on: level === "all", "data-testid": "rig-log-all", onClick: () => setLevel("all") }, "全部"),
-            h(Btn, { on: level === "warn", "data-testid": "rig-log-warn", onClick: () => setLevel("warn") }, `警告+（${(counts.warn ?? 0) + (counts.error ?? 0)}）`),
-            h(Btn, { on: level === "error", "data-testid": "rig-log-error", onClick: () => setLevel("error") }, `错误（${counts.error ?? 0}）`),
+            h(Btn, { on: level === "all", "data-testid": "rig-log-all", onClick: () => setLevel("all") }, T("全部")),
+            h(Btn, { on: level === "warn", "data-testid": "rig-log-warn", onClick: () => setLevel("warn") }, T("警告+（{n0}）", { n0: (counts.warn ?? 0) + (counts.error ?? 0) })),
+            h(Btn, { on: level === "error", "data-testid": "rig-log-error", onClick: () => setLevel("error") }, T("错误（{n0}）", { n0: counts.error ?? 0 })),
             h("input", {
               className: "SPR_input",
               style: { width: 130 },
-              placeholder: "搜关键字…",
+              placeholder: T("搜关键字…"),
               "data-testid": "rig-log-query",
               value: query,
               onChange: (event) => setQuery(event.target.value)
@@ -4700,7 +5737,7 @@
           )
         ),
         entries.length === 0
-          ? h("p", { className: "SPR_hint" }, filtered.length === 0 && paired.length > 0 ? "当前筛选下没有日志。" : "")
+          ? h("p", { className: "SPR_hint" }, filtered.length === 0 && paired.length > 0 ? T("当前筛选下没有日志。") : "")
           : h(
               "ul",
               { className: "SPR_logList" },
@@ -4710,7 +5747,7 @@
                   { key: `${entry.at}-${index}`, "data-level": entry.level },
                   h("span", { className: "SPR_logTime" }, new Date(entry.at).toLocaleTimeString("zh-CN", { hour12: false })),
                   h("span", null, entry.message),
-                  entry.elapsed === undefined ? null : h("span", { className: "SPR_logElapsed" }, `（${formatElapsed(entry.elapsed)}）`)
+                  entry.elapsed === undefined ? null : h("span", { className: "SPR_logElapsed" }, T("（{n0}）", { n0: formatElapsed(entry.elapsed) }))
                 )
               )
             )
@@ -4723,7 +5760,7 @@
       return h(
         "div",
         { className: "SPR_log" },
-        h("span", { className: "SPR_fieldLabel" }, "运行日志"),
+        h("span", { className: "SPR_fieldLabel" }, T("运行日志")),
         h(
           "ul",
           { className: "SPR_logList" },
@@ -4759,29 +5796,37 @@
      * `scripts/verify-tools.mjs` 有一条契约把两边逐项比对，防止悄悄漂移——
      * 这正是 RIG_ANIMATIONS 已经在用的做法。
      */
-    const RIG_ROLES = [
-      { key: "head", label: "头部" },
-      { key: "neck", label: "脖子" },
-      { key: "torso", label: "躯干" },
-      { key: "hip", label: "胯部" },
-      { key: "upperArm", label: "上臂" },
-      { key: "lowerArm", label: "小臂" },
-      { key: "hand", label: "手" },
-      { key: "upperLeg", label: "大腿" },
-      { key: "lowerLeg", label: "小腿" },
-      { key: "foot", label: "脚" },
-      { key: "hair", label: "头发" },
-      { key: "cloth", label: "衣料" },
-      { key: "accessory", label: "配饰" },
-      { key: "weapon", label: "武器" }
+    function make_RIG_ROLES() {
+      return [
+      { key: "head", label: T("头部") },
+      { key: "neck", label: T("脖子") },
+      { key: "torso", label: T("躯干") },
+      { key: "hip", label: T("胯部") },
+      { key: "upperArm", label: T("上臂") },
+      { key: "lowerArm", label: T("小臂") },
+      { key: "hand", label: T("手") },
+      { key: "upperLeg", label: T("大腿") },
+      { key: "lowerLeg", label: T("小腿") },
+      { key: "foot", label: T("脚") },
+      { key: "hair", label: T("头发") },
+      { key: "cloth", label: T("衣料") },
+      { key: "accessory", label: T("配饰") },
+      { key: "weapon", label: T("武器") }
     ];
+    }
+    let RIG_ROLES = make_RIG_ROLES();
 
-    const RIG_STAGES = [
-      { key: "parts", title: "① 拆件", hint: "生图模型把角色拆成独立部件（这一步花钱，只跑一次；也可以直接上传部件 PNG）" },
-      { key: "layout", title: "② 装配定位", hint: "把部件摆回参考姿态；本地计算，免费，可以逐件重跑或手工拖动" },
-      { key: "rig", title: "③ 骨骼与动画", hint: "自动推骨骼层级 + 待机/行走/奔跑/挥手/跳跃/攻击，直接播放验收" },
-      { key: "atlas", title: "④ 图集", hint: "打包成 Spine 纹理图集（.png + .atlas），可直接导入引擎" }
+
+    function make_RIG_STAGES() {
+      return [
+      { key: "parts", title: T("① 拆件"), hint: T("生图模型把角色拆成独立部件（这一步花钱，只跑一次；也可以直接上传部件 PNG）") },
+      { key: "layout", title: T("② 装配定位"), hint: T("把部件摆回参考姿态；本地计算，免费，可以逐件重跑或手工拖动") },
+      { key: "rig", title: T("③ 骨骼与动画"), hint: T("自动推骨骼层级 + 待机/行走/奔跑/挥手/跳跃/攻击，直接播放验收") },
+      { key: "atlas", title: T("④ 图集"), hint: T("打包成 Spine 纹理图集（.png + .atlas），可直接导入引擎") }
     ];
+    }
+    let RIG_STAGES = make_RIG_STAGES();
+
 
     const K_RIG_JOB = "rig:job";
     const K_RIG_SHEET = "rig:sheet";
@@ -4796,16 +5841,20 @@
     const K_RIG_REDRAW = "rig:redraw";
 
     /** 后台任务的 pending 文案：宿主在跑什么，界面就直说什么。 */
-    const RIG_BUSY_LABEL = {
-      [K_RIG_JOB]: "正在刷新…",
-      [K_RIG_SHEET]: "正在拆件生图…",
-      [K_RIG_SEGMENT]: "正在分割部件…",
-      [K_RIG_LAYOUT]: "正在装配定位…",
-      [K_RIG_BONES]: "正在生成骨骼…",
-      [K_RIG_ATLAS]: "正在打包图集…",
-      [K_RIG_REDRAW]: "正在重绘部件…",
-      [K_RIG_CREATE]: "正在创建任务…"
+    function make_RIG_BUSY_LABEL() {
+      return {
+      [K_RIG_JOB]: T("正在刷新…"),
+      [K_RIG_SHEET]: T("正在拆件生图…"),
+      [K_RIG_SEGMENT]: T("正在分割部件…"),
+      [K_RIG_LAYOUT]: T("正在装配定位…"),
+      [K_RIG_BONES]: T("正在生成骨骼…"),
+      [K_RIG_ATLAS]: T("正在打包图集…"),
+      [K_RIG_REDRAW]: T("正在重绘部件…"),
+      [K_RIG_CREATE]: T("正在创建任务…")
     };
+    }
+    let RIG_BUSY_LABEL = make_RIG_BUSY_LABEL();
+
 
     function rigStageOf(job, key) {
       return (job.stages ?? []).find((entry) => entry.stage === key) ?? { stage: key, status: "empty" };
@@ -4827,26 +5876,26 @@
           "div",
           { className: "SPR_rigCardMeta" },
           `${part.width ?? "?"}×${part.height ?? "?"}`,
-          part.placed ? " · 已定位" : part.status === "ready" ? " · 未定位" : "",
-          typeof part.score === "number" ? ` · 相似度 ${part.score}` : "",
-          part.manual ? " · 手工调整" : ""
+          part.placed ? T(" · 已定位") : part.status === "ready" ? T(" · 未定位") : "",
+          typeof part.score === "number" ? T(" · 相似度 {n0}", { n0: part.score }) : "",
+          part.manual ? T(" · 手工调整") : ""
         ),
         // 低置信度必须一眼可见：平涂/低细节美术上，模板匹配很难分辨形状相同的
         // 部件（左右肢、同色衣料），自动结果只是初值，要提醒用户逐个核对。
         part.status === "ready" && (part.placed !== true || (typeof part.score === "number" && part.score < 0.5))
           ? h("div", { className: "SPR_rigCardMeta", style: { color: "var(--dsw-alias-state-warning-primary, #b45309)" } },
-              part.placed !== true ? "自动定位没找到，请手工拖到正确位置" : "相似度偏低，建议核对或拖一下")
+              part.placed !== true ? T("自动定位没找到，请手工拖到正确位置") : T("相似度偏低，建议核对或拖一下"))
           : null,
         part.error ? h("div", { className: "SPR_rigCardMeta", style: { color: "var(--dsw-alias-state-error-primary)" } }, part.error) : null,
         h(
           "div",
           { className: "SPR_rigCardBtns" },
-          h(Btn, { onClick: onSelect, on: selected }, "选中"),
-          h(Btn, { onClick: onApprove, on: part.approved === true }, part.approved ? "已通过" : "通过"),
-          h(Btn, { onClick: onRetry, disabled: busy || part.status !== "ready" }, "重新定位"),
-          h(Btn, { onClick: onRename }, "改名"),
-          h(Btn, { onClick: onHide }, part.hidden ? "取消隐藏" : "隐藏"),
-          h(Btn, { onClick: onRemove, danger: true }, "删除")
+          h(Btn, { onClick: onSelect, on: selected }, T("选中")),
+          h(Btn, { onClick: onApprove, on: part.approved === true }, part.approved ? T("已通过") : T("通过")),
+          h(Btn, { onClick: onRetry, disabled: busy || part.status !== "ready" }, T("重新定位")),
+          h(Btn, { onClick: onRename }, T("改名")),
+          h(Btn, { onClick: onHide }, part.hidden ? T("取消隐藏") : T("隐藏")),
+          h(Btn, { onClick: onRemove, danger: true }, T("删除"))
         )
       );
     }
@@ -4889,14 +5938,14 @@
       const patch = (name, fields) =>
         void run(
           () => api.setRigSemantics({ jobId: job.id, parts: [{ name, ...fields }], by: "human" }),
-          `已更新「${name}」的语义`,
+          T("已更新「{n0}」的语义", { n0: name }),
           activeKey
         );
 
       const anchorField = (part, key, index) =>
         h(NumField, {
           key: `${part.name}:${key}:${index}`,
-          label: `${key === "proximal" ? "近端" : "远端"}${index === 0 ? "x" : "y"}`,
+          label: T("{n0}{n1}", { n0: key === "proximal" ? T("近端") : T("远端"), n1: index === 0 ? "x" : "y" }),
           value: (part[key] ?? [0, 0])[index],
           min: 0,
           max: 1,
@@ -4915,18 +5964,18 @@
           "div",
           { className: "SPR_rigStageHead" },
           h("span", { className: "SPR_rigStageHint", style: { flex: 1 } },
-            "语义（角色 / 父级 / 锚点）：决定骨骼挂在谁身上、骨骼从部件的哪一端伸到哪一端。改这里不会动②里已经摆好的位置，只会重算③骨骼。")
+            T("语义（角色 / 父级 / 锚点）：决定骨骼挂在谁身上、骨骼从部件的哪一端伸到哪一端。改这里不会动②里已经摆好的位置，只会重算③骨骼。"))
         ),
         sem.errors.length > 0
           ? h("p", { className: "SPR_hint", style: { color: "var(--dsw-alias-state-error-primary)" } },
-              `语义有 ${sem.errors.length} 处错误：` + sem.errors.map((e) => `${e.name || "整体"} ${e.message}`).join("；"))
+              T("语义有 {n0} 处错误：", { n0: sem.errors.length }) + sem.errors.map((e) => T("{n0} {n1}", { n0: e.name || T("整体"), n1: e.message })).join(T("；")))
           : null,
         sem.warnings.length > 0
           ? h("p", { className: "SPR_hint", style: { color: "var(--dsw-alias-state-warning-primary, #b45309)" } },
-              `提示：` + sem.warnings.map((w) => `${w.name || "整体"} ${w.message}`).join("；"))
+              T("提示：") + sem.warnings.map((w) => T("{n0} {n1}", { n0: w.name || T("整体"), n1: w.message })).join(T("；")))
           : null,
         sem.errors.length === 0 && sem.warnings.length === 0
-          ? h("p", { className: "SPR_hint" }, sem.ready ? "语义已就绪，无结构问题。" : "还没有可用部件。")
+          ? h("p", { className: "SPR_hint" }, sem.ready ? T("语义已就绪，无结构问题。") : T("还没有可用部件。"))
           : null,
         h(
           "div",
@@ -4936,12 +5985,12 @@
             { className: "SPR_table", style: { width: "100%", fontSize: 12, borderCollapse: "collapse" } },
             h("thead", null,
               h("tr", null,
-                h("th", { style: { textAlign: "left" } }, "部件"),
-                h("th", { style: { textAlign: "left" } }, "角色"),
-                h("th", { style: { textAlign: "left" } }, "父级"),
-                h("th", { style: { textAlign: "left" } }, "近端锚点"),
-                h("th", { style: { textAlign: "left" } }, "远端锚点"),
-                h("th", { style: { textAlign: "left" } }, "来源")
+                h("th", { style: { textAlign: "left" } }, T("部件")),
+                h("th", { style: { textAlign: "left" } }, T("角色")),
+                h("th", { style: { textAlign: "left" } }, T("父级")),
+                h("th", { style: { textAlign: "left" } }, T("近端锚点")),
+                h("th", { style: { textAlign: "left" } }, T("远端锚点")),
+                h("th", { style: { textAlign: "left" } }, T("来源"))
               )
             ),
             h("tbody", null,
@@ -4965,7 +6014,7 @@
                       value: part.parent ?? "",
                       onChange: (event) => patch(part.name, { parent: event.target.value === "" ? null : event.target.value })
                     },
-                      h("option", { value: "" }, "（挂 root）"),
+                      h("option", { value: "" }, T("（挂 root）")),
                       names.filter((name) => name !== part.name).map((name) => h("option", { key: name, value: name }, name))
                     )
                   ),
@@ -4976,7 +6025,7 @@
                     anchorField(part, "distal", 0), anchorField(part, "distal", 1)
                   ),
                   h("td", { style: { whiteSpace: "nowrap" } },
-                    part.semanticsSource === "human" ? "人工" : part.semanticsSource === "ai" ? "AI" : "默认"
+                    part.semanticsSource === "human" ? T("人工") : part.semanticsSource === "ai" ? "AI" : T("默认")
                   )
                 )
               )
@@ -5004,14 +6053,14 @@
       const offsets = job.rig?.boneOffsets ?? {};
       if (bones.length === 0) {
         return h("p", { className: "SPR_hint", style: { marginTop: 10 } },
-          "还没有骨骼。先点上面的「生成骨骼与动画」——生成之后这里可以逐根微调。");
+          T("还没有骨骼。先点上面的「生成骨骼与动画」——生成之后这里可以逐根微调。"));
       }
       const manualCount = Object.keys(offsets).length;
 
       const patch = (name, fields) =>
         void run(
           () => api.setRigBoneOffsets({ jobId: job.id, bones: [{ name, ...fields }], by: "human" }),
-          `已调整「${name}」`,
+          T("已调整「{n0}」", { n0: name }),
           activeKey
         );
 
@@ -5019,9 +6068,9 @@
         "div",
         { "data-testid": "rig-bone-editor", style: { marginTop: 12 } },
         h("h3", { style: { fontSize: 13, margin: "0 0 4px" } },
-          `骨骼手工偏移（${manualCount > 0 ? `已调 ${manualCount} 根` : "未调整"}）`),
+          T("骨骼手工偏移（{n0}）", { n0: manualCount > 0 ? T("已调 {n0} 根", { n0: manualCount }) : T("未调整") })),
         h("p", { className: "SPR_hint", style: { marginTop: 0 } },
-          "这里调的是「你相对绑定姿势改了多少」，不会被重新推骨骼覆盖。位移单位是参考图像素，旋转是度。全零即视为未调整。"),
+          T("这里调的是「你相对绑定姿势改了多少」，不会被重新推骨骼覆盖。位移单位是参考图像素，旋转是度。全零即视为未调整。")),
         h(
           "div",
           { style: { marginTop: 8, maxHeight: 320, overflowY: "auto" } },
@@ -5030,12 +6079,12 @@
             { className: "SPR_table", style: { width: "100%", fontSize: 12, borderCollapse: "collapse" } },
             h("thead", null,
               h("tr", null,
-                h("th", { style: { textAlign: "left" } }, "骨骼"),
-                h("th", { style: { textAlign: "left" } }, "父级"),
-                h("th", { style: { textAlign: "left" } }, "绑定姿势"),
-                h("th", { style: { textAlign: "left" } }, "手工位移 x"),
-                h("th", { style: { textAlign: "left" } }, "手工位移 y"),
-                h("th", { style: { textAlign: "left" } }, "手工旋转"),
+                h("th", { style: { textAlign: "left" } }, T("骨骼")),
+                h("th", { style: { textAlign: "left" } }, T("父级")),
+                h("th", { style: { textAlign: "left" } }, T("绑定姿势")),
+                h("th", { style: { textAlign: "left" } }, T("手工位移 x")),
+                h("th", { style: { textAlign: "left" } }, T("手工位移 y")),
+                h("th", { style: { textAlign: "left" } }, T("手工旋转")),
                 h("th", null, "")
               )
             ),
@@ -5082,10 +6131,10 @@
                           "data-testid": `rig-bone-reset-${bone.name}`,
                           onClick: () => void run(
                             () => api.resetRigBoneOffsets({ jobId: job.id, names: [bone.name] }),
-                            `已清除「${bone.name}」的手工偏移`,
+                            T("已清除「{n0}」的手工偏移", { n0: bone.name }),
                             activeKey
                           )
-                        }, "清除")
+                        }, T("清除"))
                   )
                 );
               })
@@ -5100,14 +6149,14 @@
                 BusyBtn,
                 {
                   busy: busy,
-                  busyText: "清除中…",
+                  busyText: T("清除中…"),
                   onClick: () => void run(
                     () => api.resetRigBoneOffsets({ jobId: job.id }),
-                    "已清除全部手工骨骼偏移",
+                    T("已清除全部手工骨骼偏移"),
                     activeKey
                   )
                 },
-                `清除全部手工偏移（${manualCount} 根）`
+                T("清除全部手工偏移（{n0} 根）", { n0: manualCount })
               )
             )
           : null
@@ -5133,7 +6182,7 @@
       const patch = (id, fields) =>
         void run(
           () => api.setRigAnimationSettings({ jobId: job.id, animations: [{ id, ...fields }], by: "human" }),
-          `已调整「${id}」的动画参数`,
+          T("已调整「{n0}」的动画参数", { n0: id }),
           activeKey
         );
 
@@ -5141,18 +6190,18 @@
         "div",
         { "data-testid": "rig-animation-panel", style: { marginTop: 12 } },
         h("h3", { style: { fontSize: 13, margin: "0 0 4px" } },
-          `动画参数（${changed > 0 ? `已调 ${changed} 个` : "全部为预设默认值"}）`),
+          T("动画参数（{n0}）", { n0: changed > 0 ? T("已调 {n0} 个", { n0: changed }) : T("全部为预设默认值") })),
         h("p", { className: "SPR_hint", style: { marginTop: 0 } },
-          "幅度统一缩放旋转与位移（1 = 预设原样）；时长是一个循环的秒数。改完点上面的「生成骨骼与动画」重算。"),
+          T("幅度统一缩放旋转与位移（1 = 预设原样）；时长是一个循环的秒数。改完点上面的「生成骨骼与动画」重算。")),
         h(
           "table",
           { className: "SPR_table", style: { width: "100%", fontSize: 12, borderCollapse: "collapse", marginTop: 8 } },
           h("thead", null,
             h("tr", null,
-              h("th", { style: { textAlign: "left" } }, "动作"),
-              h("th", { style: { textAlign: "left" } }, "时长（秒）"),
-              h("th", { style: { textAlign: "left" } }, "幅度"),
-              h("th", { style: { textAlign: "left" } }, "状态"),
+              h("th", { style: { textAlign: "left" } }, T("动作")),
+              h("th", { style: { textAlign: "left" } }, T("时长（秒）")),
+              h("th", { style: { textAlign: "left" } }, T("幅度")),
+              h("th", { style: { textAlign: "left" } }, T("状态")),
               h("th", null, "")
             )
           ),
@@ -5161,7 +6210,7 @@
               h(
                 "tr",
                 { key: preset.id, "data-testid": `rig-anim-row-${preset.id}` },
-                h("td", { style: { paddingRight: 8 } }, `${preset.label}（${preset.id}）`),
+                h("td", { style: { paddingRight: 8 } }, T("{n0}（{n1}）", { n0: preset.label, n1: preset.id })),
                 h("td", { style: { paddingRight: 8 } },
                   h(NumField, {
                     label: "",
@@ -5183,8 +6232,8 @@
                   })
                 ),
                 h("td", { style: { paddingRight: 8, opacity: 0.8 } },
-                  (preset.enabled ? "会生成" : "未勾选") +
-                    (preset.duration !== preset.defaultDuration ? ` · 预设 ${preset.defaultDuration}s` : "")
+                  (preset.enabled ? T("会生成") : T("未勾选")) +
+                    (preset.duration !== preset.defaultDuration ? T(" · 预设 {n0}s", { n0: preset.defaultDuration }) : "")
                 ),
                 h("td", null,
                   settings[preset.id] === undefined
@@ -5195,10 +6244,10 @@
                         "data-testid": `rig-anim-reset-${preset.id}`,
                         onClick: () => void run(
                           () => api.resetRigAnimationSettings({ jobId: job.id, ids: [preset.id] }),
-                          `已重置「${preset.id}」`,
+                          T("已重置「{n0}」", { n0: preset.id }),
                           activeKey
                         )
-                      }, "重置")
+                      }, T("重置"))
                 )
               )
             )
@@ -5212,14 +6261,14 @@
                 BusyBtn,
                 {
                   busy: busy,
-                  busyText: "重置中…",
+                  busyText: T("重置中…"),
                   onClick: () => void run(
                     () => api.resetRigAnimationSettings({ jobId: job.id }),
-                    "已重置全部动画参数",
+                    T("已重置全部动画参数"),
                     activeKey
                   )
                 },
-                `重置全部（${changed} 个）`
+                T("重置全部（{n0} 个）", { n0: changed })
               )
             )
           : null
@@ -5228,16 +6277,24 @@
 
     /** 关键帧里每种轨道要编辑哪些数值字段（简写里旋转叫 `angle`）。 */
     const TRACK_VALUE_KEYS = { rotate: ["angle"], translate: ["x", "y"], scale: ["x", "y"] };
-    const TRACK_LABELS = { rotate: "旋转", translate: "位移", scale: "缩放" };
+    function make_TRACK_LABELS() {
+      return { rotate: T("旋转"), translate: T("位移"), scale: T("缩放") };
+    }
+    let TRACK_LABELS = make_TRACK_LABELS();
+
     /** 缓动预设。控制点是**归一化**的 4 个数（首尾锚点隐含为 0,0 / 1,1）。 */
-    const EASING_PRESETS = [
-      { id: "linear", label: "线性", curve: null },
+    function make_EASING_PRESETS() {
+      return [
+      { id: "linear", label: T("线性"), curve: null },
       { id: "ease", label: "Ease", curve: [0.25, 0, 0.75, 1] },
       { id: "in", label: "EaseIn", curve: [0.42, 0, 1, 1] },
       { id: "out", label: "EaseOut", curve: [0, 0, 0.58, 1] },
       { id: "fast", label: "EaseFast", curve: [0.4, 0, 0.2, 1] },
-      { id: "step", label: "阶跃", curve: "stepped" }
+      { id: "step", label: T("阶跃"), curve: "stepped" }
     ];
+    }
+    let EASING_PRESETS = make_EASING_PRESETS();
+
 
     function easingNameOf(curve) {
       if (curve === "stepped") return "step";
@@ -5371,7 +6428,7 @@
           bones[bone][kind] = list;
         });
         setSelected({ bone, kind, index: next.bones[bone][kind].indexOf(frame) });
-        commit(next, `已在「${bone}/${TRACK_LABELS[kind]}」加了一帧`, autoRebuild && onRebuild !== undefined);
+        commit(next, T("已在「{n0}/{n1}」加了一帧", { n0: bone, n1: TRACK_LABELS[kind] }), autoRebuild && onRebuild !== undefined);
       };
 
       const removeFrame = (bone, kind, index) => {
@@ -5386,7 +6443,7 @@
           list[list.length - 1].curve = null;
         });
         setSelected(null);
-        commit(next, `已删除「${bone}/${TRACK_LABELS[kind]}」的第 ${index + 1} 帧`, autoRebuild && onRebuild !== undefined);
+        commit(next, T("已删除「{n0}/{n1}」的第 {n2} 帧", { n0: bone, n1: TRACK_LABELS[kind], n2: index + 1 }), autoRebuild && onRebuild !== undefined);
       };
 
       const addTrack = (bone, kind) => {
@@ -5401,7 +6458,7 @@
           bones[bone] = bones[bone] ?? {};
           bones[bone][kind] = [start, end];
         });
-        commit(next, `已为「${bone}」加一条${TRACK_LABELS[kind]}轨道`, false);
+        commit(next, T("已为「{n0}」加一条{n1}轨道", { n0: bone, n1: TRACK_LABELS[kind] }), false);
       };
 
       const removeTrack = (bone, kind) => {
@@ -5411,7 +6468,7 @@
           if (Object.keys(bones[bone]).length === 0) delete bones[bone];
         });
         setSelected(null);
-        commit(next, `已删除「${bone}/${TRACK_LABELS[kind]}」轨道`, autoRebuild && onRebuild !== undefined);
+        commit(next, T("已删除「{n0}/{n1}」轨道", { n0: bone, n1: TRACK_LABELS[kind] }), autoRebuild && onRebuild !== undefined);
       };
 
       // 拖动关键帧：单击选中，拖动改时间，松手才提交。
@@ -5447,7 +6504,7 @@
             if (current !== null) {
               void run(
                 () => api.saveRigAnimation({ jobId: job.id, id: current.id, animation: current }),
-                `已移动「${drag.bone}/${TRACK_LABELS[drag.kind]}」的关键帧`,
+                T("已移动「{n0}/{n1}」的关键帧", { n0: drag.bone, n1: TRACK_LABELS[drag.kind] }),
                 activeKey
               );
             }
@@ -5473,14 +6530,14 @@
       return h(
         "div",
         { "data-testid": "rig-timeline", style: { marginTop: 12 } },
-        h("h3", { style: { fontSize: 13, margin: "0 0 4px" } }, "时间轴与关键帧"),
+        h("h3", { style: { fontSize: 13, margin: "0 0 4px" } }, T("时间轴与关键帧")),
         h("p", { className: "SPR_hint", style: { marginTop: 0 } },
-          "选一台动画后可以加/删/拖关键帧、改数值与缓动。提交后这台动画就以这份数据为准（参数滑杆不再影响它），" +
-          "「还原」可以退回预设。"),
+          T("选一台动画后可以加/删/拖关键帧、改数值与缓动。提交后这台动画就以这份数据为准（参数滑杆不再影响它），") +
+          T("「还原」可以退回预设。")),
         h(
           "div",
           { className: "SPR_rigEditorRow" },
-          h("span", { className: "SPR_refRow" }, "动作"),
+          h("span", { className: "SPR_refRow" }, T("动作")),
           presets.map((preset) =>
             h(
               Btn,
@@ -5490,12 +6547,12 @@
                 onClick: () => setAnimId(preset.id),
                 "data-testid": `rig-tl-anim-${preset.id}`
               },
-              `${preset.label}${customIds.includes(preset.id) ? " ·已改" : ""}`
+              T("{n0}{n1}", { n0: preset.label, n1: customIds.includes(preset.id) ? T(" ·已改") : "" })
             )
           )
         ),
         draft === null
-          ? h("p", { className: "SPR_hint" }, loading ? "读取中…" : "选择一台动画开始编辑。")
+          ? h("p", { className: "SPR_hint" }, loading ? T("读取中…") : T("选择一台动画开始编辑。"))
           : h(
               "div",
               null,
@@ -5503,7 +6560,7 @@
                 "div",
                 { className: "SPR_rigEditorRow" },
                 h("label", { className: "SPR_field" },
-                  h("span", { className: "SPR_fieldLabel" }, "循环时长（秒）"),
+                  h("span", { className: "SPR_fieldLabel" }, T("循环时长（秒）")),
                   h("input", {
                     className: "SPR_input",
                     type: "number",
@@ -5515,7 +6572,7 @@
                     onChange: (event) => {
                       const value = Number(event.target.value);
                       if (Number.isFinite(value) && value > 0) {
-                        commit({ ...draft, duration: Math.min(10, value) }, `已把「${animId}」的时长改为 ${value}s`, false);
+                        commit({ ...draft, duration: Math.min(10, value) }, T("已把「{n0}」的时长改为 {n1}s", { n0: animId, n1: value }), false);
                       }
                     }
                   })
@@ -5523,9 +6580,9 @@
                 h(Btn, {
                   on: draft.loop === true,
                   "data-testid": "rig-tl-loop",
-                  onClick: () => commit({ ...draft, loop: draft.loop !== true }, draft.loop === true ? "已设为不循环" : "已设为循环", false)
-                }, draft.loop === true ? "循环" : "一次性"),
-                h(Chip, { kind: customIds.includes(animId) ? "ready" : "idle", text: customIds.includes(animId) ? "已改为手工数据" : "预设（改动后转为数据）" }),
+                  onClick: () => commit({ ...draft, loop: draft.loop !== true }, draft.loop === true ? T("已设为不循环") : T("已设为循环"), false)
+                }, draft.loop === true ? T("循环") : T("一次性")),
+                h(Chip, { kind: customIds.includes(animId) ? "ready" : "idle", text: customIds.includes(animId) ? T("已改为手工数据") : T("预设（改动后转为数据）") }),
                 customIds.includes(animId)
                   ? h(Btn, {
                       "data-testid": "rig-tl-revert",
@@ -5535,13 +6592,13 @@
                         setDraft(data);
                         setSelected(null);
                         if (autoRebuild && onRebuild !== undefined) await api.runRigBones({ jobId: job.id });
-                      }, `已还原「${animId}」到预设`, activeKey)
-                    }, "还原到预设")
+                      }, T("已还原「{n0}」到预设", { n0: animId }), activeKey)
+                    }, T("还原到预设"))
                   : null
               ),
               // ── 轨道 ────────────────────────────────────────────────
               tracks.length === 0
-                ? h("p", { className: "SPR_hint" }, "这台动画在当前部件集下没有任何轨道（预设依赖的骨骼都不存在）。")
+                ? h("p", { className: "SPR_hint" }, T("这台动画在当前部件集下没有任何轨道（预设依赖的骨骼都不存在）。"))
                 : h(
                     "div",
                     { className: "SPR_tlWrap", "data-testid": "rig-tl-track" },
@@ -5590,7 +6647,7 @@
                         h("button", {
                           type: "button",
                           className: "SPR_miniBtn",
-                          title: "删除这条轨道",
+                          title: T("删除这条轨道"),
                           "data-testid": `rig-tl-del-track-${track.bone}-${track.kind}`,
                           onClick: () => removeTrack(track.bone, track.kind)
                         }, "×")
@@ -5600,30 +6657,30 @@
               // ── 选中帧的编辑 ────────────────────────────────────────
               selectedFrame === null
                 ? h("p", { className: "SPR_hint", style: { marginTop: 8 } },
-                    "点一个关键帧来改它；在轨道空白处**双击**加一帧。首帧（0 秒）不能删——它是每条轨道的锚。")
+                    T("点一个关键帧来改它；在轨道空白处**双击**加一帧。首帧（0 秒）不能删——它是每条轨道的锚。"))
                 : h(
                     "div",
                     { className: "SPR_tlEdit", "data-testid": "rig-tl-edit" },
-                    h("strong", null, `${selected.bone} · ${TRACK_LABELS[selected.kind]} · 第 ${selected.index + 1} 帧`),
+                    h("strong", null, T("{n0} · {n1} · 第 {n2} 帧", { n0: selected.bone, n1: TRACK_LABELS[selected.kind], n2: selected.index + 1 })),
                     h(NumField, {
-                      label: "时间(s)",
+                      label: T("时间(s)"),
                       value: selectedFrame.frame.time,
                       min: 0,
                       max: draft.duration,
                       step: 0.01,
-                      onChange: (value) => setFrame({ time: value }, `已改「${selected.bone}」的关键帧时间`, false)
+                      onChange: (value) => setFrame({ time: value }, T("已改「{n0}」的关键帧时间", { n0: selected.bone }), false)
                     }),
                     TRACK_VALUE_KEYS[selected.kind].map((key) =>
                       h(NumField, {
                         key,
-                        label: key === "angle" ? "角度" : key,
+                        label: key === "angle" ? T("角度") : key,
                         value: selectedFrame.frame[key] ?? 0,
                         step: 1,
-                        onChange: (value) => setFrame({ [key]: value }, `已改「${selected.bone}/${TRACK_LABELS[selected.kind]}」的${key}`, autoRebuild && onRebuild !== undefined)
+                        onChange: (value) => setFrame({ [key]: value }, T("已改「{n0}/{n1}」的{n2}", { n0: selected.bone, n1: TRACK_LABELS[selected.kind], n2: key }), autoRebuild && onRebuild !== undefined)
                       })
                     ),
                     h("div", { className: "SPR_rigEditorRow" },
-                      h("span", { className: "SPR_refRow" }, "缓动"),
+                      h("span", { className: "SPR_refRow" }, T("缓动")),
                       EASING_PRESETS.map((preset) =>
                         h(Btn, {
                           key: preset.id,
@@ -5631,7 +6688,7 @@
                           "data-testid": `rig-tl-ease-${preset.id}`,
                           onClick: () => setFrame(
                             { curve: Array.isArray(preset.curve) ? [...preset.curve] : preset.curve },
-                            `已把「${selected.bone}」的缓动改为 ${preset.label}`,
+                            T("已把「{n0}」的缓动改为 {n1}", { n0: selected.bone, n1: preset.label }),
                             autoRebuild && onRebuild !== undefined
                           )
                         }, preset.label)
@@ -5643,16 +6700,16 @@
                         disabled: selected.index === 0 || selectedFrame.frames.length <= 2,
                         "data-testid": "rig-tl-del-frame",
                         onClick: () => removeFrame(selected.bone, selected.kind, selected.index)
-                      }, "删除这一帧"),
+                      }, T("删除这一帧")),
                       h("span", { className: "SPR_hint" },
-                        selected.index === 0 ? "首帧是轨道锚点，不能删" : (selectedFrame.frames.length <= 2 ? "每条轨道至少留两帧" : ""))
+                        selected.index === 0 ? T("首帧是轨道锚点，不能删") : (selectedFrame.frames.length <= 2 ? T("每条轨道至少留两帧") : ""))
                     )
                   ),
               // ── 加轨道 ──────────────────────────────────────────────
               h(
                 "div",
                 { className: "SPR_rigEditorRow", style: { marginTop: 8 } },
-                h("span", { className: "SPR_refRow" }, "加轨道"),
+                h("span", { className: "SPR_refRow" }, T("加轨道")),
                 h("select", {
                   className: "SPR_input",
                   "data-testid": "rig-tl-add-bone",
@@ -5674,9 +6731,9 @@
                   on: autoRebuild,
                   "data-testid": "rig-tl-autorebuild",
                   onClick: () => setAutoRebuild(!autoRebuild)
-                }, autoRebuild ? "改完自动重算预览：开" : "改完自动重算预览：关"),
-                h(Btn, { onClick: () => void load(animId) }, "重新读取"),
-                h("span", { className: "SPR_hint" }, "重算是本地计算，免费")
+                }, autoRebuild ? T("改完自动重算预览：开") : T("改完自动重算预览：关")),
+                h(Btn, { onClick: () => void load(animId) }, T("重新读取")),
+                h("span", { className: "SPR_hint" }, T("重算是本地计算，免费"))
               )
             )
       );
@@ -5704,12 +6761,12 @@
         h(
           "div",
           { className: "SPR_rigStageHead" },
-          h("span", { className: "SPR_rigStageTitle" }, "拆件质检"),
-          h(Chip, { kind: qa.ok ? "ready" : "error", text: qa.ok ? `可信度 ${Math.round(qa.score * 100)}%` : `不可信（${Math.round(qa.score * 100)}%）` }),
+          h("span", { className: "SPR_rigStageTitle" }, T("拆件质检")),
+          h(Chip, { kind: qa.ok ? "ready" : "error", text: qa.ok ? T("可信度 {n0}%", { n0: Math.round(qa.score * 100) }) : T("不可信（{n0}%）", { n0: Math.round(qa.score * 100) }) }),
           h("span", { className: "SPR_rigStageHint" }, qa.summary)
         ),
         errors.length === 0 && warnings.length === 0
-          ? h("p", { className: "SPR_hint" }, "没有发现重复件，装配相似度也在正常范围。")
+          ? h("p", { className: "SPR_hint" }, T("没有发现重复件，装配相似度也在正常范围。"))
           : h(
               "ul",
               { className: "SPR_qaList" },
@@ -5727,13 +6784,13 @@
           { className: "SPR_rigEditorRow", style: { marginTop: 8 } },
           h(BusyBtn, {
             busy: busy,
-            busyText: "质检中…",
+            busyText: T("质检中…"),
             "data-testid": "rig-qa-rerun",
-            onClick: () => void run(() => api.runRigQa({ jobId: job.id }), "已重跑拆件质检", activeKey)
-          }, "重新质检"),
+            onClick: () => void run(() => api.runRigQa({ jobId: job.id }), T("已重跑拆件质检"), activeKey)
+          }, T("重新质检")),
           // 「参考图里大致有几个独立部位」只能靠看图判断，所以留成手填——给不出就不做这项判断。
           h("label", { className: "SPR_field" },
-            h("span", { className: "SPR_fieldLabel" }, "参考图里大约几个部位"),
+            h("span", { className: "SPR_fieldLabel" }, T("参考图里大约几个部位")),
             h("input", {
               className: "SPR_input",
               type: "number",
@@ -5741,15 +6798,15 @@
               max: 200,
               "data-testid": "rig-qa-expected",
               defaultValue: qa.expectedParts ?? "",
-              placeholder: "看图填，可留空",
+              placeholder: T("看图填，可留空"),
               onBlur: (event) => {
                 const value = Number(event.target.value);
                 if (!Number.isFinite(value) || value <= 0) return;
-                void run(() => api.runRigQa({ jobId: job.id, expectedParts: value }), `已按「${value} 个部位」重新质检`, activeKey);
+                void run(() => api.runRigQa({ jobId: job.id, expectedParts: value }), T("已按「{n0} 个部位」重新质检", { n0: value }), activeKey);
               }
             })
           ),
-          h("span", { className: "SPR_hint" }, "填了它就能判断「部件数是不是多出来了」——多出来的多半是重复件")
+          h("span", { className: "SPR_hint" }, T("填了它就能判断「部件数是不是多出来了」——多出来的多半是重复件"))
         )
       );
     }
@@ -5780,22 +6837,22 @@
       return h(
         "div",
         { "data-testid": "rig-constraints", style: { marginTop: 12 } },
-        h("h3", { style: { fontSize: 13, margin: "0 0 4px" } }, `IK 约束（${constraints.length > 0 ? `${constraints.length} 条` : "无"}）`),
+        h("h3", { style: { fontSize: 13, margin: "0 0 4px" } }, T("IK 约束（{n0}）", { n0: constraints.length > 0 ? T("{n0} 条", { n0: constraints.length }) : T("无") })),
         h("p", { className: "SPR_hint", style: { marginTop: 0 } },
-          "把一条骨骼链约束到一个**可拖的目标点**：在下面的预览里拖那个青色菱形，手就跟着走。" +
-          "链长 1 = 末端骨 + 它的父级（两骨余弦定理）；权重小于 1 是软 IK。"),
+          T("把一条骨骼链约束到一个**可拖的目标点**：在下面的预览里拖那个青色菱形，手就跟着走。") +
+          T("链长 1 = 末端骨 + 它的父级（两骨余弦定理）；权重小于 1 是软 IK。")),
         constraints.length > 0
           ? h(
               "table",
               { className: "SPR_table", style: { width: "100%", fontSize: 12, borderCollapse: "collapse", marginTop: 8 } },
               h("thead", null,
                 h("tr", null,
-                  h("th", { style: { textAlign: "left" } }, "名称"),
-                  h("th", { style: { textAlign: "left" } }, "链末端骨骼"),
-                  h("th", { style: { textAlign: "left" } }, "目标点"),
-                  h("th", { style: { textAlign: "left" } }, "链长"),
-                  h("th", { style: { textAlign: "left" } }, "弯曲"),
-                  h("th", { style: { textAlign: "left" } }, "权重"),
+                  h("th", { style: { textAlign: "left" } }, T("名称")),
+                  h("th", { style: { textAlign: "left" } }, T("链末端骨骼")),
+                  h("th", { style: { textAlign: "left" } }, T("目标点")),
+                  h("th", { style: { textAlign: "left" } }, T("链长")),
+                  h("th", { style: { textAlign: "left" } }, T("弯曲")),
+                  h("th", { style: { textAlign: "left" } }, T("权重")),
                   h("th", null, "")
                 )
               ),
@@ -5814,15 +6871,15 @@
                         min: 1,
                         max: 4,
                         step: 1,
-                        onChange: (value) => write([{ name: entry.name, bone: entry.bone, target: entry.target, chain: value, bendPositive: entry.bendPositive, weight: entry.weight }], `已改「${entry.name}」的链长`)
+                        onChange: (value) => write([{ name: entry.name, bone: entry.bone, target: entry.target, chain: value, bendPositive: entry.bendPositive, weight: entry.weight }], T("已改「{n0}」的链长", { n0: entry.name }))
                       })
                     ),
                     h("td", null,
                       h(Btn, {
                         on: entry.bendPositive === true,
                         "data-testid": `rig-ik-bend-${entry.name}`,
-                        onClick: () => write([{ name: entry.name, bone: entry.bone, target: entry.target, chain: entry.chain, bendPositive: entry.bendPositive !== true, weight: entry.weight }], "已切换弯曲方向")
-                      }, entry.bendPositive === true ? "正向" : "反向")
+                        onClick: () => write([{ name: entry.name, bone: entry.bone, target: entry.target, chain: entry.chain, bendPositive: entry.bendPositive !== true, weight: entry.weight }], T("已切换弯曲方向"))
+                      }, entry.bendPositive === true ? T("正向") : T("反向"))
                     ),
                     h("td", null,
                       h(NumField, {
@@ -5831,7 +6888,7 @@
                         min: 0,
                         max: 1,
                         step: 0.1,
-                        onChange: (value) => write([{ name: entry.name, bone: entry.bone, target: entry.target, chain: entry.chain, bendPositive: entry.bendPositive, weight: value }], `已把「${entry.name}」的权重改为 ${value}`)
+                        onChange: (value) => write([{ name: entry.name, bone: entry.bone, target: entry.target, chain: entry.chain, bendPositive: entry.bendPositive, weight: value }], T("已把「{n0}」的权重改为 {n1}", { n0: entry.name, n1: value }))
                       })
                     ),
                     h("td", null,
@@ -5841,8 +6898,8 @@
                         onClick: () => void run(async () => {
                           await api.resetRigConstraints({ jobId: job.id, names: [entry.name] });
                           await api.runRigBones({ jobId: job.id });
-                        }, `已删除约束「${entry.name}」`, activeKey)
-                      }, "删除")
+                        }, T("已删除约束「{n0}」", { n0: entry.name }), activeKey)
+                      }, T("删除"))
                     )
                   )
                 )
@@ -5852,23 +6909,23 @@
         h(
           "div",
           { className: "SPR_rigEditorRow", style: { marginTop: 8 } },
-          h("span", { className: "SPR_refRow" }, "加约束"),
+          h("span", { className: "SPR_refRow" }, T("加约束")),
           h("select", {
             className: "SPR_input",
             "data-testid": "rig-ik-bone",
             value: currentBone,
             onChange: (event) => setBone(event.target.value)
           }, boneChoices.map((name) => h("option", { key: name, value: name }, name))),
-          h(NumField, { label: "链长", value: chain, min: 1, max: 4, step: 1, onChange: setChain }),
+          h(NumField, { label: T("链长"), value: chain, min: 1, max: 4, step: 1, onChange: setChain }),
           h(Btn, {
             primary: true,
             "data-testid": "rig-ik-add",
             onClick: () => {
               const name = `ik-${currentBone}`;
-              write([{ name, bone: currentBone, target: `${name}-target`, chain, bendPositive: true, weight: 1 }], `已为「${currentBone}」加 IK 约束`);
+              write([{ name, bone: currentBone, target: `${name}-target`, chain, bendPositive: true, weight: 1 }], T("已为「{n0}」加 IK 约束", { n0: currentBone }));
             }
-          }, "加到这条链上"),
-          h("span", { className: "SPR_hint" }, "目标点会自动补一根骨骼，位置就在链末端")
+          }, T("加到这条链上")),
+          h("span", { className: "SPR_hint" }, T("目标点会自动补一根骨骼，位置就在链末端"))
         ),
         constraints.length > 0
           ? h("div", { className: "SPR_rigEditorRow" },
@@ -5877,8 +6934,8 @@
                 onClick: () => void run(async () => {
                   await api.resetRigConstraints({ jobId: job.id });
                   await api.runRigBones({ jobId: job.id });
-                }, "已清空全部 IK 约束", activeKey)
-              }, "清空全部"))
+                }, T("已清空全部 IK 约束"), activeKey)
+              }, T("清空全部")))
           : null
       );
     }
@@ -5908,27 +6965,27 @@
           await api.setRigMesh({ jobId: job.id, meshes: [{ name, ...patch }], by: "human" });
           // 网格会改变附件的**类型**（region → mesh），骨骼与图集都得重做。
           await api.runRigBones({ jobId: job.id });
-        }, `已更新「${name}」的网格`, activeKey);
+        }, T("已更新「{n0}」的网格", { n0: name }), activeKey);
 
       return h(
         "div",
         { "data-testid": "rig-mesh", style: { marginTop: 12 } },
         h("h3", { style: { fontSize: 13, margin: "0 0 4px" } },
-          `蒙皮网格（${targets.length > 0 ? `${targets.length} 个部件已细分` : "无"}）`),
+          T("蒙皮网格（{n0}）", { n0: targets.length > 0 ? T("{n0} 个部件已细分", { n0: targets.length }) : T("无") })),
         h("p", { className: "SPR_hint", style: { marginTop: 0 } },
-          "把部件切成网格之后就能对顶点做 FFD 变形——裙摆、披风、长发这类「上缘不动、下缘甩出去」" +
-          "用刚体骨骼是动不出来的。网格是规则三角化，密度越高越软，预览也越吃性能。"),
+          T("把部件切成网格之后就能对顶点做 FFD 变形——裙摆、披风、长发这类「上缘不动、下缘甩出去」") +
+          T("用刚体骨骼是动不出来的。网格是规则三角化，密度越高越软，预览也越吃性能。")),
         targets.length > 0
           ? h(
               "table",
               { className: "SPR_table", style: { width: "100%", fontSize: 12, borderCollapse: "collapse", marginTop: 8 } },
               h("thead", null,
                 h("tr", null,
-                  h("th", { style: { textAlign: "left" } }, "部件"),
-                  h("th", { style: { textAlign: "left" } }, "列=行"),
-                  h("th", { style: { textAlign: "left" } }, "摆幅"),
-                  h("th", { style: { textAlign: "left" } }, "循环(s)"),
-                  h("th", { style: { textAlign: "left" } }, "固定端"),
+                  h("th", { style: { textAlign: "left" } }, T("部件")),
+                  h("th", { style: { textAlign: "left" } }, T("列=行")),
+                  h("th", { style: { textAlign: "left" } }, T("摆幅")),
+                  h("th", { style: { textAlign: "left" } }, T("循环(s)")),
+                  h("th", { style: { textAlign: "left" } }, T("固定端")),
                   h("th", null, "")
                 )
               ),
@@ -5951,7 +7008,7 @@
                           type: "button", className: "SPR_miniBtn",
                           "data-testid": `rig-mesh-wave-${name}`,
                           onClick: () => write(name, { deform: { amplitude: sizeOf(name) } })
-                        }, "加飘动")
+                        }, T("加飘动"))
                       : h(NumField, {
                           label: "", value: wave.amplitude, min: 0, max: 200, step: 1,
                           onChange: (value) => write(name, { deform: { ...wave, amplitude: value } })
@@ -5970,9 +7027,9 @@
                           value: wave.anchor,
                           onChange: (event) => write(name, { deform: { ...wave, anchor: event.target.value } })
                         },
-                        h("option", { value: "top" }, "上缘"),
-                        h("option", { value: "bottom" }, "下缘"),
-                        h("option", { value: "none" }, "整体"))
+                        h("option", { value: "top" }, T("上缘")),
+                        h("option", { value: "bottom" }, T("下缘")),
+                        h("option", { value: "none" }, T("整体")))
                     ),
                     h("td", null,
                       h(Btn, {
@@ -5981,8 +7038,8 @@
                         onClick: () => void run(async () => {
                           await api.resetRigMesh({ jobId: job.id, names: [name] });
                           await api.runRigBones({ jobId: job.id });
-                        }, `已取消「${name}」的网格`, activeKey)
-                      }, "取消")
+                        }, T("已取消「{n0}」的网格", { n0: name }), activeKey)
+                      }, T("取消"))
                     )
                   );
                 })
@@ -5992,7 +7049,7 @@
         h(
           "div",
           { className: "SPR_rigEditorRow", style: { marginTop: 8 } },
-          h("span", { className: "SPR_refRow" }, "加网格"),
+          h("span", { className: "SPR_refRow" }, T("加网格")),
           h("select", {
             className: "SPR_input",
             "data-testid": "rig-mesh-pick",
@@ -6003,7 +7060,7 @@
             primary: true,
             "data-testid": "rig-mesh-add",
             onClick: () => write(current, { cols: 6, rows: 6 })
-          }, "细分这个部件"),
+          }, T("细分这个部件")),
           // 一键入口：用户想的是「让裙摆飘起来」，不是「给我一个 6×6 网格」。
           h(Btn, {
             "data-testid": "rig-mesh-skirt",
@@ -6011,8 +7068,8 @@
               const skirt = boneNames.find((name) => name === "hip") ?? boneNames[boneNames.length - 1];
               write(skirt, { cols: 6, rows: 6, deform: { amplitude: 12, cycles: 1, direction: 0, anchor: "top", duration: 1.6 } });
             }
-          }, "给裙摆加飘动"),
-          h("span", { className: "SPR_hint" }, "网格与变形都是本地计算，免费")
+          }, T("给裙摆加飘动")),
+          h("span", { className: "SPR_hint" }, T("网格与变形都是本地计算，免费"))
         ),
         targets.length > 0
           ? h("div", { className: "SPR_rigEditorRow" },
@@ -6021,8 +7078,8 @@
                 onClick: () => void run(async () => {
                   await api.resetRigMesh({ jobId: job.id });
                   await api.runRigBones({ jobId: job.id });
-                }, "已清除全部网格与变形", activeKey)
-              }, "清空全部"))
+                }, T("已清除全部网格与变形"), activeKey)
+              }, T("清空全部")))
           : null
       );
     }
@@ -6080,20 +7137,20 @@
         "div",
         { "data-testid": "rig-paths", style: { marginTop: 12 } },
         h("h3", { style: { fontSize: 13, margin: "0 0 4px" } },
-          `Path 约束（${entries.length > 0 ? `${entries.length} 条` : "无"}）`),
+          T("Path 约束（{n0}）", { n0: entries.length > 0 ? T("{n0} 条", { n0: entries.length }) : T("无") })),
         h("p", { className: "SPR_hint", style: { marginTop: 0 } },
-          "把一串骨骼沿折线按弧长铺开——尾巴、辫子这类「长度远超单根骨」的部件用它。" +
-          "间距 0 表示均匀铺满整条路径；大于 0 就是固定间距，骨骼只覆盖路径的一段。"),
+          T("把一串骨骼沿折线按弧长铺开——尾巴、辫子这类「长度远超单根骨」的部件用它。") +
+          T("间距 0 表示均匀铺满整条路径；大于 0 就是固定间距，骨骼只覆盖路径的一段。")),
         entries.length > 0
           ? h(
               "table",
               { className: "SPR_table", style: { width: "100%", fontSize: 12, borderCollapse: "collapse", marginTop: 8 } },
               h("thead", null,
                 h("tr", null,
-                  h("th", { style: { textAlign: "left" } }, "名称"),
-                  h("th", { style: { textAlign: "left" } }, "骨链"),
-                  h("th", { style: { textAlign: "left" } }, "间距"),
-                  h("th", { style: { textAlign: "left" } }, "旋转混合"),
+                  h("th", { style: { textAlign: "left" } }, T("名称")),
+                  h("th", { style: { textAlign: "left" } }, T("骨链")),
+                  h("th", { style: { textAlign: "left" } }, T("间距")),
+                  h("th", { style: { textAlign: "left" } }, T("旋转混合")),
                   h("th", null, "")
                 )
               ),
@@ -6107,13 +7164,13 @@
                     h("td", null,
                       h(NumField, {
                         label: "", value: entry.spacing, min: 0, max: 400, step: 1,
-                        onChange: (value) => write(name, { points: entry.points, bones: entry.bones, spacing: value, translateMix: entry.translateMix, rotateMix: entry.rotateMix }, `已改「${name}」的间距`)
+                        onChange: (value) => write(name, { points: entry.points, bones: entry.bones, spacing: value, translateMix: entry.translateMix, rotateMix: entry.rotateMix }, T("已改「{n0}」的间距", { n0: name }))
                       })
                     ),
                     h("td", null,
                       h(NumField, {
                         label: "", value: entry.rotateMix, min: 0, max: 1, step: 0.1,
-                        onChange: (value) => write(name, { points: entry.points, bones: entry.bones, spacing: entry.spacing, translateMix: entry.translateMix, rotateMix: value }, `已改「${name}」的旋转混合`)
+                        onChange: (value) => write(name, { points: entry.points, bones: entry.bones, spacing: entry.spacing, translateMix: entry.translateMix, rotateMix: value }, T("已改「{n0}」的旋转混合", { n0: name }))
                       })
                     ),
                     h("td", null,
@@ -6123,8 +7180,8 @@
                         onClick: () => void run(async () => {
                           await api.resetRigPath({ jobId: job.id, names: [name] });
                           await api.runRigBones({ jobId: job.id });
-                        }, `已删除路径「${name}」`, activeKey)
-                      }, "删除")
+                        }, T("已删除路径「{n0}」", { n0: name }), activeKey)
+                      }, T("删除"))
                     )
                   )
                 )
@@ -6134,15 +7191,15 @@
         h(
           "div",
           { className: "SPR_rigEditorRow", style: { marginTop: 8 } },
-          h("span", { className: "SPR_refRow" }, "加路径"),
+          h("span", { className: "SPR_refRow" }, T("加路径")),
           h("select", {
             className: "SPR_input",
             "data-testid": "rig-path-tip",
             value: currentTip,
             onChange: (event) => setTip(event.target.value)
           }, boneNames.map((name) => h("option", { key: name, value: name }, name))),
-          h(NumField, { label: "链长", value: depth, min: 1, max: 6, step: 1, onChange: setDepth }),
-          h(NumField, { label: "间距", value: spacing, min: 0, max: 400, step: 1, onChange: setSpacing }),
+          h(NumField, { label: T("链长"), value: depth, min: 1, max: 6, step: 1, onChange: setDepth }),
+          h(NumField, { label: T("间距"), value: spacing, min: 0, max: 400, step: 1, onChange: setSpacing }),
           h(Btn, {
             primary: true,
             "data-testid": "rig-path-add",
@@ -6150,10 +7207,10 @@
               const chain = chainOf(currentTip, depth);
               const points = pointsOf(chain);
               if (points.length < 4) return;
-              write(`path-${currentTip}`, { points, bones: chain, spacing, translateMix: 1, rotateMix: 1 }, `已沿「${chain.join(" → ")}」加路径`);
+              write(`path-${currentTip}`, { points, bones: chain, spacing, translateMix: 1, rotateMix: 1 }, T("已沿「{n0}」加路径", { n0: chain.join(" → ") }));
             }
-          }, "沿这条链加路径"),
-          h("span", { className: "SPR_hint" }, "默认路径沿这些部件的近端锚点生成")
+          }, T("沿这条链加路径")),
+          h("span", { className: "SPR_hint" }, T("默认路径沿这些部件的近端锚点生成"))
         ),
         entries.length > 0
           ? h("div", { className: "SPR_rigEditorRow" },
@@ -6162,8 +7219,8 @@
                 onClick: () => void run(async () => {
                   await api.resetRigPath({ jobId: job.id });
                   await api.runRigBones({ jobId: job.id });
-                }, "已清空全部路径约束", activeKey)
-              }, "清空全部"))
+                }, T("已清空全部路径约束"), activeKey)
+              }, T("清空全部")))
           : null
       );
     }
@@ -6234,7 +7291,7 @@
       const applyTint = () =>
         void run(
           () => api.tintRigParts({ jobId: job.id, names: [current], tint: draft, by: "human", note: describeTint(draft) }),
-          `已给「${current}」换色（新增一版）`,
+          T("已给「{n0}」换色（新增一版）", { n0: current }),
           activeKey
         );
 
@@ -6242,14 +7299,14 @@
         "div",
         { className: "SPR_rigStage", "data-testid": "rig-texture-panel", style: { marginTop: 12 } },
         h("div", { className: "SPR_rigStageHead" },
-          h("span", { className: "SPR_rigStageTitle" }, "贴图变体"),
+          h("span", { className: "SPR_rigStageTitle" }, T("贴图变体")),
           h("span", { className: "SPR_rigStageHint", style: { flex: 1 } },
-            "每一次换色 / 上传替换都新增一个版本，永不覆盖原图；「换回原版」就是切版本。")
+            T("每一次换色 / 上传替换都新增一个版本，永不覆盖原图；「换回原版」就是切版本。"))
         ),
         h(
           "div",
           { className: "SPR_rigEditorRow", style: { marginTop: 8 } },
-          h("span", { className: "SPR_refRow" }, "部件"),
+          h("span", { className: "SPR_refRow" }, T("部件")),
           h(
             "select",
             {
@@ -6261,14 +7318,14 @@
             parts.map((entry) => h("option", { key: entry.name, value: entry.name }, entry.label ?? entry.name))
           ),
           h("span", { className: "SPR_hint" },
-            `当前 v${activeVersion}${noteSuffix(versions.find((v) => v.v === activeVersion)?.note)}`)
+            T("当前 v{n0}{n1}", { n0: activeVersion, n1: noteSuffix(versions.find((v) => v.v === activeVersion)?.note) }))
         ),
 
         // 版本列表：点一下切过去，这就是「回退原版」。
         h(
           "div",
           { className: "SPR_rigEditorRow", "data-testid": "rig-texture-versions" },
-          h("span", { className: "SPR_refRow" }, "版本"),
+          h("span", { className: "SPR_refRow" }, T("版本")),
           versions.map((version) =>
             h(
               "span",
@@ -6284,7 +7341,7 @@
                   onClick: () =>
                     void run(
                       () => api.setRigTextureVersion({ jobId: job.id, name: current, version: version.v }),
-                      `已切到 v${version.v}`,
+                      T("已切到 v{n0}", { n0: version.v }),
                       activeKey
                     )
                 },
@@ -6294,11 +7351,11 @@
                 ? h("button", {
                     type: "button",
                     className: "SPR_miniBtn",
-                    title: "删除这一版",
+                    title: T("删除这一版"),
                     onClick: () =>
                       void run(
                         () => api.removeRigTextureVersion({ jobId: job.id, name: current, version: version.v }),
-                        `已删除 v${version.v}`,
+                        T("已删除 v{n0}", { n0: version.v }),
                         activeKey
                       )
                   }, "×")
@@ -6329,11 +7386,11 @@
           h(
             "div",
             { style: { display: "flex", flexWrap: "wrap", gap: 8, flex: 1 } },
-            h(RangeRow, { label: "色相", value: draft.hue, min: -180, max: 180, step: 5, onChange: (value) => setDraft({ ...draft, hue: value }) }),
-            h(RangeRow, { label: "饱和度", value: draft.saturation, min: 0, max: 3, step: 0.1, onChange: (value) => setDraft({ ...draft, saturation: value }) }),
-            h(RangeRow, { label: "明度", value: draft.lightness, min: -1, max: 1, step: 0.05, onChange: (value) => setDraft({ ...draft, lightness: value }) }),
-            h(RangeRow, { label: "亮度", value: draft.brightness, min: -1, max: 1, step: 0.05, onChange: (value) => setDraft({ ...draft, brightness: value }) }),
-            h(RangeRow, { label: "对比", value: draft.contrast, min: 0, max: 3, step: 0.1, onChange: (value) => setDraft({ ...draft, contrast: value }) })
+            h(RangeRow, { label: T("色相"), value: draft.hue, min: -180, max: 180, step: 5, onChange: (value) => setDraft({ ...draft, hue: value }) }),
+            h(RangeRow, { label: T("饱和度"), value: draft.saturation, min: 0, max: 3, step: 0.1, onChange: (value) => setDraft({ ...draft, saturation: value }) }),
+            h(RangeRow, { label: T("明度"), value: draft.lightness, min: -1, max: 1, step: 0.05, onChange: (value) => setDraft({ ...draft, lightness: value }) }),
+            h(RangeRow, { label: T("亮度"), value: draft.brightness, min: -1, max: 1, step: 0.05, onChange: (value) => setDraft({ ...draft, brightness: value }) }),
+            h(RangeRow, { label: T("对比"), value: draft.contrast, min: 0, max: 3, step: 0.1, onChange: (value) => setDraft({ ...draft, contrast: value }) })
           )
         ),
         h(
@@ -6341,15 +7398,15 @@
           { className: "SPR_rigEditorRow" },
           h(BusyBtn, {
             busy: busy,
-            busyText: "换色中…",
+            busyText: T("换色中…"),
             primary: true,
             disabled: isIdentity,
             "data-testid": "rig-texture-apply",
             onClick: applyTint
-          }, "应用换色（新增一版）"),
-          h(Btn, { onClick: () => setDraft(IDENTITY_TINT), disabled: isIdentity }, "重置滑杆"),
+          }, T("应用换色（新增一版）")),
+          h(Btn, { onClick: () => setDraft(IDENTITY_TINT), disabled: isIdentity }, T("重置滑杆")),
           h("label", { className: "SPR_refRow", style: { display: "inline-flex", gap: 6, alignItems: "center" } },
-            "上传替换",
+            T("上传替换"),
             h("input", {
               type: "file",
               accept: "image/png,image/jpeg,image/webp",
@@ -6363,8 +7420,8 @@
                   const raw = String(reader.result ?? "");
                   const base64 = raw.slice(raw.indexOf(",") + 1);
                   void run(
-                    () => api.uploadRigTexture({ jobId: job.id, name: current, data: base64, note: "手工上传" }),
-                    `已上传「${current}」的新贴图`,
+                    () => api.uploadRigTexture({ jobId: job.id, name: current, data: base64, note: T("手工上传") }),
+                    T("已上传「{n0}」的新贴图", { n0: current }),
                     activeKey
                   );
                 };
@@ -6372,7 +7429,7 @@
               }
             })
           ),
-          h("span", { className: "SPR_hint" }, isIdentity ? "" : "滑杆只是预览，点「应用换色」才落成新版本")
+          h("span", { className: "SPR_hint" }, isIdentity ? "" : T("滑杆只是预览，点「应用换色」才落成新版本"))
         ),
 
         // AI 重绘：**花钱**，所以按钮文案直说，并且可以随时切回上一版。
@@ -6383,23 +7440,23 @@
             className: "SPR_input",
             style: { flex: 1, minWidth: 180 },
             "data-testid": "rig-redraw-prompt",
-            placeholder: "想让这块变成什么样？（例如「换成深蓝色布料」「加上金属高光」）",
+            placeholder: T("想让这块变成什么样？（例如「换成深蓝色布料」「加上金属高光」）"),
             value: redrawPrompt,
             onChange: (event) => setRedrawPrompt(event.target.value)
           }),
           h(BusyBtn, {
             busy: keyBusy(K_RIG_REDRAW),
-            busyText: "正在重绘…",
+            busyText: T("正在重绘…"),
             disabled: redrawPrompt.trim() === "" || busy,
             "data-testid": "rig-redraw-run",
             onClick: () =>
               void run(
                 () => api.runRigRedraw({ jobId: job.id, name: current, prompt: redrawPrompt.trim() }),
-                "已提交 AI 重绘（会花钱）",
+                T("已提交 AI 重绘（会花钱）"),
                 K_RIG_REDRAW
               )
-          }, "AI 重绘这一块（会花钱）"),
-          h("span", { className: "SPR_hint" }, "重绘结果是一版新的贴图：轮廓按原样裁回，不满意切回上一版即可")
+          }, T("AI 重绘这一块（会花钱）")),
+          h("span", { className: "SPR_hint" }, T("重绘结果是一版新的贴图：轮廓按原样裁回，不满意切回上一版即可"))
         )
       );
     }
@@ -6407,12 +7464,12 @@
     /** 把草稿说成人话，写进版本的 note（回退时能看懂哪一版是什么）。 */
     function describeTint(tint) {
       const bits = [];
-      if (tint.hue) bits.push(`色相${tint.hue > 0 ? "+" : ""}${tint.hue}°`);
-      if (tint.saturation !== 1) bits.push(`饱和×${tint.saturation}`);
-      if (tint.lightness) bits.push(`明度${tint.lightness > 0 ? "+" : ""}${tint.lightness}`);
-      if (tint.brightness) bits.push(`亮度${tint.brightness > 0 ? "+" : ""}${tint.brightness}`);
-      if (tint.contrast !== 1) bits.push(`对比×${tint.contrast}`);
-      return bits.join(" ") || "换色";
+      if (tint.hue) bits.push(T("色相{n0}{n1}°", { n0: tint.hue > 0 ? "+" : "", n1: tint.hue }));
+      if (tint.saturation !== 1) bits.push(T("饱和×{n0}", { n0: tint.saturation }));
+      if (tint.lightness) bits.push(T("明度{n0}{n1}", { n0: tint.lightness > 0 ? "+" : "", n1: tint.lightness }));
+      if (tint.brightness) bits.push(T("亮度{n0}{n1}", { n0: tint.brightness > 0 ? "+" : "", n1: tint.brightness }));
+      if (tint.contrast !== 1) bits.push(T("对比×{n0}", { n0: tint.contrast }));
+      return bits.join(" ") || T("换色");
     }
 
     /**
@@ -6721,7 +7778,7 @@
         const current = captureSnapshot(Object.keys(last));
         setHistory((stack) => stack.slice(0, -1));
         setFuture((stack) => [...stack, current]);
-        applySnapshot(last, "已撤销");
+        applySnapshot(last, T("已撤销"));
       };
       const redo = () => {
         if (future.length === 0) return;
@@ -6729,7 +7786,7 @@
         const current = captureSnapshot(Object.keys(next));
         setFuture((stack) => stack.slice(0, -1));
         setHistory((stack) => [...stack, current]);
-        applySnapshot(next, "已重做");
+        applySnapshot(next, T("已重做"));
       };
 
       // ── 拖动：移动 / 缩放 ───────────────────────────────────────────
@@ -6757,7 +7814,7 @@
           if (base === undefined) return;
           const patch = current.kind === "move" ? movePatch(base, current) : resizePatch(base, current);
           if (patch === null) return;
-          commit([{ name: current.name, ...patch }], current.kind === "move" ? `已移动「${current.name}」` : `已缩放「${current.name}」`);
+          commit([{ name: current.name, ...patch }], current.kind === "move" ? T("已移动「{n0}」", { n0: current.name }) : T("已缩放「{n0}」", { n0: current.name }));
         };
         window.addEventListener("mousemove", onMove);
         window.addEventListener("mouseup", onUp);
@@ -6823,7 +7880,7 @@
           const step = event.shiftKey ? 10 : 1;
           const move = (dx, dy) => {
             event.preventDefault();
-            commit([{ name: selected, x: base.x + dx, y: base.y + dy }], `已微调「${selected}」`);
+            commit([{ name: selected, x: base.x + dx, y: base.y + dy }], T("已微调「{n0}」", { n0: selected }));
           };
           if (event.key === "ArrowLeft") move(-step, 0);
           else if (event.key === "ArrowRight") move(step, 0);
@@ -6831,7 +7888,7 @@
           else if (event.key === "ArrowDown") move(0, step);
           else if (event.key === "Delete" || event.key === "Backspace") {
             event.preventDefault();
-            commit([{ name: selected, placed: false }], `已收回「${selected}」`);
+            commit([{ name: selected, placed: false }], T("已收回「{n0}」", { n0: selected }));
           } else if (event.key === "Escape") setSelected(null);
         };
         window.addEventListener("keydown", onKey);
@@ -6868,7 +7925,7 @@
           const point = toCanvas(event.clientX, event.clientY);
           commit(
             [{ name: drag.name, x: Math.round(point.x - width / 2), y: Math.round(point.y - height / 2), width, height, placed: true }],
-            `已放置「${drag.name}」`
+            T("已放置「{n0}」", { n0: drag.name })
           );
           setSelected(drag.name);
         };
@@ -6988,7 +8045,7 @@
         else if (mode === "up") reordered.splice(Math.min(ordered.length - 1, index + 1), 0, name);
         else reordered.splice(Math.max(0, index - 1), 0, name);
         const patches = reordered.map((key, position) => ({ name: key, z: position }));
-        commit(patches, "已调整图层顺序");
+        commit(patches, T("已调整图层顺序"));
       };
 
       const patchSelected = (patch: any, label: any) => {
@@ -6997,7 +8054,7 @@
       };
 
       if (placedNames.length === 0 && notYetPlaced.length === 0) {
-        return h("p", { className: "SPR_hint" }, "还没有可用部件，请先在第 ① 步拆件或上传部件 PNG。");
+        return h("p", { className: "SPR_hint" }, T("还没有可用部件，请先在第 ① 步拆件或上传部件 PNG。"));
       }
 
       return h(
@@ -7008,24 +8065,24 @@
           "div",
           { className: "SPR_asmBar" },
           h("span", { className: "SPR_asmGroup" },
-            h("span", { className: "SPR_fieldLabel" }, "缩放"),
-            h(Btn, { onClick: () => zoomCenter(1 / RIG_ZOOM_STEP), title: "缩小" }, "−"),
-            h(Btn, { onClick: fitView, "data-testid": "rig-asm-fit", title: "适应窗口（Ctrl/Cmd+0）" }, `${Math.round(zoom * 100)}%`),
-            h(Btn, { onClick: () => zoomCenter(RIG_ZOOM_STEP), title: "放大" }, "+")
+            h("span", { className: "SPR_fieldLabel" }, T("缩放")),
+            h(Btn, { onClick: () => zoomCenter(1 / RIG_ZOOM_STEP), title: T("缩小") }, "−"),
+            h(Btn, { onClick: fitView, "data-testid": "rig-asm-fit", title: T("适应窗口（Ctrl/Cmd+0）") }, `${Math.round(zoom * 100)}%`),
+            h(Btn, { onClick: () => zoomCenter(RIG_ZOOM_STEP), title: T("放大") }, "+")
           ),
           h("span", { className: "SPR_asmGroup" },
-            h(Btn, { on: showReference, onClick: () => setShowReference((v) => !v), title: "把参考图叠在下面，方便对位" }, "参考图底图"),
-            h(Btn, { on: showBoxes, onClick: () => setShowBoxes((v) => !v) }, "显示边框"),
-            h(Btn, { on: snapEnabled, onClick: () => setSnapEnabled((v) => !v), title: "拖动时吸附到其它部件的边与中线" }, "吸附"),
-            h(Btn, { on: lockRatio, onClick: () => setLockRatio((v) => !v), title: "拖角手柄时保持宽高比" }, "锁等比")
+            h(Btn, { on: showReference, onClick: () => setShowReference((v) => !v), title: T("把参考图叠在下面，方便对位") }, T("参考图底图")),
+            h(Btn, { on: showBoxes, onClick: () => setShowBoxes((v) => !v) }, T("显示边框")),
+            h(Btn, { on: snapEnabled, onClick: () => setSnapEnabled((v) => !v), title: T("拖动时吸附到其它部件的边与中线") }, T("吸附")),
+            h(Btn, { on: lockRatio, onClick: () => setLockRatio((v) => !v), title: T("拖角手柄时保持宽高比") }, T("锁等比"))
           ),
           h("span", { className: "SPR_asmGroup" },
-            h(Btn, { onClick: undo, disabled: history.length === 0 }, `撤销${history.length > 0 ? `(${history.length})` : ""}`),
-            h(Btn, { onClick: redo, disabled: future.length === 0 }, "重做")
+            h(Btn, { onClick: undo, disabled: history.length === 0 }, T("撤销{n0}", { n0: history.length > 0 ? `(${history.length})` : "" })),
+            h(Btn, { onClick: redo, disabled: future.length === 0 }, T("重做"))
           ),
           h("span", { className: "SPR_spacer" }),
           h("span", { className: "SPR_asmHint" },
-            `已放置 ${placedNames.length}/${(job.parts ?? []).filter((part) => part.status === "ready").length}　·　拖部件移动、拖角缩放、方向键微调 1px（Shift 10px）、Delete 收回、滚轮缩放、空格拖动平移`)
+            T("已放置 {n0}/{n1}　·　拖部件移动、拖角缩放、方向键微调 1px（Shift 10px）、Delete 收回、滚轮缩放、空格拖动平移", { n0: placedNames.length, n1: (job.parts ?? []).filter((part) => part.status === "ready").length }))
         ),
 
         h(
@@ -7132,7 +8189,7 @@
           h(
             "div",
             { className: "SPR_asmSide" },
-            h("div", { className: "SPR_sideTitle" }, `未放置（${unplaced.length + notYetPlaced.length}）· 拖进画布`),
+            h("div", { className: "SPR_sideTitle" }, T("未放置（{n0}）· 拖进画布", { n0: unplaced.length + notYetPlaced.length })),
             h(
               "div",
               { className: "SPR_asmPalette" },
@@ -7148,57 +8205,57 @@
                   h("span", null, part.label ?? part.name)
                 )
               ),
-              unplaced.length + notYetPlaced.length === 0 ? h("p", { className: "SPR_hint" }, "全部部件都已放置。") : null
+              unplaced.length + notYetPlaced.length === 0 ? h("p", { className: "SPR_hint" }, T("全部部件都已放置。")) : null
             ),
 
             selectedItem !== undefined && selected !== null
               ? h(
                   "div",
                   { className: "SPR_asmPanel" },
-                  h("div", { className: "SPR_sideTitle" }, `选中：${selectedPart?.label ?? selected}`),
+                  h("div", { className: "SPR_sideTitle" }, T("选中：{n0}", { n0: selectedPart?.label ?? selected })),
                   h(
                     "div",
                     { className: "SPR_asmFields" },
-                    h(NumField, { label: "x", value: selectedItem.x, onChange: (value) => patchSelected({ x: value }, "已修改 x") }),
-                    h(NumField, { label: "y", value: selectedItem.y, onChange: (value) => patchSelected({ y: value }, "已修改 y") }),
-                    h(NumField, { label: "宽", value: selectedItem.width, min: 1, onChange: (value) => patchSelected(lockRatio ? { width: value, height: Math.round((value * selectedItem.height) / Math.max(1, selectedItem.width)) } : { width: value }, "已修改宽度") }),
-                    h(NumField, { label: "高", value: selectedItem.height, min: 1, onChange: (value) => patchSelected(lockRatio ? { height: value, width: Math.round((value * selectedItem.width) / Math.max(1, selectedItem.height)) } : { height: value }, "已修改高度") }),
-                    h(NumField, { label: "旋转", value: selectedItem.rotation, step: 5, onChange: (value) => patchSelected({ rotation: value }, "已旋转") }),
-                    h(NumField, { label: "层级", value: selectedItem.z, onChange: (value) => patchSelected({ z: value }, "已修改层级") })
+                    h(NumField, { label: "x", value: selectedItem.x, onChange: (value) => patchSelected({ x: value }, T("已修改 x")) }),
+                    h(NumField, { label: "y", value: selectedItem.y, onChange: (value) => patchSelected({ y: value }, T("已修改 y")) }),
+                    h(NumField, { label: T("宽"), value: selectedItem.width, min: 1, onChange: (value) => patchSelected(lockRatio ? { width: value, height: Math.round((value * selectedItem.height) / Math.max(1, selectedItem.width)) } : { width: value }, T("已修改宽度")) }),
+                    h(NumField, { label: T("高"), value: selectedItem.height, min: 1, onChange: (value) => patchSelected(lockRatio ? { height: value, width: Math.round((value * selectedItem.width) / Math.max(1, selectedItem.height)) } : { height: value }, T("已修改高度")) }),
+                    h(NumField, { label: T("旋转"), value: selectedItem.rotation, step: 5, onChange: (value) => patchSelected({ rotation: value }, T("已旋转")) }),
+                    h(NumField, { label: T("层级"), value: selectedItem.z, onChange: (value) => patchSelected({ z: value }, T("已修改层级")) })
                   ),
                   h(
                     "div",
                     { className: "SPR_asmRow" },
-                    h(Btn, { onClick: () => changeZ(selected, "front") }, "置顶"),
-                    h(Btn, { onClick: () => changeZ(selected, "up") }, "上移"),
-                    h(Btn, { onClick: () => changeZ(selected, "down") }, "下移"),
-                    h(Btn, { onClick: () => changeZ(selected, "back") }, "置底")
+                    h(Btn, { onClick: () => changeZ(selected, "front") }, T("置顶")),
+                    h(Btn, { onClick: () => changeZ(selected, "up") }, T("上移")),
+                    h(Btn, { onClick: () => changeZ(selected, "down") }, T("下移")),
+                    h(Btn, { onClick: () => changeZ(selected, "back") }, T("置底"))
                   ),
                   h(
                     "div",
                     { className: "SPR_asmRow" },
-                    h(Btn, { onClick: () => patchSelected({ width: selectedItem.height, height: selectedItem.width }, "已交换宽高") }, "宽高互换"),
+                    h(Btn, { onClick: () => patchSelected({ width: selectedItem.height, height: selectedItem.width }, T("已交换宽高")) }, T("宽高互换")),
                     h(
                       BusyBtn,
                       {
                         busy: busy,
-                        busyText: "重定位中…",
-                        onClick: () => void run(() => api.runRigLayout({ jobId: job.id, names: [selected] }), `已重新自动定位「${selected}」`, activeKey)
+                        busyText: T("重定位中…"),
+                        onClick: () => void run(() => api.runRigLayout({ jobId: job.id, names: [selected] }), T("已重新自动定位「{n0}」", { n0: selected }), activeKey)
                       },
-                      "这块重新自动定位"
+                      T("这块重新自动定位")
                     ),
-                    h(Btn, { onClick: () => commit([{ name: selected, placed: false }], `已收回「${selected}」`), danger: true }, "收回部件")
+                    h(Btn, { onClick: () => commit([{ name: selected, placed: false }], T("已收回「{n0}」", { n0: selected })), danger: true }, T("收回部件"))
                   ),
                   selectedItem.matched === false
-                    ? h("p", { className: "SPR_hint" }, "这块目前是「未放置」状态：拖到画布上或点上面的数值确认即可放回。")
+                    ? h("p", { className: "SPR_hint" }, T("这块目前是「未放置」状态：拖到画布上或点上面的数值确认即可放回。"))
                     : null
                 )
-              : h("div", { className: "SPR_asmPanel" }, h("p", { className: "SPR_hint" }, "在画布上点一个部件，这里会出现它的精确参数与图层操作。")),
+              : h("div", { className: "SPR_asmPanel" }, h("p", { className: "SPR_hint" }, T("在画布上点一个部件，这里会出现它的精确参数与图层操作。"))),
 
             h(
               "div",
               { className: "SPR_asmPanel" },
-              h("div", { className: "SPR_sideTitle" }, "图层（从下到上）"),
+              h("div", { className: "SPR_sideTitle" }, T("图层（从下到上）")),
               h(
                 "ol",
                 { className: "SPR_asmLayers" },
@@ -7270,7 +8327,7 @@
           className: "SPR_gateMask",
           role: "dialog",
           "aria-modal": "true",
-          "aria-label": "骨骼动画生成（实验性）",
+          "aria-label": T("骨骼动画生成（实验性）"),
           onClick: close
         },
         h(
@@ -7279,8 +8336,8 @@
           h(
             "div",
             { className: "SPR_gateHead" },
-            h("span", { className: "SPR_expTag" }, "实验性"),
-            h("span", { className: "SPR_gateTitle" }, "骨骼动画生成仍在开发中")
+            h("span", { className: "SPR_expTag" }, T("实验性")),
+            h("span", { className: "SPR_gateTitle" }, T("骨骼动画生成仍在开发中"))
           ),
           RIG_EXPERIMENTAL_POINTS.map((text, index) => h("p", { key: index, className: "SPR_gateBody" }, text)),
           h(
@@ -7295,14 +8352,14 @@
               "label",
               { className: "SPR_gateMute" },
               h("input", { type: "checkbox", checked: mute, onChange: (event) => setMute(event.target.checked) }),
-              "本次会话不再提示"
+              T("本次会话不再提示")
             ),
             h(
               "a",
               { className: "SPR_btn", href: RIG_EXPERIMENTAL_REPO, target: "_blank", rel: "noreferrer" },
-              "去 GitHub 仓库"
+              T("去 GitHub 仓库")
             ),
-            h(Btn, { onClick: close, primary: true, "data-testid": "rig-experimental-ok" }, "我知道了")
+            h(Btn, { onClick: close, primary: true, "data-testid": "rig-experimental-ok" }, T("我知道了"))
           )
         )
       );
@@ -7313,14 +8370,14 @@
       return h(
         "div",
         { className: "SPR_expBar" },
-        h("span", { className: "SPR_expTag" }, "实验性"),
-        h("span", { className: "SPR_expBarText" }, "该模块功能尚不完善，仍在开发中；若你需要它，欢迎到"),
+        h("span", { className: "SPR_expTag" }, T("实验性")),
+        h("span", { className: "SPR_expBarText" }, T("该模块功能尚不完善，仍在开发中；若你需要它，欢迎到")),
         h(
           "a",
           { className: "SPR_link", href: RIG_EXPERIMENTAL_REPO, target: "_blank", rel: "noreferrer" },
-          "GitHub 仓库"
+          T("GitHub 仓库")
         ),
-        h("span", { className: "SPR_expBarText" }, "一起开发。")
+        h("span", { className: "SPR_expBarText" }, T("一起开发。"))
       );
     }
 
@@ -7333,6 +8390,7 @@
      * 落到对应阶段。
      */
     function RigModule(props) {
+      useLocaleTick();
       const api = props.api;
       const [jobs, setJobs] = React.useState([]);
       const [jobId, setJobId] = React.useState(null);
@@ -7401,7 +8459,7 @@
             // 而不是统一视图，界面会以各种「读不到字段」的形式坏掉。与其让用户对着
             // 一个灰按钮猜，不如直说。
             if (next !== null && next !== undefined && next.sourceUrl === undefined && (next.stages ?? []).every((entry) => entry.stage === undefined)) {
-              setNotice({ kind: "error", text: "宿主半区版本过旧（缺少骨骼动画模块的字段）。请重启 DSH Desktop 后重试。" });
+              setNotice({ kind: "error", text: T("宿主半区版本过旧（缺少骨骼动画模块的字段）。请重启 DSH Desktop 后重试。") });
               setJob(null);
               return;
             }
@@ -7454,26 +8512,26 @@
           }
         };
         if (feedback === undefined) return invoke();
-        const label = RIG_BUSY_LABEL[feedback] ?? (feedback.startsWith("rig:relayout") ? "正在重新定位…" : "正在处理…");
+        const label = RIG_BUSY_LABEL[feedback] ?? (feedback.startsWith("rig:relayout") ? T("正在重新定位…") : T("正在处理…"));
         return tasks.run(feedback, label, invoke);
       };
 
       const createJob = () =>
         run(
           async () => {
-            const created = await api.createRigJob({ name: "新骨骼动画任务" });
+            const created = await api.createRigJob({ name: T("新骨骼动画任务") });
             await refresh();
             setJobId(created.jobId);
             setStage("parts");
             return created;
           },
-          "已新建骨骼动画任务",
+          T("已新建骨骼动画任务"),
           K_RIG_CREATE
         );
 
       const deleteJob = async () => {
         if (job === null) return;
-        if (typeof window !== "undefined" && !window.confirm(`删除任务「${job.name}」？产物文件会一并删除。`)) return;
+        if (typeof window !== "undefined" && !window.confirm(T("删除任务「{n0}」？产物文件会一并删除。", { n0: job.name }))) return;
         await run(async () => {
           await api.deleteRigJob({ jobId: job.id });
           const list = await refresh();
@@ -7484,9 +8542,9 @@
 
       const renameJob = async () => {
         if (job === null) return;
-        const next = typeof window === "undefined" ? null : window.prompt("新的任务名", job.name);
+        const next = typeof window === "undefined" ? null : window.prompt(T("新的任务名"), job.name);
         if (next === null || next.trim() === "") return;
-        await run(() => api.saveRigJob({ jobId: job.id, name: next.trim() }), "已重命名");
+        await run(() => api.saveRigJob({ jobId: job.id, name: next.trim() }), T("已重命名"));
       };
 
       const uploadSource = async (files) => {
@@ -7496,7 +8554,7 @@
         try {
           const data = await readFileBase64(file);
           await api.uploadRigSource({ jobId: job.id, name: file.name, data });
-          setNotice({ kind: "ok", text: `已上传参考图：${file.name}` });
+          setNotice({ kind: "ok", text: T("已上传参考图：{n0}", { n0: file.name }) });
           await load(job.id);
           await refresh();
         } catch (error) {
@@ -7514,7 +8572,7 @@
             const data = await readFileBase64(file);
             await api.uploadRigPart({ jobId: job.id, name: file.name, data });
           }
-          setNotice({ kind: "ok", text: `已上传 ${files.length} 个部件（文件名即部件名）` });
+          setNotice({ kind: "ok", text: T("已上传 {n0} 个部件（文件名即部件名）", { n0: files.length }) });
           await load(job.id);
           await refresh();
         } catch (error) {
@@ -7527,22 +8585,22 @@
       const saveSettings = () =>
         run(
           () => api.saveRigJob({ jobId: job.id, sheetPrompt: promptDraft, suffix: suffixDraft, settings: settingsDraft }),
-          "已保存提示词与参数"
+          T("已保存提示词与参数")
         );
 
       const selectedItem = job !== null && selected !== null ? (job.layout?.items ?? {})[selected] : undefined;
 
       if (api === undefined) {
-        return h("div", { className: "SPR_rigPanel" }, h("p", { className: "SPR_hint" }, "远程服务尚未挂载完成，请稍候…"));
+        return h("div", { className: "SPR_rigPanel" }, h("p", { className: "SPR_hint" }, T("远程服务尚未挂载完成，请稍候…")));
       }
 
       const headerButtons = h(
         React.Fragment,
         null,
-        h(Btn, { onClick: () => void refresh(), disabled: loading || keyBusy(K_RIG_JOB) }, "刷新列表"),
-        job !== null ? h(Btn, { onClick: () => void renameJob() }, "重命名") : null,
-        job !== null ? h(Btn, { onClick: () => void deleteJob(), danger: true }, "删除任务") : null,
-        h(BusyBtn, { onClick: () => void createJob(), busy: keyBusy(K_RIG_CREATE), busyText: "创建中…", primary: true }, "新建任务")
+        h(Btn, { onClick: () => void refresh(), disabled: loading || keyBusy(K_RIG_JOB) }, T("刷新列表")),
+        job !== null ? h(Btn, { onClick: () => void renameJob() }, T("重命名")) : null,
+        job !== null ? h(Btn, { onClick: () => void deleteJob(), danger: true }, T("删除任务")) : null,
+        h(BusyBtn, { onClick: () => void createJob(), busy: keyBusy(K_RIG_CREATE), busyText: T("创建中…"), primary: true }, T("新建任务"))
       );
 
       return h(
@@ -7555,9 +8613,9 @@
         h(
           "div",
           { className: "SPR_toolbar" },
-          h("span", { className: "SPR_refRow" }, "生图模型"),
-          h("span", { className: "SPR_badge" }, globalConfig?.arkModel ?? job?.settings?.model ?? "未配置"),
-          h("span", { className: "SPR_refRow" }, "（模型在「设置 → 游戏素材大师」里改）"),
+          h("span", { className: "SPR_refRow" }, T("生图模型")),
+          h("span", { className: "SPR_badge" }, globalConfig?.arkModel ?? job?.settings?.model ?? T("未配置")),
+          h("span", { className: "SPR_refRow" }, T("（模型在「设置 → 游戏素材大师」里改）")),
           h("span", { className: "SPR_spacer" }),
           headerButtons
         ),
@@ -7566,7 +8624,7 @@
               "div",
               { className: "SPR_notice", "data-kind": notice.kind === "error" ? "error" : "info" },
               notice.text,
-              h(Btn, { onClick: () => setNotice(null) }, "关闭")
+              h(Btn, { onClick: () => setNotice(null) }, T("关闭"))
             )
           : null,
         h(
@@ -7585,26 +8643,26 @@
                 onClick: () => setStage(entry.key)
               },
               h("span", { className: "SPR_moduleTitle" }, `${done ? "✓ " : ""}${entry.title}`),
-              h("span", { className: "SPR_moduleHint" }, info.status === "running" ? "进行中…" : entry.hint)
+              h("span", { className: "SPR_moduleHint" }, info.status === "running" ? T("进行中…") : entry.hint)
             );
           })
         ),
         jobs.length === 0
-          ? h("p", { className: "SPR_hint" }, loading ? "正在读取任务…" : "还没有骨骼动画任务，点右上角「新建任务」开始。")
+          ? h("p", { className: "SPR_hint" }, loading ? T("正在读取任务…") : T("还没有骨骼动画任务，点右上角「新建任务」开始。"))
           : h(
               React.Fragment,
               null,
               h(
                 "div",
                 { className: "SPR_toolbar", style: { flexWrap: "wrap" } },
-                h("span", { className: "SPR_refRow" }, "任务"),
+                h("span", { className: "SPR_refRow" }, T("任务")),
                 h(
                   "select",
                   { className: "SPR_input", style: { width: 260 }, value: jobId ?? "", onChange: (event) => setJobId(event.target.value) },
-                  jobs.map((entry) => h("option", { key: entry.id, value: entry.id }, `${entry.name}（部件 ${entry.partCount}）`))
+                  jobs.map((entry) => h("option", { key: entry.id, value: entry.id }, T("{n0}（部件 {n1}）", { n0: entry.name, n1: entry.partCount })))
                 ),
                 job !== null ? h("span", { className: "SPR_badge" }, job.id) : null,
-                stageBusy ? h(BusyBadge, { show: true, text: "本阶段进行中…" }) : null
+                stageBusy ? h(BusyBadge, { show: true, text: T("本阶段进行中…") }) : null
               ),
               job === null
                 ? null
@@ -7621,15 +8679,15 @@
                       h(
                         "div",
                         { className: "SPR_rigStageHead" },
-                        h("span", { className: "SPR_rigStageTitle" }, "角色参考图"),
-                        h("span", { className: "SPR_rigStageHint" }, "拆件、装配、骨骼都以这张整图为基准；建议用能看清全身、背景干净的角色立绘。"),
-                        job.sourceUrl !== null && job.sourceUrl !== undefined ? h(Chip, { kind: "ready", text: `${job.canvas?.width ?? "?"}×${job.canvas?.height ?? "?"}` }) : h(Chip, { kind: "empty", text: "未上传" })
+                        h("span", { className: "SPR_rigStageTitle" }, T("角色参考图")),
+                        h("span", { className: "SPR_rigStageHint" }, T("拆件、装配、骨骼都以这张整图为基准；建议用能看清全身、背景干净的角色立绘。")),
+                        job.sourceUrl !== null && job.sourceUrl !== undefined ? h(Chip, { kind: "ready", text: `${job.canvas?.width ?? "?"}×${job.canvas?.height ?? "?"}` }) : h(Chip, { kind: "empty", text: T("未上传") })
                       ),
                       h(
                         "div",
                         { className: "SPR_toolbar", style: { marginTop: 10 } },
-                        h(UploadBox, { label: "拖入角色整图（PNG / JPG）", accept: "image/*", onFiles: (files) => void uploadSource(files), busy: uploading }),
-                        h(UploadBox, { label: "拖入部件 PNG（可多选，文件名即部件名）", accept: "image/*", multiple: true, onFiles: (files) => void uploadParts(files), busy: uploading })
+                        h(UploadBox, { label: T("拖入角色整图（PNG / JPG）"), accept: "image/*", onFiles: (files) => void uploadSource(files), busy: uploading }),
+                        h(UploadBox, { label: T("拖入部件 PNG（可多选，文件名即部件名）"), accept: "image/*", multiple: true, onFiles: (files) => void uploadParts(files), busy: uploading })
                       ),
                       job.sourceUrl !== null && job.sourceUrl !== undefined
                         ? h("img", { className: "SPR_rigCardImg", style: { height: 200, marginTop: 10 }, src: job.sourceUrl, alt: "reference" })
@@ -7644,8 +8702,8 @@
                           h(
                             "div",
                             { className: "SPR_rigStageHead" },
-                            h("span", { className: "SPR_rigStageTitle" }, "① 拆件"),
-                            h("span", { className: "SPR_rigStageHint" }, "让生图模型把角色拆成摊平的部件图，再自动分割成逐件透明 PNG。**这一步花钱**，只跑一次；参数改了可以「重新分割」，不额外计费。"),
+                            h("span", { className: "SPR_rigStageTitle" }, T("① 拆件")),
+                            h("span", { className: "SPR_rigStageHint" }, T("让生图模型把角色拆成摊平的部件图，再自动分割成逐件透明 PNG。**这一步花钱**，只跑一次；参数改了可以「重新分割」，不额外计费。")),
                             h(StatusChip, { node: rigStageOf(job, "parts") })
                           ),
                           h(
@@ -7655,46 +8713,46 @@
                               BusyBtn,
                               {
                                 busy: keyBusy(K_RIG_SHEET),
-                                busyText: "正在拆件生图…",
+                                busyText: T("正在拆件生图…"),
                                 primary: true,
                                 disabled: job.sourceUrl === null || job.sourceUrl === undefined || busy,
-                                onClick: () => void run(() => api.runRigSheet({ jobId: job.id }), "已提交拆件生图", K_RIG_SHEET)
+                                onClick: () => void run(() => api.runRigSheet({ jobId: job.id }), T("已提交拆件生图"), K_RIG_SHEET)
                               },
-                              job.sheet?.status === "ready" ? "重新生成拆件图（会花钱）" : "生成拆件图（会花钱）"
+                              job.sheet?.status === "ready" ? T("重新生成拆件图（会花钱）") : T("生成拆件图（会花钱）")
                             ),
                             h(
                               BusyBtn,
                               {
                                 busy: keyBusy(K_RIG_SEGMENT),
-                                busyText: "正在分割…",
+                                busyText: T("正在分割…"),
                                 disabled: job.sheet?.status !== "ready" || busy,
-                                onClick: () => void run(() => api.runRigSegment({ jobId: job.id }), "已提交重新分割", K_RIG_SEGMENT)
+                                onClick: () => void run(() => api.runRigSegment({ jobId: job.id }), T("已提交重新分割"), K_RIG_SEGMENT)
                               },
-                              "用现有拆件图重新分割"
+                              T("用现有拆件图重新分割")
                             ),
-                            h(NumField, { label: "网格列", value: settingsDraft.gridColumns ?? 4, min: 1, max: 8, onChange: (value) => setSettingsDraft({ ...settingsDraft, gridColumns: value }) }),
-                            h(NumField, { label: "网格行", value: settingsDraft.gridRows ?? 4, min: 1, max: 8, onChange: (value) => setSettingsDraft({ ...settingsDraft, gridRows: value }) }),
-                            h(NumField, { label: "底色容差", value: settingsDraft.backgroundTolerance ?? 30, min: 1, max: 200, onChange: (value) => setSettingsDraft({ ...settingsDraft, backgroundTolerance: value }) }),
-                            h(NumField, { label: "边缘羽化", value: settingsDraft.feather ?? 26, min: 1, max: 200, onChange: (value) => setSettingsDraft({ ...settingsDraft, feather: value }) }),
-                            h(NumField, { label: "最小面积", value: settingsDraft.minArea ?? 0, min: 0, max: 100000, onChange: (value) => setSettingsDraft({ ...settingsDraft, minArea: value }) }),
+                            h(NumField, { label: T("网格列"), value: settingsDraft.gridColumns ?? 4, min: 1, max: 8, onChange: (value) => setSettingsDraft({ ...settingsDraft, gridColumns: value }) }),
+                            h(NumField, { label: T("网格行"), value: settingsDraft.gridRows ?? 4, min: 1, max: 8, onChange: (value) => setSettingsDraft({ ...settingsDraft, gridRows: value }) }),
+                            h(NumField, { label: T("底色容差"), value: settingsDraft.backgroundTolerance ?? 30, min: 1, max: 200, onChange: (value) => setSettingsDraft({ ...settingsDraft, backgroundTolerance: value }) }),
+                            h(NumField, { label: T("边缘羽化"), value: settingsDraft.feather ?? 26, min: 1, max: 200, onChange: (value) => setSettingsDraft({ ...settingsDraft, feather: value }) }),
+                            h(NumField, { label: T("最小面积"), value: settingsDraft.minArea ?? 0, min: 0, max: 100000, onChange: (value) => setSettingsDraft({ ...settingsDraft, minArea: value }) }),
                             // 「边缘羽化」以前是「离底色多远才不透明」的斜率，浅色填充会
                             // 因此整片变半透明；现在它只作用于轮廓最外圈，内部一律不透明。
                             h("p", { className: "SPR_hint", style: { marginTop: 4, marginBottom: 0 } },
-                              "底色容差：与底色多接近算背景。边缘羽化：只决定轮廓最外圈那几个像素的软过渡，部件内部不会变半透明。"),
-                            h(Btn, { onClick: () => void saveSettings() }, "保存参数与提示词")
+                              T("底色容差：与底色多接近算背景。边缘羽化：只决定轮廓最外圈那几个像素的软过渡，部件内部不会变半透明。")),
+                            h(Btn, { onClick: () => void saveSettings() }, T("保存参数与提示词"))
                           ),
                           h("textarea", {
                             className: "SPR_input",
                             style: { width: "100%", minHeight: 110, marginTop: 10, fontFamily: "inherit", fontSize: 12 },
                             value: promptDraft,
-                            placeholder: "留空则使用内置的网格拆件提示词（要求模型按 4×4 网格摆放 16 个标准人形部件）",
+                            placeholder: T("留空则使用内置的网格拆件提示词（要求模型按 4×4 网格摆放 16 个标准人形部件）"),
                             onChange: (event) => setPromptDraft(event.target.value)
                           }),
                           h("textarea", {
                             className: "SPR_input",
                             style: { width: "100%", minHeight: 48, marginTop: 6, fontFamily: "inherit", fontSize: 12 },
                             value: suffixDraft,
-                            placeholder: "统一附加提示词（可留空）",
+                            placeholder: T("统一附加提示词（可留空）"),
                             onChange: (event) => setSuffixDraft(event.target.value)
                           }),
                           job.sheet?.url !== null && job.sheet?.url !== undefined
@@ -7702,14 +8760,14 @@
                                 "div",
                                 { className: "SPR_rigCanvasWrap" },
                                 h("img", { src: job.sheet.url, alt: "sheet" }),
-                                h(LoadingOverlay, { show: keyBusy(K_RIG_SHEET) || keyBusy(K_RIG_SEGMENT), text: keyBusy(K_RIG_SHEET) ? "生图模型正在拆件…" : "正在分割部件…" })
+                                h(LoadingOverlay, { show: keyBusy(K_RIG_SHEET) || keyBusy(K_RIG_SEGMENT), text: keyBusy(K_RIG_SHEET) ? T("生图模型正在拆件…") : T("正在分割部件…") })
                               )
-                            : h("p", { className: "SPR_hint", style: { marginTop: 10 } }, job.sourceUrl === null || job.sourceUrl === undefined ? "先上传角色参考图。" : "还没有拆件图：点上面的「生成拆件图」，或者用上面的上传框直接给现成部件 PNG。"),
+                            : h("p", { className: "SPR_hint", style: { marginTop: 10 } }, job.sourceUrl === null || job.sourceUrl === undefined ? T("先上传角色参考图。") : T("还没有拆件图：点上面的「生成拆件图」，或者用上面的上传框直接给现成部件 PNG。")),
                           (job.parts ?? []).length > 0
                             ? h(
                                 "div",
                                 null,
-                                h("h3", { style: { fontSize: 13, margin: "14px 0 0" } }, `部件（${job.parts.length}）——逐件验收，摆错的可单独重跑`),
+                                h("h3", { style: { fontSize: 13, margin: "14px 0 0" } }, T("部件（{n0}）——逐件验收，摆错的可单独重跑", { n0: job.parts.length })),
                                 h(
                                   "div",
                                   { className: "SPR_rigGrid" },
@@ -7728,16 +8786,16 @@
                                       onRemove: () => void run(() => api.removeRigPart({ jobId: job.id, name: part.name })),
                                       onRename: () => {
                                         const next = typeof window === "undefined" ? null : window.prompt(
-                                          `把「${part.name}」改成什么名字？\n（名字决定骨骼层级，标准名如 head / torso / hip / left-upper-arm / left-lower-leg / right-foot，见拆件提示词里的网格表）`,
+                                          T("把「{n0}」改成什么名字？\n（名字决定骨骼层级，标准名如 head / torso / hip / left-upper-arm / left-lower-leg / right-foot，见拆件提示词里的网格表）", { n0: part.name }),
                                           part.name
                                         );
                                         if (next === null || next.trim() === "" || next === part.name) return;
-                                        void run(() => api.renameRigPart({ jobId: job.id, from: part.name, to: next.trim() }), `已改名为「${next.trim()}」`);
+                                        void run(() => api.renameRigPart({ jobId: job.id, from: part.name, to: next.trim() }), T("已改名为「{n0}」", { n0: next.trim() }));
                                       },
                                       onRetry: () =>
                                         void run(
                                           () => api.runRigLayout({ jobId: job.id, names: [part.name] }),
-                                          `已重新定位「${part.name}」`,
+                                          T("已重新定位「{n0}」", { n0: part.name }),
                                           PART_K(part.name, "relayout")
                                         )
                                     })
@@ -7760,14 +8818,14 @@
                             "div",
                             { className: "SPR_toolbar", style: { marginTop: 12 } },
                             h(Btn, {
-                              onClick: () => void run(() => api.saveRigJob({ jobId: job.id, approved: true, stage: "parts" }), "第①步已通过"),
+                              onClick: () => void run(() => api.saveRigJob({ jobId: job.id, approved: true, stage: "parts" }), T("第①步已通过")),
                               on: rigStageOf(job, "parts").approved === true,
                               disabled: (job.parts ?? []).filter((part) => part.status === "ready").length === 0
-                            }, rigStageOf(job, "parts").approved === true ? "第①步：已通过" : "第①步：通过"),
+                            }, rigStageOf(job, "parts").approved === true ? T("第①步：已通过") : T("第①步：通过")),
                             h(Btn, {
                               onClick: () => void run(() => api.saveRigJob({ jobId: job.id, approved: false, stage: "parts" }))
-                            }, "取消通过"),
-                            h(Btn, { onClick: () => setStage("layout") }, "下一步：装配定位 →")
+                            }, T("取消通过")),
+                            h(Btn, { onClick: () => setStage("layout") }, T("下一步：装配定位 →"))
                           )
                         )
                       : null,
@@ -7780,8 +8838,8 @@
                           h(
                             "div",
                             { className: "SPR_rigStageHead" },
-                            h("span", { className: "SPR_rigStageTitle" }, "② 装配定位"),
-                            h("span", { className: "SPR_rigStageHint" }, "多尺度模板匹配把每个部件摆回参考姿态。**本地计算，免费**：失败或摆错只重跑那几个部件，不用整批重来。"),
+                            h("span", { className: "SPR_rigStageTitle" }, T("② 装配定位")),
+                            h("span", { className: "SPR_rigStageHint" }, T("多尺度模板匹配把每个部件摆回参考姿态。**本地计算，免费**：失败或摆错只重跑那几个部件，不用整批重来。")),
                             h(StatusChip, { node: rigStageOf(job, "layout") })
                           ),
                           h(
@@ -7791,35 +8849,35 @@
                               BusyBtn,
                               {
                                 busy: keyBusy(K_RIG_LAYOUT),
-                                busyText: "正在装配定位…",
+                                busyText: T("正在装配定位…"),
                                 primary: true,
                                 disabled: (job.parts ?? []).filter((part) => part.status === "ready").length === 0 || busy,
-                                onClick: () => void run(() => api.runRigLayout({ jobId: job.id }), "已提交装配定位（本地计算）", K_RIG_LAYOUT)
+                                onClick: () => void run(() => api.runRigLayout({ jobId: job.id }), T("已提交装配定位（本地计算）"), K_RIG_LAYOUT)
                               },
-                              "重新装配全部部件"
+                              T("重新装配全部部件")
                             ),
                             h(
                               BusyBtn,
                               {
                                 busy: keyBusy(K_RIG_LAYOUT),
-                                busyText: "正在重试…",
+                                busyText: T("正在重试…"),
                                 disabled: (job.review?.unmatched ?? []).length === 0 || busy,
-                                onClick: () => void run(() => api.runRigLayout({ jobId: job.id, names: job.review.unmatched }), "已提交重试未命中的部件", K_RIG_LAYOUT)
+                                onClick: () => void run(() => api.runRigLayout({ jobId: job.id, names: job.review.unmatched }), T("已提交重试未命中的部件"), K_RIG_LAYOUT)
                               },
-                              `只重试未命中的 ${(job.review?.unmatched ?? []).length} 个`
+                              T("只重试未命中的 {n0} 个", { n0: (job.review?.unmatched ?? []).length })
                             ),
-                            h(Btn, { onClick: () => setShowReference((current) => !current), on: showReference }, showReference ? "只显示合成图" : "并排显示参考图")
+                            h(Btn, { onClick: () => setShowReference((current) => !current), on: showReference }, showReference ? T("只显示合成图") : T("并排显示参考图"))
                           ),
                           h(RigAssemblyEditor, { job, api, run, busy, activeKey: K_RIG_LAYOUT }),
                           (job.review?.unmatched ?? []).length > 0
-                            ? h("p", { className: "SPR_hint", style: { color: "var(--dsw-alias-state-warning-primary, #b45309)" } }, `这些部件没匹配上，请手工拖到正确位置：${job.review.unmatched.join("、")}`)
+                            ? h("p", { className: "SPR_hint", style: { color: "var(--dsw-alias-state-warning-primary, #b45309)" } }, T("这些部件没匹配上，请手工拖到正确位置：{n0}", { n0: job.review.unmatched.join(T("、")) }))
                             : null,
                           h(
                             "div",
                             { className: "SPR_toolbar", style: { marginTop: 12 } },
-                            h(Btn, { onClick: () => void run(() => api.saveRigJob({ jobId: job.id, approved: true, stage: "layout" }), "第②步已通过"), on: rigStageOf(job, "layout").approved === true, disabled: job.layout?.status !== "ready" }, rigStageOf(job, "layout").approved === true ? "第②步：已通过" : "第②步：通过"),
-                            h(Btn, { onClick: () => void run(() => api.saveRigJob({ jobId: job.id, approved: false, stage: "layout" })) }, "取消通过"),
-                            h(Btn, { onClick: () => setStage("rig") }, "下一步：骨骼与动画 →")
+                            h(Btn, { onClick: () => void run(() => api.saveRigJob({ jobId: job.id, approved: true, stage: "layout" }), T("第②步已通过")), on: rigStageOf(job, "layout").approved === true, disabled: job.layout?.status !== "ready" }, rigStageOf(job, "layout").approved === true ? T("第②步：已通过") : T("第②步：通过")),
+                            h(Btn, { onClick: () => void run(() => api.saveRigJob({ jobId: job.id, approved: false, stage: "layout" })) }, T("取消通过")),
+                            h(Btn, { onClick: () => setStage("rig") }, T("下一步：骨骼与动画 →"))
                           )
                         )
                       : null,
@@ -7832,8 +8890,8 @@
                           h(
                             "div",
                             { className: "SPR_rigStageHead" },
-                            h("span", { className: "SPR_rigStageTitle" }, "③ 骨骼与动画"),
-                            h("span", { className: "SPR_rigStageHint" }, "按部件语义自动推骨骼层级，并生成六个动画预设。**本地计算，免费**。下面直接播放验收。"),
+                            h("span", { className: "SPR_rigStageTitle" }, T("③ 骨骼与动画")),
+                            h("span", { className: "SPR_rigStageHint" }, T("按部件语义自动推骨骼层级，并生成六个动画预设。**本地计算，免费**。下面直接播放验收。")),
                             h(StatusChip, { node: rigStageOf(job, "rig") })
                           ),
                           h(
@@ -7843,14 +8901,14 @@
                               BusyBtn,
                               {
                                 busy: keyBusy(K_RIG_BONES),
-                                busyText: "正在生成骨骼…",
+                                busyText: T("正在生成骨骼…"),
                                 primary: true,
                                 disabled: job.layout?.status !== "ready" || busy,
-                                onClick: () => void run(() => api.runRigBones({ jobId: job.id }), "已提交骨骼构建", K_RIG_BONES)
+                                onClick: () => void run(() => api.runRigBones({ jobId: job.id }), T("已提交骨骼构建"), K_RIG_BONES)
                               },
-                              "生成骨骼与动画"
+                              T("生成骨骼与动画")
                             ),
-                            h("span", { className: "SPR_refRow" }, "动画预设"),
+                            h("span", { className: "SPR_refRow" }, T("动画预设")),
                             RIG_ANIMATIONS.map((name) =>
                               h(
                                 "label",
@@ -7868,12 +8926,12 @@
                                 name
                               )
                             ),
-                            h(Btn, { onClick: () => void saveSettings() }, "保存动画选择"),
-                            job.rig?.skeleton !== null && job.rig?.skeleton !== undefined ? h("a", { className: "SPR_link", href: job.rig.skeleton, download: "skeleton.json" }, "下载 skeleton.json") : null,
-                            job.rig?.preview !== null && job.rig?.preview !== undefined ? h("a", { className: "SPR_link", href: job.rig.preview, target: "_blank", rel: "noreferrer" }, "新窗口打开预览") : null
+                            h(Btn, { onClick: () => void saveSettings() }, T("保存动画选择")),
+                            job.rig?.skeleton !== null && job.rig?.skeleton !== undefined ? h("a", { className: "SPR_link", href: job.rig.skeleton, download: "skeleton.json" }, T("下载 skeleton.json")) : null,
+                            job.rig?.preview !== null && job.rig?.preview !== undefined ? h("a", { className: "SPR_link", href: job.rig.preview, target: "_blank", rel: "noreferrer" }, T("新窗口打开预览")) : null
                           ),
                           (job.rig?.warnings ?? []).length > 0
-                            ? h("p", { className: "SPR_hint", style: { color: "var(--dsw-alias-state-warning-primary, #b45309)" } }, `骨骼告警：${job.rig.warnings.join("；")}`)
+                            ? h("p", { className: "SPR_hint", style: { color: "var(--dsw-alias-state-warning-primary, #b45309)" } }, T("骨骼告警：{n0}", { n0: job.rig.warnings.join(T("；")) }))
                             : null,
                           job.rig?.preview !== null && job.rig?.preview !== undefined
                             ? h(
@@ -7882,11 +8940,11 @@
                                 h(
                                   "div",
                                   { className: "SPR_rigEditorRow" },
-                                  h("span", { className: "SPR_refRow" }, "播放动画"),
+                                  h("span", { className: "SPR_refRow" }, T("播放动画")),
                                   (job.rig.animations ?? []).map((name) =>
                                     h(Btn, { key: name, on: anim === name, onClick: () => setAnim(name) }, name)
                                   ),
-                                  h("span", { className: "SPR_hint" }, "预览里也能拖时间轴、开骨骼网格")
+                                  h("span", { className: "SPR_hint" }, T("预览里也能拖时间轴、开骨骼网格"))
                                 ),
                                 h("iframe", {
                                   className: "SPR_rigPreview",
@@ -7894,10 +8952,10 @@
                                   // 快照一变 iframe 就重载，预览才能「立即反映」。
                                   // 少了它 React 认为 src 没变、不重新挂载，预览会一直是旧的。
                                   src: `${job.rig.preview}?v=${job.rig.updatedAt ?? 0}#${anim}`,
-                                  title: "骨骼动画预览"
+                                  title: T("骨骼动画预览")
                                 })
                               )
-                            : h("p", { className: "SPR_hint", style: { marginTop: 10 } }, job.layout?.status === "ready" ? "点「生成骨骼与动画」得到 skeleton.json 与可播放预览。" : "先完成第②步装配定位。"),
+                            : h("p", { className: "SPR_hint", style: { marginTop: 10 } }, job.layout?.status === "ready" ? T("点「生成骨骼与动画」得到 skeleton.json 与可播放预览。") : T("先完成第②步装配定位。")),
                           h(RigAnimationPanel, { job, api, run, busy, activeKey: K_RIG_BONES }),
                           h(RigTimelineEditor, { job, api, run, busy, activeKey: K_RIG_BONES, onRebuild: true }),
                           h(RigConstraintPanel, { job, api, run, busy, activeKey: K_RIG_BONES }),
@@ -7909,17 +8967,17 @@
                             ? h(
                                 "div",
                                 { className: "SPR_rigEditorRow", "data-testid": "rig-bones-db" },
-                                h("span", { className: "SPR_refRow" }, "DragonBones 骨架"),
+                                h("span", { className: "SPR_refRow" }, T("DragonBones 骨架")),
                                 h("a", { className: "SPR_link", href: job.rig.dragonBones.skeleton, target: "_blank", rel: "noreferrer" }, "skeleton_ske.json"),
-                                h("span", { className: "SPR_hint" }, "同一份骨架的 DragonBones 5.5 写法（Cocos / Egret / Laya 可直接加载）")
+                                h("span", { className: "SPR_hint" }, T("同一份骨架的 DragonBones 5.5 写法（Cocos / Egret / Laya 可直接加载）"))
                               )
                             : null,
                           h(
                             "div",
                             { className: "SPR_toolbar", style: { marginTop: 12 } },
-                            h(Btn, { onClick: () => void run(() => api.saveRigJob({ jobId: job.id, approved: true, stage: "rig" }), "第③步已通过"), on: rigStageOf(job, "rig").approved === true, disabled: job.rig?.status !== "ready" }, rigStageOf(job, "rig").approved === true ? "第③步：已通过" : "第③步：通过"),
-                            h(Btn, { onClick: () => void run(() => api.saveRigJob({ jobId: job.id, approved: false, stage: "rig" })) }, "取消通过"),
-                            h(Btn, { onClick: () => setStage("atlas") }, "下一步：图集 →")
+                            h(Btn, { onClick: () => void run(() => api.saveRigJob({ jobId: job.id, approved: true, stage: "rig" }), T("第③步已通过")), on: rigStageOf(job, "rig").approved === true, disabled: job.rig?.status !== "ready" }, rigStageOf(job, "rig").approved === true ? T("第③步：已通过") : T("第③步：通过")),
+                            h(Btn, { onClick: () => void run(() => api.saveRigJob({ jobId: job.id, approved: false, stage: "rig" })) }, T("取消通过")),
+                            h(Btn, { onClick: () => setStage("atlas") }, T("下一步：图集 →"))
                           )
                         )
                       : null,
@@ -7932,8 +8990,8 @@
                           h(
                             "div",
                             { className: "SPR_rigStageHead" },
-                            h("span", { className: "SPR_rigStageTitle" }, "④ 图集"),
-                            h("span", { className: "SPR_rigStageHint" }, "把部件按装配后的尺寸打包成 Spine 纹理图集。区域尺寸与 skeleton.json 里挂点的 width/height 一致，导入引擎不会错位。"),
+                            h("span", { className: "SPR_rigStageTitle" }, T("④ 图集")),
+                            h("span", { className: "SPR_rigStageHint" }, T("把部件按装配后的尺寸打包成 Spine 纹理图集。区域尺寸与 skeleton.json 里挂点的 width/height 一致，导入引擎不会错位。")),
                             h(StatusChip, { node: rigStageOf(job, "atlas") })
                           ),
                           h(
@@ -7943,16 +9001,16 @@
                               BusyBtn,
                               {
                                 busy: keyBusy(K_RIG_ATLAS),
-                                busyText: "正在打包…",
+                                busyText: T("正在打包…"),
                                 primary: true,
                                 disabled: job.rig?.status !== "ready" || busy,
-                                onClick: () => void run(() => api.runRigAtlas({ jobId: job.id }), "已提交图集打包", K_RIG_ATLAS)
+                                onClick: () => void run(() => api.runRigAtlas({ jobId: job.id }), T("已提交图集打包"), K_RIG_ATLAS)
                               },
-                              "打包纹理图集"
+                              T("打包纹理图集")
                             ),
-                            job.atlas?.text !== null && job.atlas?.text !== undefined ? h("a", { className: "SPR_link", href: job.atlas.text, target: "_blank", rel: "noreferrer" }, "查看 skeleton.atlas") : null,
-                            job.atlas?.image !== null && job.atlas?.image !== undefined ? h("a", { className: "SPR_link", href: job.atlas.image, download: "skeleton.png" }, "下载 skeleton.png") : null,
-                            job.atlas?.width !== undefined ? h(Chip, { kind: "ready", text: `${job.atlas.width}×${job.atlas.height} · ${job.atlas.regions} 区域${(job.atlas.pages ?? []).length > 1 ? ` · ${job.atlas.pages.length} 页` : ""}` }) : null
+                            job.atlas?.text !== null && job.atlas?.text !== undefined ? h("a", { className: "SPR_link", href: job.atlas.text, target: "_blank", rel: "noreferrer" }, T("查看 skeleton.atlas")) : null,
+                            job.atlas?.image !== null && job.atlas?.image !== undefined ? h("a", { className: "SPR_link", href: job.atlas.image, download: "skeleton.png" }, T("下载 skeleton.png")) : null,
+                            job.atlas?.width !== undefined ? h(Chip, { kind: "ready", text: T("{n0}×{n1} · {n2} 区域{n3}", { n0: job.atlas.width, n1: job.atlas.height, n2: job.atlas.regions, n3: (job.atlas.pages ?? []).length > 1 ? T(" · {n0} 页", { n0: job.atlas.pages.length }) : "" }) }) : null
                           ),
                           // 同一份图集的**两种描述**：Spine 的 .atlas 与 DragonBones 的 _tex.json。
                           // 两者必须是同一次装箱出来的——分开各装一次，坐标迟早对不上，
@@ -7961,7 +9019,7 @@
                             ? h(
                                 "div",
                                 { className: "SPR_rigEditorRow", "data-testid": "rig-atlas-db" },
-                                h("span", { className: "SPR_refRow" }, "DragonBones 贴图"),
+                                h("span", { className: "SPR_refRow" }, T("DragonBones 贴图")),
                                 job.atlas.dragonBones.map((entry) =>
                                   h("a", { key: entry.file, className: "SPR_link", href: entry.url, target: "_blank", rel: "noreferrer" },
                                     entry.file.split("/").pop())
@@ -7970,31 +9028,31 @@
                             : null,
                           (job.atlas?.warnings ?? []).length > 0
                             ? h("p", { className: "SPR_hint", style: { color: "var(--dsw-alias-state-warning-primary, #b45309)" } },
-                                `图集提示：${job.atlas.warnings.join("；")}`)
+                                T("图集提示：{n0}", { n0: job.atlas.warnings.join(T("；")) }))
                             : null,
                           job.atlas?.url !== null && job.atlas?.url !== undefined
                             ? h("div", { className: "SPR_rigAtlasWrap" }, h("img", { src: job.atlas.url, alt: "atlas" }))
-                            : h("p", { className: "SPR_hint", style: { marginTop: 10 } }, job.rig?.status === "ready" ? "点「打包纹理图集」生成 skeleton.png + skeleton.atlas。" : "先完成第③步骨骼构建。"),
+                            : h("p", { className: "SPR_hint", style: { marginTop: 10 } }, job.rig?.status === "ready" ? T("点「打包纹理图集」生成 skeleton.png + skeleton.atlas。") : T("先完成第③步骨骼构建。")),
                           // 多页图集：逐页给下载与预览（页名与 .atlas 第一行严格一致）。
                           (job.atlas?.pages ?? []).length > 1
                             ? h(
                                 "div",
                                 { className: "SPR_rigEditorRow" },
-                                h("span", { className: "SPR_refRow" }, "分页"),
+                                h("span", { className: "SPR_refRow" }, T("分页")),
                                 job.atlas.pages.map((page) =>
                                   h("a", { key: page.file, className: "SPR_link", href: `/${page.file}`, target: "_blank", rel: "noreferrer" },
-                                    `${page.file.split("/").pop()}（${page.width}×${page.height} · ${page.regions} 区域）`)
+                                    T("{n0}（{n1}×{n2} · {n3} 区域）", { n0: page.file.split("/").pop(), n1: page.width, n2: page.height, n3: page.regions }))
                                 )
                               )
                             : null,
                           h(
                             "div",
                             { className: "SPR_toolbar", style: { marginTop: 12 } },
-                            h(Btn, { onClick: () => void run(() => api.saveRigJob({ jobId: job.id, approved: true, stage: "atlas" }), "第④步已通过"), on: rigStageOf(job, "atlas").approved === true, disabled: job.atlas?.status !== "ready" }, rigStageOf(job, "atlas").approved === true ? "第④步：已通过" : "第④步：通过"),
-                            h(Btn, { onClick: () => void run(() => api.saveRigJob({ jobId: job.id, approved: false, stage: "atlas" })) }, "取消通过")
+                            h(Btn, { onClick: () => void run(() => api.saveRigJob({ jobId: job.id, approved: true, stage: "atlas" }), T("第④步已通过")), on: rigStageOf(job, "atlas").approved === true, disabled: job.atlas?.status !== "ready" }, rigStageOf(job, "atlas").approved === true ? T("第④步：已通过") : T("第④步：通过")),
+                            h(Btn, { onClick: () => void run(() => api.saveRigJob({ jobId: job.id, approved: false, stage: "atlas" })) }, T("取消通过"))
                           ),
-                          h("p", { className: "SPR_hint", style: { marginTop: 10 } }, "导入 Spine：把 skeleton.json、skeleton.atlas、skeleton.png 三个文件放在同一目录，打开 Spine 时选 skeleton.json 即可。"),
-                          h("p", { className: "SPR_hint", style: { marginTop: 4 } }, "导入 DragonBones：把 export/dragonbones/skeleton_ske.json 与 atlas/skeleton_tex.json、atlas/skeleton.png 放同一目录后加载 .json 数据与纹理。")
+                          h("p", { className: "SPR_hint", style: { marginTop: 10 } }, T("导入 Spine：把 skeleton.json、skeleton.atlas、skeleton.png 三个文件放在同一目录，打开 Spine 时选 skeleton.json 即可。")),
+                          h("p", { className: "SPR_hint", style: { marginTop: 4 } }, T("导入 DragonBones：把 export/dragonbones/skeleton_ske.json 与 atlas/skeleton_tex.json、atlas/skeleton.png 放同一目录后加载 .json 数据与纹理。"))
                         )
                       : null,
 
@@ -8006,6 +9064,7 @@
 
     // ── 设置页 ───────────────────────────────────────────────────────────
     function ConfigSection(props) {
+      useLocaleTick();
       const api = props?.api;
       const [config, setConfig] = React.useState(null);
       const [arkKey, setArkKey] = React.useState("");
@@ -8038,10 +9097,10 @@
       };
 
       if (api === undefined || config === null) {
-        return h("section", { className: "SPR_settings" }, h("p", { className: "SPR_hint" }, "正在载入配置…"));
+        return h("section", { className: "SPR_settings" }, h("p", { className: "SPR_hint" }, T("正在载入配置…")));
       }
 
-      const patch = (values) => run(() => api.saveConfig(values), "配置已保存");
+      const patch = (values) => run(() => api.saveConfig(values), T("配置已保存"));
 
       // 模型能力决定分辨率档位与时长控件形态；切换模型后宿主会重新收敛，
       // 这里始终以「当前模型」的能力为准，避免下拉里出现非法档位。
@@ -8072,8 +9131,8 @@
       return h(
         "section",
         { className: "SPR_settings" },
-        h("h2", { style: { margin: 0, fontSize: 15 } }, "游戏素材大师"),
-        h("p", { className: "SPR_hint" }, "配置两家模型的 API Key 与整条流水线的默认参数。Key 只保存在本机 DSH 数据目录下的 game-material-master/config.json（真实路径见文末「数据位置」），界面里始终脱敏显示。"),
+        h("h2", { style: { margin: 0, fontSize: 15 } }, T("游戏素材大师")),
+        h("p", { className: "SPR_hint" }, T("配置两家模型的 API Key 与整条流水线的默认参数。Key 只保存在本机 DSH 数据目录下的 game-material-master/config.json（真实路径见文末「数据位置」），界面里始终脱敏显示。")),
 
         notice !== null
           ? h("div", { className: "SPR_note", "data-kind": notice.kind }, notice.text)
@@ -8082,25 +9141,25 @@
         h(
           "div",
           { className: "SPR_settingsGroup" },
-          h("h3", null, "火山方舟（生图）"),
-          h("p", null, config.ffmpeg?.ok === true ? `ffmpeg 可用：${config.ffmpeg.version}` : `ffmpeg 不可用：${config.ffmpeg?.error ?? "未知"}`),
+          h("h3", null, T("火山方舟（生图）")),
+          h("p", null, config.ffmpeg?.ok === true ? T("ffmpeg 可用：{n0}", { n0: config.ffmpeg.version }) : T("ffmpeg 不可用：{n0}", { n0: config.ffmpeg?.error ?? T("未知") })),
           h(
             "div",
             { className: "SPR_keyRow" },
             h(
               "label",
               { className: "SPR_field" },
-              h("span", { className: "SPR_fieldLabel" }, `API Key ${config.arkApiKeySet ? `（已配置 ${config.arkApiKeyHint}）` : "（未配置）"}`),
+              h("span", { className: "SPR_fieldLabel" }, T("API Key {n0}", { n0: config.arkApiKeySet ? T("（已配置 {n0}）", { n0: config.arkApiKeyHint }) : T("（未配置）") })),
               h("input", {
                 className: "SPR_input",
                 type: "password",
-                placeholder: config.arkApiKeySet ? "留空表示不修改" : "粘贴 ARK_API_KEY",
+                placeholder: config.arkApiKeySet ? T("留空表示不修改") : T("粘贴 ARK_API_KEY"),
                 value: arkKey,
                 onChange: (event) => setArkKey(event.target.value)
               })
             ),
-            h(Btn, { onClick: () => run(async () => { await api.saveConfig({ arkApiKey: arkKey }); setArkKey(""); }, "火山方舟 Key 已保存") }, "保存 Key"),
-            h(Btn, { disabled: !config.arkApiKeySet, onClick: () => run(() => api.saveConfig({ clearArkApiKey: true }), "已清除火山方舟 Key") }, "清除")
+            h(Btn, { onClick: () => run(async () => { await api.saveConfig({ arkApiKey: arkKey }); setArkKey(""); }, T("火山方舟 Key 已保存")) }, T("保存 Key")),
+            h(Btn, { disabled: !config.arkApiKeySet, onClick: () => run(() => api.saveConfig({ clearArkApiKey: true }), T("已清除火山方舟 Key")) }, T("清除"))
           ),
           h(
             "div",
@@ -8108,7 +9167,7 @@
             h(
               "label",
               { className: "SPR_field" },
-              h("span", { className: "SPR_fieldLabel" }, "生图模型"),
+              h("span", { className: "SPR_fieldLabel" }, T("生图模型")),
               h(
                 "select",
                 {
@@ -8117,11 +9176,11 @@
                   onChange: (event) => void patch({ arkModel: event.target.value })
                 },
                 (config.arkModels ?? []).map((model) =>
-                  h("option", { key: model.id, value: model.id }, `${model.label}（${model.id}）`)
+                  h("option", { key: model.id, value: model.id }, T("{n0}（{n1}）", { n0: model.label, n1: model.id }))
                 ),
                 (config.arkModels ?? []).some((model) => model.id === config.arkModel)
                   ? null
-                  : h("option", { value: config.arkModel }, `自定义：${config.arkModel}`)
+                  : h("option", { value: config.arkModel }, T("自定义：{n0}", { n0: config.arkModel }))
               )
             ),
             /**
@@ -8134,7 +9193,7 @@
             h(
               "label",
               { className: "SPR_field" },
-              h("span", { className: "SPR_fieldLabel" }, "部件重绘模型"),
+              h("span", { className: "SPR_fieldLabel" }, T("部件重绘模型")),
               h(
                 "select",
                 {
@@ -8143,16 +9202,16 @@
                   value: config.arkRedrawModel ?? "",
                   onChange: (event) => void patch({ arkRedrawModel: event.target.value })
                 },
-                h("option", { value: "" }, "跟生图模型相同"),
+                h("option", { value: "" }, T("跟生图模型相同")),
                 (config.arkModels ?? []).map((model) =>
-                  h("option", { key: model.id, value: model.id }, `${model.label}（${model.id}）`)
+                  h("option", { key: model.id, value: model.id }, T("{n0}（{n1}）", { n0: model.label, n1: model.id }))
                 )
               )
             ),
             h(
               "label",
               { className: "SPR_field" },
-              h("span", { className: "SPR_fieldLabel" }, "输出尺寸"),
+              h("span", { className: "SPR_fieldLabel" }, T("输出尺寸")),
               h("input", {
                 className: "SPR_input",
                 value: config.arkSize,
@@ -8177,15 +9236,15 @@
               BusyBtn,
               {
                 busy: testing === "ark",
-                busyText: "正在生成测试图…",
+                busyText: T("正在生成测试图…"),
                 disabled: testing !== null || !config.arkApiKeySet,
                 onClick: async () => {
                   setTesting("ark");
-                  await run(() => api.testArk(), (value) => `连接正常：${value.model} 返回 ${value.bytes} 字节图片`);
+                  await run(() => api.testArk(), (value) => T("连接正常：{n0} 返回 {n1} 字节图片", { n0: value.model, n1: value.bytes }));
                   setTesting(null);
                 }
               },
-              "测试连接（会真实生成 1 张 1K 小图，产生少量费用）"
+              T("测试连接（会真实生成 1 张 1K 小图，产生少量费用）")
             )
           )
         ),
@@ -8193,25 +9252,25 @@
         h(
           "div",
           { className: "SPR_settingsGroup" },
-          h("h3", null, "MiniMax（图生视频）"),
-          h("p", null, "视频阶段使用图生视频（I2V）。建议用 MiniMax-Hailuo-02，镜头稳定性最好。"),
+          h("h3", null, T("MiniMax（图生视频）")),
+          h("p", null, T("视频阶段使用图生视频（I2V）。建议用 MiniMax-Hailuo-02，镜头稳定性最好。")),
           h(
             "div",
             { className: "SPR_keyRow" },
             h(
               "label",
               { className: "SPR_field" },
-              h("span", { className: "SPR_fieldLabel" }, `API Key ${config.minimaxApiKeySet ? `（已配置 ${config.minimaxApiKeyHint}）` : "（未配置）"}`),
+              h("span", { className: "SPR_fieldLabel" }, T("API Key {n0}", { n0: config.minimaxApiKeySet ? T("（已配置 {n0}）", { n0: config.minimaxApiKeyHint }) : T("（未配置）") })),
               h("input", {
                 className: "SPR_input",
                 type: "password",
-                placeholder: config.minimaxApiKeySet ? "留空表示不修改" : "粘贴 MiniMax API Key",
+                placeholder: config.minimaxApiKeySet ? T("留空表示不修改") : T("粘贴 MiniMax API Key"),
                 value: minimaxKey,
                 onChange: (event) => setMinimaxKey(event.target.value)
               })
             ),
-            h(Btn, { onClick: () => run(async () => { await api.saveConfig({ minimaxApiKey: minimaxKey }); setMinimaxKey(""); }, "MiniMax Key 已保存") }, "保存 Key"),
-            h(Btn, { disabled: !config.minimaxApiKeySet, onClick: () => run(() => api.saveConfig({ clearMinimaxApiKey: true }), "已清除 MiniMax Key") }, "清除")
+            h(Btn, { onClick: () => run(async () => { await api.saveConfig({ minimaxApiKey: minimaxKey }); setMinimaxKey(""); }, T("MiniMax Key 已保存")) }, T("保存 Key")),
+            h(Btn, { disabled: !config.minimaxApiKeySet, onClick: () => run(() => api.saveConfig({ clearMinimaxApiKey: true }), T("已清除 MiniMax Key")) }, T("清除"))
           ),
           h(
             "div",
@@ -8219,7 +9278,7 @@
             h(
               "label",
               { className: "SPR_field" },
-              h("span", { className: "SPR_fieldLabel" }, "视频模型"),
+              h("span", { className: "SPR_fieldLabel" }, T("视频模型")),
               h(
                 "select",
                 {
@@ -8228,11 +9287,11 @@
                   onChange: (event) => onModelChange(event.target.value)
                 },
                 (config.minimaxModels ?? []).map((model) =>
-                  h("option", { key: model.id, value: model.id }, `${model.label}（${model.id}）`)
+                  h("option", { key: model.id, value: model.id }, T("{n0}（{n1}）", { n0: model.label, n1: model.id }))
                 ),
                 (config.minimaxModels ?? []).some((model) => model.id === config.minimaxModel)
                   ? null
-                  : h("option", { value: config.minimaxModel }, `自定义：${config.minimaxModel}`)
+                  : h("option", { value: config.minimaxModel }, T("自定义：{n0}", { n0: config.minimaxModel }))
               )
             ),
             // 时长控件随模型切换：Hailuo 是 6/10 两档，H3 是 4~15 连续区间。
@@ -8240,7 +9299,7 @@
               ? h(
                   "label",
                   { className: "SPR_field" },
-                  h("span", { className: "SPR_fieldLabel" }, "时长（秒）"),
+                  h("span", { className: "SPR_fieldLabel" }, T("时长（秒）")),
                   h(
                     "select",
                     {
@@ -8249,12 +9308,12 @@
                       onChange: (event) => void patch({ minimaxDuration: Number(event.target.value) })
                     },
                     minimaxCaps.durations.map((seconds) =>
-                      h("option", { key: seconds, value: seconds }, `${seconds} 秒`)
+                      h("option", { key: seconds, value: seconds }, T("{n0} 秒", { n0: seconds }))
                     )
                   )
                 )
               : h(NumField, {
-                  label: `时长（秒，${minimaxCaps.durationMin}~${minimaxCaps.durationMax}）`,
+                  label: T("时长（秒，{n0}~{n1}）", { n0: minimaxCaps.durationMin, n1: minimaxCaps.durationMax }),
                   value: config.minimaxDuration,
                   min: minimaxCaps.durationMin,
                   max: minimaxCaps.durationMax,
@@ -8263,7 +9322,7 @@
             h(
               "label",
               { className: "SPR_field" },
-              h("span", { className: "SPR_fieldLabel" }, "分辨率"),
+              h("span", { className: "SPR_fieldLabel" }, T("分辨率")),
               h(
                 "select",
                 {
@@ -8281,8 +9340,8 @@
                 "span",
                 { className: "SPR_fieldLabel" },
                 usingCompshare
-                  ? "Base URL（优云智算版 H3 固定使用，无需修改）"
-                  : "Base URL（主机根，不含 /v1、/v2）"
+                  ? T("Base URL（优云智算版 H3 固定使用，无需修改）")
+                  : T("Base URL（主机根，不含 /v1、/v2）")
               ),
               h("input", {
                 className: "SPR_input",
@@ -8299,7 +9358,7 @@
               h(
                 "span",
                 { className: "SPR_fieldLabel" },
-                `当前协议：${minimaxCaps.protocol === "v2" ? `v2（${config.minimaxPathPrefix ?? ""}/v2/video_generation）` : `v1（${config.minimaxPathPrefix ?? ""}/v1/video_generation）`}`
+                T("当前协议：{n0}", { n0: minimaxCaps.protocol === "v2" ? T("v2（{n0}/v2/video_generation）", { n0: config.minimaxPathPrefix ?? "" }) : T("v1（{n0}/v1/video_generation）", { n0: config.minimaxPathPrefix ?? "" }) })
               )
             )
           ),
@@ -8310,15 +9369,15 @@
               BusyBtn,
               {
                 busy: testing === "minimax",
-                busyText: "正在校验…",
+                busyText: T("正在校验…"),
                 disabled: testing !== null || !config.minimaxApiKeySet,
                 onClick: async () => {
                   setTesting("minimax");
-                  await run(() => api.testMinimax(), (value) => `连接正常：${value.model}`);
+                  await run(() => api.testMinimax(), (value) => T("连接正常：{n0}", { n0: value.model }));
                   setTesting(null);
                 }
               },
-              "测试连接（只校验 Key，不产生费用）"
+              T("测试连接（只校验 Key，不产生费用）")
             )
           )
         ),
@@ -8326,55 +9385,55 @@
         h(
           "div",
           { className: "SPR_settingsGroup" },
-          h("h3", null, "新建项目的默认参数"),
-          h("p", null, "这些值会成为每个新项目的初始设置，之后可在项目里单独调整。"),
+          h("h3", null, T("新建项目的默认参数")),
+          h("p", null, T("这些值会成为每个新项目的初始设置，之后可在项目里单独调整。")),
           h(
             "div",
             { className: "SPR_fields" },
             h(NumField, {
-              label: "单格宽（px）",
+              label: T("单格宽（px）"),
               value: config.cellWidth,
               min: 16,
               max: 2048,
               onChange: (value) => void patch({ cellWidth: value })
             }),
             h(NumField, {
-              label: "单格高（px）",
+              label: T("单格高（px）"),
               value: config.cellHeight,
               min: 16,
               max: 2048,
               onChange: (value) => void patch({ cellHeight: value })
             }),
             h(NumField, {
-              label: "每段视频抽帧数",
+              label: T("每段视频抽帧数"),
               value: config.frameCount,
               min: 1,
               max: 64,
               onChange: (value) => void patch({ frameCount: value })
             }),
             h(NumField, {
-              label: "并发数",
+              label: T("并发数"),
               value: config.concurrency,
               min: 1,
               max: 8,
               onChange: (value) => void patch({ concurrency: value })
             }),
             h(NumField, {
-              label: "抠像下限",
+              label: T("抠像下限"),
               value: config.keyLow,
               min: 0,
               max: 255,
               onChange: (value) => void patch({ keyLow: value })
             }),
             h(NumField, {
-              label: "抠像上限",
+              label: T("抠像上限"),
               value: config.keyHigh,
               min: 1,
               max: 255,
               onChange: (value) => void patch({ keyHigh: value })
             }),
             h(NumField, {
-              label: "去绿溢出",
+              label: T("去绿溢出"),
               value: config.despill,
               min: 0,
               max: 1,
@@ -8382,35 +9441,35 @@
               onChange: (value) => void patch({ despill: value })
             }),
             h(NumField, {
-              label: "边缘收缩（px）",
+              label: T("边缘收缩（px）"),
               value: config.edgeShrink,
               min: 0,
               max: 8,
               onChange: (value) => void patch({ edgeShrink: value })
             }),
             h(NumField, {
-              label: "背景分割容差（0 = 只认绿色）",
+              label: T("背景分割容差（0 = 只认绿色）"),
               value: config.bgTolerance,
               min: 0,
               max: 160,
               onChange: (value) => void patch({ bgTolerance: value })
             }),
             h(NumField, {
-              label: "抽帧工作尺寸（长边 px）",
+              label: T("抽帧工作尺寸（长边 px）"),
               value: config.workingLongEdge,
               min: 128,
               max: 2048,
               onChange: (value) => void patch({ workingLongEdge: value })
             }),
             h(NumField, {
-              label: "像素块边长（0/1 = 关闭）",
+              label: T("像素块边长（0/1 = 关闭）"),
               value: config.pixelSize,
               min: 0,
               max: 32,
               onChange: (value) => void patch({ pixelSize: value })
             }),
             h(NumField, {
-              label: "自动裁剪填充比例",
+              label: T("自动裁剪填充比例"),
               value: config.fillRatio,
               min: 0.5,
               max: 1,
@@ -8418,7 +9477,7 @@
               onChange: (value) => void patch({ fillRatio: value })
             }),
             h(NumField, {
-              label: "底部留白（px）",
+              label: T("底部留白（px）"),
               value: config.bottomMargin,
               min: 0,
               max: 64,
@@ -8430,17 +9489,17 @@
         h(
           "div",
           { className: "SPR_settingsGroup" },
-          h("h3", null, "数据位置"),
+          h("h3", null, T("数据位置")),
           h(
             "p",
             null,
-            "所有项目（源图、绿幕图、视频、序列帧、整图）都保存在：" ,
+            T("所有项目（源图、绿幕图、视频、序列帧、整图）都保存在：") ,
             h("code", null, config.dataRoot)
           ),
           h(
             "div",
             { className: "SPR_toolbar" },
-            h(Btn, { onClick: () => void run(() => api.saveConfig({}), "已刷新") }, "重新读取配置")
+            h(Btn, { onClick: () => void run(() => api.saveConfig({}), T("已刷新")) }, T("重新读取配置"))
           )
         )
       );
@@ -8450,6 +9509,9 @@
     const inject = ["slots", "remote"];
 
     function apply(ctx) {
+      // 界面文案跟随 DSH 的语言设置；服务不可用时安静地退回中文原文。
+      attachI18n(ctx);
+
       // 样式随 fiber 生命周期注入/移除。
       ctx.effect(() => {
         if (typeof document === "undefined") return () => {};
@@ -8467,11 +9529,11 @@
       const call = async (method, payload?: any) => {
         await mount;
         const remote = ctx.get(`remote.${SERVICE}`);
-        if (remote === undefined) throw new Error("gameStudio 远程服务不可用，请确认插件已启用");
+        if (remote === undefined) throw new Error(T("gameStudio 远程服务不可用，请确认插件已启用"));
         const result = payload === undefined ? await remote[method]() : await remote[method](payload);
         if (result === null || typeof result !== "object" || result.ok !== true) {
           const detail = result?.error;
-          throw new Error(detail === undefined ? `${method} 调用失败` : `${detail.code ?? "ERROR"}: ${detail.message ?? ""}`);
+          throw new Error(detail === undefined ? T("{n0} 调用失败", { n0: method }) : `${detail.code ?? "ERROR"}: ${detail.message ?? ""}`);
         }
         return result.value;
       };
@@ -8593,14 +9655,14 @@
           intentListeners.clear();
           pendingIntent = null;
         };
-      }, `${PACKAGE}: 深链接拦截`);
+      }, T("{n0}: 深链接拦截", { n0: PACKAGE }));
 
       // 上报 origin（宿主据此拼可点链接），并处理「直接以深链接打开」的兜底路径。
       ctx.effect(() => {
         reportClientOrigin(api);
         consumeUrlIntent(ctx);
         return () => {};
-      }, `${PACKAGE}: 深链接引导`);
+      }, T("{n0}: 深链接引导", { n0: PACKAGE }));
 
       // 侧栏全局面板图标；id 与 main 的 key 必须一致，点击即切到工作台。
       ctx.slots.inject("sidebar.panellist", () =>
@@ -8609,7 +9671,7 @@
             name: "sidebar.panellist",
             id: GAME_STUDIO_PANEL_ID,
             order: 40,
-            label: () => "游戏素材大师"
+            label: () => T("游戏素材大师")
           },
           StudioGlyph
         )
@@ -8632,7 +9694,7 @@
             name: "settings.section",
             id: GAME_STUDIO_PANEL_ID,
             order: 18,
-            label: () => "游戏素材大师",
+            label: () => T("游戏素材大师"),
             inject: () => ({ api })
           },
           ConfigSection

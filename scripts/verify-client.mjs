@@ -730,7 +730,12 @@ function checkInputAndZoomContracts(text, label) {
       /onChange: \(event\) => setText\(event\.target\.value\)/.test(text) &&
       !/const next = Number\(event\.target\.value\)/.test(text)
   );
-  check(`${label}：有双击看大图的组件`, text.includes("function ZoomableImage") && text.includes('title: "双击看大图"'));
+  // 文案已经i18n化：源码里是 `title: T("双击看大图")`，但保留未包装的写法也接受
+  // （词条表本身、以及将来可能不做翻译的位置）。
+  check(
+    `${label}：有双击看大图的组件`,
+    text.includes("function ZoomableImage") && /title: (?:T\()?"双击看大图"/.test(text)
+  );
   check(
     `${label}：大图窗口有关闭按钮 + Esc + 点背景关闭`,
     /className: "SPR_zoomClose"/.test(text) &&
