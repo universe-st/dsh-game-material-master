@@ -438,6 +438,17 @@ const CALL_DESCRIPTION = [
   "  runRigBones({jobId})【本地生成骨架与动画，同时产出 Spine 4.2 skeleton.json 与 DragonBones 5.5 skeleton_ske.json】/",
   "  runRigAtlas({jobId})【本地打包图集，同时产出 Spine .atlas 与 DragonBones _tex.json】",
   "  ★ 自动摆位不准时用 setRigLayoutHints：先 read_image 看 getRigJob 返回的 partsMontagePath（部件按 partsOrder 顺序排列）",
+  "地图地块生成（模块五）：listTileProjects() / createTileProject({name,style?,lang?,settings?}) / getTileProject({projectId,lang?}) /",
+  "  deleteTileProject({projectId}) / saveTileProject({projectId,lang?,name?,style?,items?,settings?,resetItemsToDefault?})【改 style / items / settings 会让已生成的地块作废，重跑要花钱】/",
+  "  runTileTemplate({projectId})【① 本地渲染 2:1 等距菱形模板，免费】/",
+  "  runTileItems({projectId,keys?})【★花钱：按清单逐类生成，每个变体一次 Seedream 调用】/ runTileItem({projectId,key,variant?})【★花钱：只重跑某一张】/",
+  "  setTileApproved({projectId,key?,variant?,approved})【③ 验收，只打勾不作废任何东西】/",
+  "  runTileMap({projectId,rows?,cols?,seed?,fill?,decorDensity?})【④ 本地铺图，免费，同种子 + 同布局 = 逐像素一致】/",
+  "  saveTileMapCells({projectId,cells?,decor?,buildings?,seed?})【手动改布局，不作废已花钱的地块】/",
+  "  runTileExport({projectId})【⑤ 导出地块包 + 地图 PNG + 布局 JSON，免费】/ cancelTileJob({projectId}) / revealTileProject({projectId})",
+  "  ★ 几何交给代码、内容交给 AI：模板由本机渲染，AI 只填菱形内部；生成后本地量一次、仿射对齐回标准菱形。",
+  "    生成的几何报告看 game_material_review 返回的 variants[].geomMode —— measured 是量测成功，template 是回退模板几何。",
+  "    出现 template 多半是模型不对：必须用 Seedream 5.0 系列；4.0 会把 2:1 等距菱形画成近正方形（实测比例 1.058）。",
   "说明：key 是方向英文字面量（front/back/downLeft/downRight/upLeft/upRight/left/right）；data 是原始文件字节的 base64（不带 data: 前缀）；",
   "生成类方法立刻返回 {started:true}，接着用 game_material_wait 等它跑完，再用 game_material_review 拿验收包。",
   "调用结果里若带 openUrl，请把它作为 Markdown 链接贴给用户，用户点击即切换到插件对应页面。"
@@ -541,13 +552,16 @@ export function registerStudioTools(host: StudioToolHost, gateway: GameStudioGat
       async execute(args: any) {
         const id = asString(args?.id);
         if (id === "") {
-          const [projects, images, sequences, rigs] = await Promise.all([listProjects(), listImageJobs(), listSequenceJobs(), listRigJobs()]);
+          const [projects, images, sequences, rigs, tiles] = await Promise.all([
+            listProjects(), listImageJobs(), listSequenceJobs(), listRigJobs(), listTileProjects()
+          ]);
           return {
             module: moduleOf(args?.module) ?? null,
             projects,
             imageJobs: images,
             sequenceJobs: sequences,
             rigJobs: rigs,
+            tileProjects: tiles,
             links: {
               sprite: buildOpenLink({ module: "sprite" }),
               image: buildOpenLink({ module: "image" }),
@@ -558,6 +572,9 @@ export function registerStudioTools(host: StudioToolHost, gateway: GameStudioGat
             hint: "用 game_material_status({module,id}) 看某个目标的细节；八方向图的四步是 images → videos → frames → sheet，地图地块是 template → generate → review → map。"
           };
         }
+        // ⚠️ 这里**不能**再按 module 短路：`status({module:'tile', id})` 也走到这里，
+        // 短路会把「带 id 的查询」变成「列清单」，assetBase / 几何报告全丢。
+        // 只给了 module、没给 id 的情况，上面的 `id === ""` 分支已经覆盖了。
         const module = resolveTarget(args?.module, id);
         const snapshot = await snapshotOf(module, id);
         const stage = typeof args?.stage === "string" ? args.stage : undefined;
@@ -598,7 +615,11 @@ export function registerStudioTools(host: StudioToolHost, gateway: GameStudioGat
         const config = await (gateway as any).getConfig();
         // 已有目标时先读它的真实状态：源图 / 提示词 / 素材已经在的项目里就不再问一遍。
         const target = id === "" ? undefined : await snapshotOf(module, id);
-        return intakeFor(module, id, told, config, target);
+        // 带一条深链接：用户点一下就能切到插件对应页面（新建时只带 module）。
+        return {
+          ...intakeFor(module, id, told, config, target),
+          ...openInfo(intentOf(module, id), "点开可以先看界面，再决定参数")
+        };
       }
     });
 
@@ -739,6 +760,7 @@ export function registerStudioTools(host: StudioToolHost, gateway: GameStudioGat
         const direction = typeof args?.direction === "string" ? args.direction : undefined;
         const index = args?.index === undefined ? undefined : clampInt(args.index, 0, 0, 99);
         const step = typeof args?.step === "string" ? args.step : undefined;
+        const key = typeof args?.key === "string" && args.key !== "" ? args.key : undefined;
 
         const packet: Record<string, any> = {
           module,
@@ -771,7 +793,42 @@ export function registerStudioTools(host: StudioToolHost, gateway: GameStudioGat
           if (steps.length === 0) throw new Error(`未知步骤：${step}`);
           packet.steps = steps;
           packet.nextActions = sequenceNextActions(snapshot);
+        } else if (module === "tile") {
+          // ⚠️ 地图地块的 `stages` 是**对象**（{template, generate, review, map, export}），
+          // 不是数组。之前它掉进了 `else`（骨骼动画）分支，那边无条件当成数组用
+          // `.filter()` —— 于是 game_material_review 对 tile 直接抛
+          // `snapshot.stages.filter is not a function`。真机验证才发现。
+          const tileStages = snapshot.stages as Record<string, any>;
+          const stageKeys = Object.keys(tileStages ?? {});
+          if (stage !== undefined && !stageKeys.includes(stage)) {
+            throw new Error(`未知阶段：${stage}（可选：${stageKeys.join(" / ")}）`);
+          }
+          packet.stages = stageKeys
+            .filter((key) => stage === undefined || key === stage)
+            .map((key) => ({ stage: key, ...tileStages[key] }));
+          // 只要某个地块 / 变体：过滤 items，方便「就重跑这一张」的判断
+          packet.items = (snapshot.items as any[]).filter((item) => key === undefined || item.key === key);
+          if (packet.items.length === 0) throw new Error(`找不到地块：${key}`);
+          packet.progress = snapshot.progress;
+          packet.map = snapshot.map;
+          packet.style = snapshot.style;
+          packet.settings = snapshot.settings;
+          // 给出「下一步该做什么」：几何回退过的、失败的、没生成的，都要点名
+          const fallback = packet.items.flatMap((item: any) =>
+            item.variants.filter((v: any) => v.geomMode === "template").map((v: any) => `${item.key} v${v.index + 1}`));
+          const failed = packet.items.flatMap((item: any) =>
+            item.variants.filter((v: any) => v.error !== undefined).map((v: any) => `${item.key} v${v.index + 1}：${v.error}`));
+          const missing = packet.items.filter((item: any) => item.variants.length === 0).map((item: any) => item.key);
+          packet.nextActions = {
+            missing,
+            fallback,
+            failed,
+            hint: fallback.length > 0
+              ? "这些地块没量出 2:1 菱形，已按模板几何回退。多半是模型不对——请确认生图模型是 Seedream 5.0 系列（4.0 会把等距菱形画成近正方形），然后只重跑这几张：runTileItem({projectId, key, variant})。"
+              : "几何都正常。可以继续验收、拼图（runTileMap）或导出（runTileExport）。"
+          };
         } else {
+          // 骨骼动画（模块四）
           const stages = (snapshot.stages as any[]).filter((entry) => stage === undefined || entry.stage === stage);
           if (stages.length === 0) throw new Error(`未知阶段：${stage}`);
           packet.stages = stages;

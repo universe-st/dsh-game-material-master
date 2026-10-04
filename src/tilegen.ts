@@ -982,7 +982,7 @@ export function tileSnapshot(project: TileProject, origin: string) {
   return {
     id: project.id,
     name: project.name,
-    /** 界面拼产物 URL 用（宿主与浏览器半区可能不同 origin，所以由宿主给出）。 */
+    /** 界面 / 模型拼产物 URL 用。工具侧产物已经是绝对 URL，这里给基址留一份兜底。 */
     assetBase,
     style: project.style,
     settings: project.settings,

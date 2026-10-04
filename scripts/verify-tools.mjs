@@ -36,6 +36,7 @@ const plugin = await import("../lib/index.js");
 const links = await import("../lib/links.js");
 const { METHODS } = await import("../lib/wire.js");
 const { encodePng } = await import("../lib/png.js");
+const { moduleForId } = await import("../lib/tools.js");
 
 const failures = [];
 let checks = 0;
@@ -610,6 +611,62 @@ async function main() {
     check(`骨骼动画的三层修改方法都写进了工具描述（共 ${callDescription.length} 字符）`, missing.length === 0, missing.join("、"));
     check("提示词说明「重跑不会抹掉人工改动」", /互不覆盖|不会覆盖|不会被覆盖/.test(prompt), "");
     check("提示词说明构建失败要先读 error", /导出前校验|构建失败/.test(prompt), "");
+  }
+
+  // ── 11. 模块五在**对话调用面**上真的能用 ────────────────────────────────
+  //
+  // 这一节补的是真机验证暴露出来的盲区：verify-tools 原来只比对模块名，
+  // 一个 tile 工具都没真调过。而 intake 里用了一批**中文属性名**
+  // （`known.几何由代码保证` 之类）—— 那种写法一旦有非法标识符字符就会静默
+  // 变成运行时问题（`②` 就真的编译不过）。所以这里真调一遍。
+  {
+    const intakeTool = (captured.tools ?? []).find((entry) => entry?.name === "game_material_intake");
+    const statusTool = (captured.tools ?? []).find((entry) => entry?.name === "game_material_status");
+    const reviewTool = (captured.tools ?? []).find((entry) => entry?.name === "game_material_review");
+    const callTool = (captured.tools ?? []).find((entry) => entry?.name === "game_material_call");
+    check("拿到了 intake / status / review / call 四个工具",
+      [intakeTool, statusTool, reviewTool, callTool].every((t) => typeof t?.execute === "function"));
+
+    // ① 先建一个真实的地图地块项目（走真实网关，数据落在临时 DSH_HOME）
+    const created = await studio.createTileProject({ name: "对话面验证", lang: "zh" });
+    const tileId = created.id;
+    try {
+      check("tile 项目 id 被判为 tile 模块", moduleForId(tileId) === "tile", moduleForId(tileId));
+
+      // ② intake：必须能渲染出来，且把「五个阶段」与「只有第②步花钱」讲清楚
+      const intake = await intakeTool.execute({ module: "tile", id: tileId }, {});
+      const intakeText = typeof intake === "string" ? intake : JSON.stringify(intake);
+      check("intake 对 tile 不抛异常且返回了内容", intakeText.length > 50, `${intakeText.length} 字符`);
+      check("intake 讲清了五个阶段", /模板.*生成.*验收.*拼.*导出/s.test(intakeText.replace(/\\n/g, " ")) || /五个阶段/.test(intakeText));
+      check("intake 点明了只有第②步花钱", /只有一个?钱|计费|花钱/.test(intakeText));
+      check("intake 问了画风与地块清单", /画风/.test(intakeText) && /地块/.test(intakeText));
+      check("intake 带上了 openUrl 深链接", /openUrl/.test(intakeText) && /module=tile/.test(intakeText));
+
+      // ③ status：不给 id 时要列出 tile 项目；给 id 时要回几何与产物 URL
+      const listed = await statusTool.execute({ module: "tile" }, {});
+      check("status 不给 id 时列出 tile 项目", JSON.stringify(listed).includes(tileId));
+
+      const detail = await statusTool.execute({ module: "tile", id: tileId }, {});
+      const detailText = JSON.stringify(detail);
+      check("status 给了 id 时返回该 project 的快照", detailText.includes(tileId) || detail?.id === tileId);
+      check("status 的快照里有 assetBase（界面据此拼产物 URL）",
+        detailText.includes("tile-assets") || detail?.assetBase !== undefined);
+
+      // ④ review：没产物时也要给出可读的结论，而不是崩
+      const review = await reviewTool.execute({ module: "tile", id: tileId }, {});
+      const reviewText = JSON.stringify(review);
+      check("review 对空项目不抛异常", reviewText.length > 20, `${reviewText.length} 字符`);
+      check("review 带了 openUrl", reviewText.includes("openUrl") || typeof review?.openUrl === "string");
+
+      // ⑤ call：tile 的远程方法要通过 call 通道可达（枚举里有它）
+      const callDescription = JSON.stringify(callTool?.description ?? "");
+      const tileMethods = ["listTileProjects", "createTileProject", "getTileProject", "runTileTemplate",
+        "runTileItems", "setTileApproved", "runTileMap", "runTileExport"];
+      const missingTile = tileMethods.filter((m) => !callDescription.includes(m));
+      check("地图地块的远程方法都写进了 game_material_call 的描述", missingTile.length === 0, missingTile.join("、"));
+    } finally {
+      await studio.deleteTileProject({ projectId: tileId });
+    }
   }
 
   await rm(HOME, { recursive: true, force: true });
