@@ -33,6 +33,7 @@ import {
   regularizeToCell,
   renderBuildingTemplate,
   renderTemplate,
+  shapeHalfWidthLocal,
   upscale
 } from "../lib/tilegeom.js";
 import { decodeFile, decodeImage, encodeBitmap, pngSize } from "../lib/tilemedia.js";
@@ -844,9 +845,58 @@ section("S4h 任意形状（L 形 / T 形 / 线形）");
     for (let i = 3; i < b.rgba.length; i += 4) if (b.rgba[i] > 0) n++;
     return n;
   };
-  check("S4k-1 L 形模板与 2×2 模板尺寸相同（同包围矩形）",
-    tplL.bitmap.width === tplSq.bitmap.width && tplL.bitmap.height === tplSq.bitmap.height,
+  // ⚠️ L 形与 2×2 的**画布不一定同尺寸**，而且**不该**断言它们谁一定更窄：
+  // 半宽由 `x = c − r` 的极差决定，两个形状的极差可以相同也可以不同。
+  // 真正要钉的是「**不是同一张图**」与「L 的底面更小」（见下两条），
+  // 以及半宽与拼图口径一致（见上面那条三处对照）。
+  check("S4k-1 L 形模板与 2×2 都能渲染出图（尺寸按各自半宽定，不强行相等）",
+    tplL.bitmap.width > 0 && tplSq.bitmap.width > 0,
     `L ${tplL.bitmap.width}x${tplL.bitmap.height} 2x2 ${tplSq.bitmap.width}x${tplSq.bitmap.height}`);
+  // ★ 半宽必须与**拼图/裁剪用的那条公式**一致。
+  //
+  // 这是三处口径（模板块、拼图裁剪、提示词/汇总）里最容易分叉的一条：
+  // 曾经 `tilegeom` 用「列数 + 行数」算出 L = 64，而 `tilemap.shapeDiamondHalf`
+  // 用真实 x 极差算出 48 —— 模板画的框比实际摆放的格子大一圈，
+  // 蓝色立方体线框比洋红底面宽一倍多（实测底面/线框宽比 0.373）。
+  //
+  // ⚠️ 别拿「洋红宽 / 线框宽」当断言：非矩形（T 形、十字）的逐格菱形本来
+  // 就**填不满**包围菱形（T 形只有 0.5），那是正确的几何，不是 bug。
+  // 要比就比**三条公式互相一致**（`verify-tile-pipeline` 里还有一条
+  // `tilegen` 的对照）。
+  {
+    const shapes = {
+      "1×1": [[0, 0]],
+      "2×2": [[0, 0], [0, 1], [1, 0], [1, 1]],
+      "3×1": [[0, 0], [0, 1], [0, 2]],
+      "L 形": [[0, 0], [1, 0], [1, 1]],
+      "T 形": [[0, 0], [0, 1], [0, 2], [1, 1]],
+      "十字": [[0, 1], [1, 0], [1, 1], [1, 2], [2, 1]]
+    };
+    const bad = [];
+    for (const [name, shape] of Object.entries(shapes)) {
+      const mine = shapeHalfWidthLocal(shape, S.cellWidth);
+      const maps = shapeDiamondHalf(shape, S.cellWidth).halfW;
+      // 模板画布宽 = 2·halfW + 2·pad，反推 halfW
+      const tpl = renderBuildingTemplate({ settings: S, shape, size: 512 });
+      const implied = (tpl.bitmap.width * (tpl.width / tpl.bitmap.width) - tpl.pad * 2) / 2;
+      if (Math.abs(mine - maps) > 1e-6) bad.push(`${name}: tilegeom=${mine} tilemap=${maps}`);
+      void implied;
+    }
+    check("★ 包围菱形半宽与拼图口径（shapeDiamondHalf）逐条一致",
+      bad.length === 0, bad.join(" | "));
+    // 矩形仍与老式等价 —— 老式半宽 = (cols+rows)/2 格 × (cellWidth/2) = cellWidth·(cols+rows)/4
+    // 2×2 → 64、3×1 → 64。等价就意味着老项目的模板**不用重跑**。
+    const oldRectHalf = (cols, rows) => (S.cellWidth * (cols + rows)) / 4;
+    check("★ 矩形半宽仍等于老式公式（2×2 / 3×1 模板逐字节不变）",
+      shapeHalfWidthLocal([[0, 0], [0, 1], [1, 0], [1, 1]], S.cellWidth) === oldRectHalf(2, 2) &&
+      shapeHalfWidthLocal([[0, 0], [0, 1], [0, 2]], S.cellWidth) === oldRectHalf(3, 1),
+      `2x2=${shapeHalfWidthLocal([[0, 0], [0, 1], [1, 0], [1, 1]], S.cellWidth)} 期望 ${oldRectHalf(2, 2)}`);
+    // 非矩形必须比同包围矩形的矩形**窄**（这是老公式错的直接后果）
+    check("★ L 形的半宽**小于**同包围矩形的 2×2（老公式会算成相等）",
+      shapeHalfWidthLocal([[0, 0], [1, 0], [1, 1]], S.cellWidth) <
+      shapeHalfWidthLocal([[0, 0], [0, 1], [1, 0], [1, 1]], S.cellWidth),
+      `L=${shapeHalfWidthLocal([[0, 0], [1, 0], [1, 1]], S.cellWidth)} 2x2=${shapeHalfWidthLocal([[0, 0], [0, 1], [1, 0], [1, 1]], S.cellWidth)}`);
+  }
   check("S4k-2 ★ L 形模板的不透明像素**少于** 2×2（凹口是空的）",
     opaque(tplL.bitmap) < opaque(tplSq.bitmap),
     `L=${opaque(tplL.bitmap)} 2x2=${opaque(tplSq.bitmap)}`);

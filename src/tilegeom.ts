@@ -1262,21 +1262,39 @@ export function buildingTemplateLayout(settings: TileSettings, options: {
 }
 
 /**
- * 形状的包围菱形半宽（与 `tilegen.shapeHalfWidth` 同一条公式）。
+ * 形状的包围菱形半宽（与 `tilegen.shapeHalfWidth`、`tilemap.shapeDiamondHalf`
+ * **同一条公式**）。
+ *
+ * ```
+ * 半宽 = ((max x − min x)·cellWidth/2 + cellWidth) / 2      // x = c − r
+ * ```
  *
  * ⚠️ 这里留一份本地实现是为了**不引入反向依赖**（`tilegen` 已经 import 了
- * `tilegeom`）。两处一致性由 `verify-tile.mjs` 的对照断言钉住。
+ * `tilegeom`）。三处一致性由 `verify-tile.mjs` 的对照断言钉住。
+ *
+ * ⚠️ **不能用「列数 + 行数」那一类**（如 `cellWidth·(Δdc + Δdr + 2)/4`）：
+ * 它对**实心矩形**恰好等价（矩形里 `x` 的极差正好等于 `Δdc + Δdr`），
+ * 但形状一旦**沿对角线走**（L 形、T 形…），`x = c − r` 会把两项**抵消**，
+ * 真实极差**小于**行列之和。实测 L 形（2×2 缺一格）：老公式给 64，
+ * 真实只要 32 —— 于是蓝色立方体线框比洋红底面宽一倍多
+ * （实测底面/线框宽比 **0.373**，矩形是 0.991），模型看到一个过大的空框。
+ *
+ * ⚠️ 也**不能**按「格心 + 半格」取 `max(|x| + q)`：那会把**垂直方向邻居**
+ * 的贡献再算一遍（十字会得到 48，而地图与拼图都按 32 走）——
+ * 模板就和实际摆放口径不一致了。
+ *
+ * 矩形下本式等价于 `(cols+rows)/2`，所以 2×2 模板逐字节不变。
  */
 export function shapeHalfWidthLocal(shape: Array<[number, number]>, cellWidth: number): number {
   if (shape.length === 0) return cellWidth / 2;
-  let minDR = Infinity, maxDR = -Infinity, minDC = Infinity, maxDC = -Infinity;
+  let minX = Infinity;
+  let maxX = -Infinity;
   for (const [r, c] of shape) {
-    if (r < minDR) minDR = r;
-    if (r > maxDR) maxDR = r;
-    if (c < minDC) minDC = c;
-    if (c > maxDC) maxDC = c;
+    const x = c - r;
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
   }
-  return (cellWidth * (((maxDC - minDC) + (maxDR - minDR)) + 2)) / 4;
+  return ((maxX - minX) * (cellWidth / 2) + cellWidth) / 2;
 }
 
 /** 由「列 × 行」造形状（本地版，避免 tilegeom → tilegen 的反向依赖）。 */

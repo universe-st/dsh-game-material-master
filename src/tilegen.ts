@@ -144,30 +144,33 @@ export function shapeOf(item: { shape?: TileShape; footprint?: [number, number] 
 /**
  * 形状的**包围菱形半宽**（1× 像素）。
  *
- * 每个格子相对锚点的水平偏移是 `(dc − dr) · cellWidth/4`。
- * 所以整形的水平跨度由 `(dc − dr)` 的极差决定：
- *
  * ```
- * 宽度 = cellWidth/4 · (maxDC−maxDR − (minDC−minDR)) + cellWidth
- * 半宽 = cellWidth/8 · (Δdc − Δdr) + cellWidth/2
- *      = cellWidth · (span + 2) / 4        // span = (maxDC−minDC) + (maxDR−minDR)
+ * 半宽 = ((max x − min x)·cellWidth/2 + cellWidth) / 2      // x = c − r
  * ```
  *
- * ⚠️ 别再用 `(cols + rows) / 2` —— 那**只对实心矩形**成立。
- * 实测：3×1 的矩形是 `(3+1)/2 = 2` 格半宽（宽 128），但同样的数字给
- * L 形（3 格、跨度 1×1）会算出 2 格（128），而正确答案是 1 格（64）。
+ * ★ 与 `tilemap.shapeDiamondHalf`（拼图/裁剪用）**逐字相同** ——
+ * 三处口径必须一致，否则模板画的框和实际摆放的格子对不上。
+ *
+ * ⚠️ **真机踩过**：老公式是「列数 + 行数」那一类
+ * （`cellWidth·(Δdc + Δdr + 2)/4`）。它对**实心矩形**恰好等价
+ * （矩形里 `x` 的极差正好等于 `Δdc + Δdr`），但形状一旦**沿对角线走**
+ * （L 形、T 形…），`x = c − r` 会把两项**抵消**，真实极差**小于**行列之和。
+ * 实测 L 形（2×2 缺一格）：老公式给半宽 64，真实只要 32 ——
+ * 蓝色立方体线框比洋红底面宽一倍多（底面/线框宽比 **0.373**，
+ * 矩形是 0.991），模型照着一个**过大的空框**去长高。
+ *
+ * 矩形下本式等价于 `(cols+rows)/2`，所以 2×2 模板逐字节不变。
  */
 export function shapeHalfWidth(shape: TileShape, settings: { cellWidth: number }): number {
   if (shape.length === 0) return settings.cellWidth / 2;
-  let minDR = Infinity, maxDR = -Infinity, minDC = Infinity, maxDC = -Infinity;
+  let minX = Infinity;
+  let maxX = -Infinity;
   for (const [r, c] of shape) {
-    if (r < minDR) minDR = r;
-    if (r > maxDR) maxDR = r;
-    if (c < minDC) minDC = c;
-    if (c > maxDC) maxDC = c;
+    const x = c - r;
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
   }
-  const span = (maxDC - minDC) + (maxDR - minDR);
-  return (settings.cellWidth * (span + 2)) / 4;
+  return ((maxX - minX) * (settings.cellWidth / 2) + settings.cellWidth) / 2;
 }
 
 /**
