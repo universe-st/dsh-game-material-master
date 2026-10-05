@@ -542,15 +542,37 @@ section("五个阶段都能渲染（每个都不能白屏）");
 section("① 模板阶段");
 // ═══════════════════════════════════════════════════════════════════════════
 {
-  const { tree } = renderTile(makeProject(), { stage: "template" });
+  // ⚠️ 模板图必须**按宿主列出来的文件名**渲染（`project.templates`），界面不写死。
+  // 写死 `cell.png` + `grid2x2.png` 会把 3×1 / L 形的模板藏起来 ——
+  // 用户看到的就是「只支持 1×1 和 2×2」。
+  const withTemplates = makeProject({
+    templates: ["cell.png", "grid2x2.png", "grid3x1.png", "shape-0-0_1-0_1-1.png"]
+  });
+  const { tree } = renderTile(withTemplates, { stage: "template" });
   check("有「生成模板（免费）」按钮", allText(tree).includes("生成模板（免费）"));
   check("明确标注不花钱", allText(tree).includes("本地计算，不花钱"));
+  const tiles = byClassPart(tree, "SPR_tileAsset").filter((n) => n.props["data-template"] !== undefined);
+  check("★ 按宿主给的清单渲染模板图（几个文件就几张）", tiles.length === 4, `${tiles.length} 张`);
+  check("★ 3×1 的模板也在列表里（不是只显示 1×1 和 2×2）",
+    tiles.some((n) => n.props["data-template"] === "grid3x1.png"),
+    tiles.map((n) => n.props["data-template"]).join(", "));
+  check("★ 异形模板也在列表里（L 形带形状哈希名）",
+    tiles.some((n) => n.props["data-template"] === "shape-0-0_1-0_1-1.png"),
+    tiles.map((n) => n.props["data-template"]).join(", "));
   const images = byType(tree, "img");
-  check("展示两张模板图（单格 + 2×2 网格）", images.length >= 2, `${images.length} 张`);
   check("模板图走 assetBase 相对路径",
     images.some((node) => String(node.props.src).startsWith("/dsh-game-material-master/tile-assets/tabc123/template/")),
     images.map((n) => n.props.src).join(", "));
+  check("单格模板有中文说明", allText(tree).includes("单格模板（1×1 地形用）"));
+  check("3×1 模板的说明按文件名反推", allText(tree).includes("3×1 建筑模板"));
+  check("异形模板的说明列出格子坐标", allText(tree).includes("异形模板"), allText(tree).slice(-200));
   check("空闲时没有遮罩", overlays(tree).length === 0, `${overlays(tree).length} 个`);
+  // 还没跑过 ① 时给空态提示，且不能崩
+  const empty = renderTile(makeProject({ templates: [] }), { stage: "template" }).tree;
+  check("没有模板时给空态提示（不是白屏）",
+    allText(empty).includes("还没有模板") &&
+    byClassPart(empty, "SPR_tileAsset").filter((n) => n.props["data-template"] !== undefined).length === 0,
+    allText(empty).slice(-120));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1251,23 +1273,28 @@ section("④ 拼图阶段：手动编辑布局");
   // 这里踩过两次：
   //   · 模板图一律渲染，`onError` 时把图 `display:none` 掉 —— 进面板时模板还没生成、
   //     必然先 404 一次，于是**永远不再显示**（浏览器不会重跑 onError）；
-  //   · 不按阶段状态 gate，生成完了也不一定重新渲染。
-  // 现在改成「按 stages.template.status 决定渲不渲染」，所以两条都要断言。
+  //   · 不按宿主给的清单渲染（写死两个文件名），3×1 / L 形的模板被藏起来。
+  // 现在改成「按 `project.templates` 渲不渲染、渲染几张」，所以两条都要断言。
   {
-    const notReady = renderTile(makeProject({ stages: { ...makeProject().stages, template: { status: "idle" } } }), { stage: "template" }).tree;
+    const notReady = renderTile(makeProject({ templates: [] }), { stage: "template" }).tree;
     const notReadyText = allText(notReady);
     check("模板没生成时不渲染模板图（避免一次 404 之后永久隐藏）",
-      collect(notReady, (n) => n.type === "img" && String(n.props?.alt ?? "").startsWith("cell")).length === 0);
+      byClassPart(notReady, "SPR_tileAsset").filter((n) => n.props["data-template"] !== undefined).length === 0);
     check("模板没生成时给一句可操作的提示",
       notReadyText.includes("还没有模板") && notReadyText.includes("生成模板"),
       notReadyText.slice(0, 200));
 
-    const ready = renderTile(makeProject({ stages: { ...makeProject().stages, template: { status: "done" } } }), { stage: "template" }).tree;    const imgs = collect(ready, (n) => n.type === "img");
-    check("模板生成后渲染两张模板图", imgs.length === 2, `${imgs.length} 张`);
+    const ready = renderTile(makeProject({
+      templates: ["cell.png", "grid2x2.png", "grid3x1.png"]
+    }), { stage: "template" }).tree;
+    const tiles = byClassPart(ready, "SPR_tileAsset").filter((n) => n.props["data-template"] !== undefined);
+    check("模板生成后按清单渲染（3 个文件 → 3 张）", tiles.length === 3, `${tiles.length} 张`);
+    const imgs = collect(ready, (n) => n.type === "img");
     check("模板图的 src 指向 template/",
-      imgs.every((n) => String(n.props.src).includes("/template/")),
+      imgs.length > 0 && imgs.every((n) => String(n.props.src).includes("/template/")),
       imgs.map((n) => n.props.src).join(" | "));
-    check("建筑模板那格写了「2×2 建筑模板」", allText(ready).includes("2×2 建筑模板"), allText(ready).slice(0, 200));
+    check("建筑模板那格的说明由文件名反推（2×2 → 「2×2 建筑模板」）",
+      allText(ready).includes("2×2 建筑模板"), allText(ready).slice(0, 200));
     // ⚠️ 不能再有「把图永久隐藏」的 onError
     const source = readFileSync(target, "utf8");
     check("模板图的 onError 不再把图 display:none 掉",

@@ -25,7 +25,7 @@
  * 不必重新花钱生成。这是本模块最实用的一条降本设计。
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { basename, join } from "node:path";
@@ -1508,6 +1508,14 @@ export interface TileProjectView extends TileProject {
    * 才看得见效果 —— 那就谈不上预览了。
    */
   preview: TilePreview;
+  /**
+   * ① 模板阶段**实际产出的模板文件名**（不含目录，按名字排序）。
+   *
+   * 界面照这份列表逐一渲染缩略图 —— 别写死文件名：
+   * 模板是「项目里出现哪种形状就出哪种」，写死的话
+   * 3×1 / L 形的模板会被藏起来，用户以为只支持 1×1 和 2×2。
+   */
+  templates: string[];
 }
 
 export function tileView(project: TileProject): TileProjectView {
@@ -1522,11 +1530,35 @@ export function tileView(project: TileProject): TileProjectView {
     job: jobs.get(project.id),
     assetBase: `/dsh-game-material-master/tile-assets/${project.id}/`,
     progress: tileProgress(project),
+    // ① 模板阶段**实际产出的文件**（界面上要一张张列出来）。
+    //
+    // ⚠️ 别在界面里写死文件名。模板是「项目里出现哪种形状就出哪种」，
+    // 写死 `cell.png` + `grid2x2.png` 的话，3×1 / L 形的模板**根本显示不出来** ——
+    // 用户看到的是「只有 1×1 和 2×2」，而磁盘上其实还有别的。
+    templates: listTemplateFiles(project.id),
     // 界面「手动编辑布局」要用的即时预览素材：每个地块有哪些变体贴图。
     // 不给的话界面只能画出空的菱形格子 —— 用户看不见自己涂的是什么，
     // 得先「保存布局 → 铺成地图」才能看到效果，那就谈不上预览了。
     preview: tilePreview(project)
   };
+}
+
+/**
+ * 列出 `template/` 里已有的模板文件（按名字排序）。
+ *
+ * 目录不存在（还没跑过 ①）就返回空数组 —— 界面据此决定渲不渲染缩略图。
+ * 这里是**同步**读：`tileView` 是每次读项目都会走的同步路径，
+ * 为了列个目录把它改成 async 会牵动所有调用点。目录很小，代价可忽略。
+ */
+function listTemplateFiles(projectId: string): string[] {
+  try {
+    const dir = join(tileProjectDir(projectId), "template");
+    return readdirSync(dir)
+      .filter((name) => name.endsWith(".png"))
+      .sort();
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -1786,6 +1818,7 @@ export function tileDiamondHeight(project: TileProject): number {
 }
 
 export { ArkError };
+
 
 
 
