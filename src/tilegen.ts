@@ -49,7 +49,7 @@ import {
   type TileGeomReport,
   type TileSettings
 } from "./tilegeom.js";
-import { assembleMap, cropBitmap, emptyMapState, measureAssemblyBounds, pickVariantIndex, trimTransparent, type TileMapState } from "./tilemap.js";
+import { assembleMap, cropBitmap, emptyMapState, measureAssemblyBounds, pickVariantIndex, shapeOfEntry, trimTransparent, type TileMapState } from "./tilemap.js";
 import { decodeFile, encodeBitmap, pngSize, sniffImageExt, type Bitmap } from "./tilemedia.js";
 
 export type TileStage = "template" | "generate" | "review" | "map" | "export";
@@ -1484,8 +1484,10 @@ export interface TilePreview {
   cells: Record<string, string[]>;
   /** 地块键 → 用途（`terrain` / `decor` / `building`）—— 编辑器按它分层。 */
   kinds: Record<string, string>;
-  /** 地块键 → 占格 `[列, 行]`。 */
+  /** 地块键 → 占格 `[列, 行]`（**包围矩形**，老字段；摆放请用 `shapes`）。 */
   footprints: Record<string, [number, number]>;
+  /** 地块键 → 形状（相对锚点的格子集合）。这才是摆放的真源，支持 L 形等非矩形。 */
+  shapes: Record<string, Array<[number, number]>>;
   cellWidth: number;
   cellHeight: number;
   seed: number;
@@ -1497,6 +1499,8 @@ export interface TilePreview {
   buildings: Array<{
     r: number; c: number; fw: number; fh: number; index: number;
     cell: string; baseFraction: number;
+    /** 形状（相对锚点的格子集合）—— 摆放的唯一真源；`fw/fh` 只是包围矩形。 */
+    shape: Array<[number, number]>;
     /** 贴图自然「高 / 宽」。界面算包围盒要用 —— 它不解码贴图，拿不到自然尺寸。 */
     ratio: number;
   }>;
@@ -1527,6 +1531,8 @@ export function tilePreview(project: TileProject): TilePreview {
   const cells: Record<string, string[]> = {};
   const kinds: Record<string, string> = {};
   const footprints: Record<string, [number, number]> = {};
+  /** 地块键 → 形状（相对锚点的格子集合）。摆放用它，`footprints` 只作兼容。 */
+  const shapes: Record<string, Array<[number, number]>> = {};
   /** 地块键 → `key#index` → 该变体的贴图路径与底面比例。 */
   const byVariant = new Map<string, { cell: string; baseFraction: number }>();
   for (const item of project.items) {
@@ -1542,6 +1548,9 @@ export function tilePreview(project: TileProject): TilePreview {
     if (urls.length > 0) cells[item.key] = urls;
     kinds[item.key] = item.kind;
     footprints[item.key] = [item.footprint[0], item.footprint[1]];
+    // ★ 形状是**摆放的唯一真源**（`footprints` 只是它的包围矩形，老字段）。
+    // 界面必须读这一份：非矩形形状（L 形）按包围矩形算会多占格、错半格。
+    shapes[item.key] = shapeOf(item).map(([r, c]) => [r, c] as [number, number]);
   }
 
   const rows = project.map.rows;
@@ -1601,6 +1610,9 @@ export function tilePreview(project: TileProject): TilePreview {
       r, c,
       fw: entry?.[2] ?? 2,
       fh: entry?.[3] ?? 2,
+      // ★ 形状：摆放的唯一真源（`fw/fh` 只是包围矩形）。
+      // 界面按形状铺格子 / 算底心，按包围矩形算会让 L 形错位。
+      shape: shapeOfEntry(entry),
       index: found.index,
       cell: found.cell,
       baseFraction: found.baseFraction,
@@ -1617,6 +1629,7 @@ export function tilePreview(project: TileProject): TilePreview {
     cells,
     kinds,
     footprints,
+    shapes,
     cellWidth: project.settings.cellWidth,
     cellHeight: project.settings.cellHeight,
     seed,

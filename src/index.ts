@@ -867,17 +867,25 @@ export class GameStudioGateway extends TypertRemoteService {
           const e = raw as Record<string, unknown>;
           const r = Math.trunc(Number(e.r));
           const c = Math.trunc(Number(e.c));
-          const fw = Math.max(1, Math.min(4, Math.trunc(Number(e.width ?? 1))));
-          const fh = Math.max(1, Math.min(4, Math.trunc(Number(e.height ?? 1))));
           const key = String(e.key ?? "");
           if (!Number.isFinite(r) || !Number.isFinite(c) || key === "") continue;
-          if (r < 0 || c < 0 || r + fh > project.map.rows || c + fw > project.map.cols) continue;
+          // ★ 形状优先（任意形状，含 L 形）；界面只给了宽高才退回矩形。
+          const shape = tilegen.parseShape(e.shape)
+            ?? tilegen.rectShape(
+              Math.max(1, Math.min(64, Math.trunc(Number(e.width ?? 1)))),
+              Math.max(1, Math.min(64, Math.trunc(Number(e.height ?? 1))))
+            );
+          const [fw, fh] = tilegen.boundingRectOf(shape);
+          // 越界按**每个格子**判，不是包围矩形 —— L 形的包围盒可能出界而格子还在里面。
+          if (r < 0 || c < 0) continue;
+          if (shape.some(([dr, dc]) => r + dr >= project.map.rows || c + dc >= project.map.cols)) continue;
           const name = (project.items.find((it) => it.key === key)?.variants ?? [])
             .find((v) => v.cell !== undefined);
           if (name === undefined) continue;
           const underName = resolveVariant(e.under);
           project.map.buildings.push([r, c, `${key}#${name.index}`]);
-          project.map.buildingGround.push([r, c, fw, fh, underName]);
+          // 第 5 位是形状：拼图/包围盒读它，`fw/fh` 只是包围矩形（兼容老版本）。
+          project.map.buildingGround.push([r, c, fw, fh, underName, shape]);
           // ⚠️ **不要**把占格清成空串。
           //
           // 清了的话这一格什么都不铺，建筑底面菱形的四个角是透明的，
@@ -892,17 +900,15 @@ export class GameStudioGateway extends TypertRemoteService {
           const groundKeyForFootprint = project.items.some((it) => it.key === underItem)
             ? underItem
             : String(underName).split("#")[0];
-          for (let dr = 0; dr < fh; dr++) {
-            for (let dc = 0; dc < fw; dc++) {
-              const row = project.map.cells[r + dr];
-              const cell = row?.[c + dc];
-              if (row === undefined) continue;
-              // 已经有真地面就留着；空串或残留的建筑键才替换
-              const isGround = project.items.some(
-                (it) => it.key === cell && it.kind === "terrain"
-              );
-              if (!isGround && groundKeyForFootprint !== "") row[c + dc] = groundKeyForFootprint;
-            }
+          for (const [dr, dc] of shape) {
+            const row = project.map.cells[r + dr];
+            const cell = row?.[c + dc];
+            if (row === undefined) continue;
+            // 已经有真地面就留着；空串或残留的建筑键才替换
+            const isGround = project.items.some(
+              (it) => it.key === cell && it.kind === "terrain"
+            );
+            if (!isGround && groundKeyForFootprint !== "") row[c + dc] = groundKeyForFootprint;
           }
         }
       }

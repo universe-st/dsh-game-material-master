@@ -354,6 +354,16 @@ function normalizeDraft(draft) {
  * 建筑那一项用 `ratio` / `baseFraction`（宿主在 `preview.buildings` 里给的），
  * 所以草稿里的建筑要带上这两个字段才量得准。
  */
+/** 草稿里某栋建筑的形状：带 `shape` 就用它，否则按 `fw/fh` 兜成矩形。 */
+function shapeOfDraftBuilding(bd) {
+  if (Array.isArray(bd?.shape) && bd.shape.length > 0) return bd.shape;
+  const out = [];
+  for (let r = 0; r < Math.max(1, bd?.fh ?? 1); r++) {
+    for (let c = 0; c < Math.max(1, bd?.fw ?? 1); c++) out.push([r, c]);
+  }
+  return out;
+}
+
 function boundsOf(d, rows, cols, cw = 64, ch = 96, scale = 2) {
   const stepX = (cw / 2) * scale, stepY = (cw / 4) * scale;
   const originX = (rows - 1) * stepX, originY = ch * scale;
@@ -366,9 +376,7 @@ function boundsOf(d, rows, cols, cw = 64, ch = 96, scale = 2) {
   };
   const occ = new Set();
   for (const bd of d.buildings ?? []) {
-    for (let dr = 0; dr < bd.fh; dr++) {
-      for (let dc = 0; dc < bd.fw; dc++) occ.add(`${bd.r + dr},${bd.c + dc}`);
-    }
+    for (const [dr, dc] of shapeOfDraftBuilding(bd)) occ.add(`${bd.r + dr},${bd.c + dc}`);
   }
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
@@ -382,20 +390,47 @@ function boundsOf(d, rows, cols, cw = 64, ch = 96, scale = 2) {
     }
   }
   for (const bd of d.buildings ?? []) {
+    const bShape = shapeOfDraftBuilding(bd);
     const ox = originX + (bd.c - bd.r) * stepX, oy = originY + (bd.c + bd.r) * stepY;
-    const baseX = ox + (cw * scale) / 2 + ((bd.fw - 1) * stepX) / 2;
-    const baseY = oy + (ch * scale) / 2 + ((bd.fh - 1) * stepY) / 2;
-    const w = cw * ((bd.fw + bd.fh) / 2) * scale;
+    const bOff = shapeOffsetExpect(bShape, stepX, stepY);
+    const baseX = ox + (cw * scale) / 2 + bOff.dx;
+    const baseY = oy + (ch * scale) / 2 + bOff.dy;
+    const w = (cw / 2) * scale * ((Math.max(...bShape.map(([r, c]) => c - r)) - Math.min(...bShape.map(([r, c]) => c - r))) + 2);
     const hgt = Math.max(1, Math.round(w * (typeof bd.ratio === "number" ? bd.ratio : 1)));
     const bf = typeof bd.baseFraction === "number" ? bd.baseFraction : 0.5;
     put(Math.round(baseX - w / 2), Math.round(baseY - bf * hgt), w, hgt);
-    const hw = ((bd.fw + bd.fh) / 2) * (cw / 2) * scale, hh = hw / 2;
-    put(Math.ceil(baseX - hw), Math.floor(baseY - hh),
-      Math.floor(baseX + hw) - Math.ceil(baseX - hw) + 1,
-      Math.ceil(baseY + hh) - Math.floor(baseY - hh) + 1);
+    // 垫底：逐格（与界面/宿主同口径）
+    const cellHalfW = (cw / 2) * scale, cellHalfH = cellHalfW / 2;
+    for (const [dr, dc] of bShape) {
+      const cx2 = ox + (cw * scale) / 2 + (dc - dr) * stepX;
+      const cy2 = oy + (ch * scale) / 2 + (dc + dr) * stepY;
+      put(Math.ceil(cx2 - cellHalfW), Math.floor(cy2 - cellHalfH),
+        Math.floor(cx2 + cellHalfW) - Math.ceil(cx2 - cellHalfW) + 1,
+        Math.ceil(cy2 + cellHalfH) - Math.floor(cy2 - cellHalfH) + 1);
+    }
   }
   if (!Number.isFinite(L)) return { left: 0, top: 0 };
   return { left: Math.floor(L), top: Math.floor(T) };
+}
+
+/**
+ * 形状底心偏移的**独立期望**（与 `client.ts` 里 `shapeOffsetOf` 同一条公式）。
+ *
+ * 公式：取 `(c−r)` 与 `(c+r)` 的极差，各自除 2 再乘步长。
+ * ⚠️ 界面那份手抄必须与之一致 —— 不一致就是「建筑错半格」那类老问题。
+ */
+function shapeOffsetExpect(shape, stepX, stepY) {
+  if (!Array.isArray(shape) || shape.length === 0) return { dx: 0, dy: 0 };
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const [r, c] of shape) {
+    const x = c - r;
+    const y = c + r;
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  return { dx: ((minX + maxX) / 2) * stepX, dy: ((minY + maxY) / 2) * stepY };
 }
 
 function renderTile(project, options = {}) {
@@ -840,20 +875,38 @@ section("④ 拼图阶段：三层编辑（地面 / 装饰 / 建筑）");
     const br = 0, bc = 0;   // 锚点 (0,0)
     const x = Math.round(originX + (bc - br) * stepX) - trimLeft;
     const y = Math.round(originY + (bc + br) * stepY) - trimTop;
-    // ★ 底面中心 = **占格菱形**的中心（2×2 时比锚点格中心右/下各半格）。
-    // 写成锚点格中心就是真机那个「建筑浮在半空、垫底偏半格」的 bug。
+    // ★ 底面中心 = **形状**的包围菱形中心（与宿主 `shapeBaseOffset` 同一条公式）。
+    // 夹具那栋是 2×2 矩形。
     const anchorX = x + (cw * scale) / 2;
     const anchorY = y + (ch * scale) / 2;
-    const wantX = anchorX + ((fw - 1) * stepX) / 2;
-    const wantY = anchorY + ((fh - 1) * stepY) / 2;
-    check("★ 建筑底面中心对到**占格菱形**的中心（不是锚点格中心）",
+    const bShape = [[0, 0], [0, 1], [1, 0], [1, 1]];
+    const bOff = shapeOffsetExpect(bShape, stepX, stepY);
+    const wantX = anchorX + bOff.dx;
+    const wantY = anchorY + bOff.dy;
+    check("★ 建筑底面中心对到**形状包围菱形**的中心（不是锚点格中心）",
       bimg !== undefined &&
       Number.parseFloat(String(bimg.props["data-bx"])) === wantX &&
       Number.parseFloat(String(bimg.props["data-by"])) === wantY,
       `bx=${bimg?.props["data-bx"]} by=${bimg?.props["data-by"]} 期望 ${wantX},${wantY}`);
-    check("★ 底面中心比锚点格中心低半格（2×2 的判据）",
-      Number.parseFloat(String(bimg?.props["data-by"] ?? "0")) - anchorY === stepY / 2,
+    // ★ **独立真值**：底心必须等于「四个占格菱形中心的包围盒中点」。
+    // 与公式无关 —— 公式错了这条也照样红。
+    {
+      const centers = bShape.map(([rr, cc]) => ({
+        x: x + (cc - rr) * stepX + (cw * scale) / 2,
+        y: y + (cc + rr) * stepY + (ch * scale) / 2
+      }));
+      const truthX = (Math.min(...centers.map((p) => p.x)) + Math.max(...centers.map((p) => p.x))) / 2;
+      const truthY = (Math.min(...centers.map((p) => p.y)) + Math.max(...centers.map((p) => p.y))) / 2;
+      check("★ 独立真值：底心 = 四个占格菱形中心的包围盒中点",
+        Number.parseFloat(String(bimg?.props["data-bx"])) === truthX &&
+        Number.parseFloat(String(bimg?.props["data-by"])) === truthY,
+        `界面 ${bimg?.props["data-bx"]},${bimg?.props["data-by"]} vs 真值 ${truthX},${truthY}`);
+    }
+    check("★ 底面中心比锚点格中心低一格（2×2 的判据）",
+      Number.parseFloat(String(bimg?.props["data-by"] ?? "0")) - anchorY === stepY,
       `差 ${Number.parseFloat(String(bimg?.props["data-by"] ?? "0")) - anchorY}px`);
+    void fw;
+    void fh;
   }
   // ★ 语义变了：建筑占格现在**照画地面**（与宿主 `place()` 同口径）。
   //
@@ -1346,6 +1399,40 @@ section("④ 拼图阶段：手动编辑布局");
         got.left === want.left && got.top === want.top,
         `界面 left=${got.left} top=${got.top} vs 宿主×2 ${want.left} ${want.top}`);
     }
+  }
+
+  // ★ 黄金对照：界面那份**手抄的**形状公式必须与宿主 `shapeBaseOffset` /
+  // `shapeDiamondHalf` 算出同一个值（含 L 形）。
+  //
+  // 浏览器半区不能 import 宿主代码，所以形状几何是「抄」过去的。宿主改了公式
+  // 而界面没跟，就会重演「建筑错半格 / L 形错位」那类问题。这里把两边钉死。
+  {
+    const TM = await import("../lib/tilemap.js");
+    const cw = 64;
+    const shapes = [
+      ["1×1", [[0, 0]]],
+      ["2×2", [[0, 0], [0, 1], [1, 0], [1, 1]]],
+      ["3×1", [[0, 0], [0, 1], [0, 2]]],
+      ["1×3", [[0, 0], [1, 0], [2, 0]]],
+      ["L 形", [[0, 0], [1, 0], [1, 1]]],
+      ["T 形", [[0, 0], [0, 1], [0, 2], [1, 1]]],
+      ["十字", [[0, 1], [1, 0], [1, 1], [1, 2], [2, 1]]]
+    ];
+    const bad = [];
+    const badW = [];
+    for (const [name, shape] of shapes) {
+      const host = TM.shapeBaseOffset(shape, cw);
+      const ui = shapeOffsetExpect(shape, cw / 2, cw / 4);
+      if (Math.abs(host.dx - ui.dx) > 1e-9 || Math.abs(host.dy - ui.dy) > 1e-9) {
+        bad.push(`${name}: 界面(${ui.dx},${ui.dy}) 宿主(${host.dx},${host.dy})`);
+      }
+      const hostW = TM.shapeDiamondHalf(shape, cw).halfW * 2;
+      const xs = shape.map(([r, c]) => c - r);
+      const uiW = (Math.max(...xs) - Math.min(...xs)) * (cw / 2) + cw;
+      if (Math.abs(hostW - uiW) > 1e-9) badW.push(`${name}: 界面 ${uiW} 宿主 ${hostW}`);
+    }
+    check("★ 黄金对照：形状底心偏移界面 = 宿主（含 L/T/十字）", bad.length === 0, bad.join(" | "));
+    check("★ 黄金对照：形状包围菱形宽度界面 = 宿主", badW.length === 0, badW.join(" | "));
   }
 
   // 没开始编辑时不渲染叠层
