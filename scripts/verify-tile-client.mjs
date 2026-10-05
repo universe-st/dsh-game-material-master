@@ -952,41 +952,80 @@ section("④ 拼图阶段：三层编辑（地面 / 装饰 / 建筑）");
     check("装饰贴图指向 decor/ 目录",
       String(byKey[0]?.props.src).includes("/decor/"), String(byKey[0]?.props.src));
 
-    // ★ 装饰的落地线必须与宿主 `decorAnchorY` 一致。
-    // 写成「格子底边」会让装饰整体浮到地图上方（实测树全飘在图外）。
-    // 期望值按该装饰**自己那一格**现算，别硬编码行列。
+    // ★ 装饰层的摆放口径：**贴图铺满整格，左上角对齐格子左上角**。
+    //
+    // 这条不能靠「推公式」来验 —— 历史上推错过两次（写成格子底边 / 自己又居中一次），
+    // 而且推错了断言照样绿。所以这里直接和**宿主的真实合成**比：
+    // 拿宿主 `regularizeDecorSprite` 造一张真装饰图，量出它把树画在了格内哪个位置，
+    // 再断言界面那张 `<img>` 的摆放能让**同一个像素**落到同一个画面坐标。
     {
-      const host = await import("../lib/tilegeom.js");
-      const anchorPx = host.decorAnchorY(SETTINGS) * 2;   // 叠层是交付尺寸（2×）
+      const geom = await import("../lib/tilegeom.js");
+      const tilemap = await import("../lib/tilemap.js");
+      const anchorY = geom.decorAnchorY(SETTINGS);
       const style = byKey[0]?.props.style ?? {};
       const at = /^decor (\d+),(\d+)$/.exec(String(byKey[0]?.props.alt));
       const [r, c] = at === null ? [1, 1] : [Number(at[1]), Number(at[2])];
       const scale = 2;
-      const rows = 3;
-      const stepY = (SETTINGS.cellWidth / 4) * scale;
-      const originY = SETTINGS.cellHeight * scale;
-      const trimTop = boundsOf({ ground, decor: { "1,2": "tree" }, buildings: [] }, 3, 3).top;
-      const y = Math.round(originY + (c + r) * stepY) - trimTop;
-      check("★ 装饰底边对齐宿主 decorAnchorY（不是格子底边）",
-        Number.parseFloat(String(style.top)) === y + anchorPx,
-        `界面 top=${style.top} 期望 ${y + anchorPx}（格 (${r},${c}) 的 y=${y} + 锚点 ${anchorPx}）`);
-      // ★ 水平方向必须**居中**：宿主是 `x + (cellW − decorW)/2`。
-      // 只对齐左边会让整排树右移半格 —— 真机上顶边那排树直接飘出草地。
-      const stepX = (SETTINGS.cellWidth / 2) * scale;
-      const originX = (rows - 1) * stepX;
-      const trimLeft = boundsOf({ ground, decor: { "1,2": "tree" }, buildings: [] }, 3, 3).left;
-      const x = Math.round(originX + (c - r) * stepX) - trimLeft;
-      check("★ 装饰锚在格子**水平中点**（与宿主居中的口径一致）",
-        Number.parseFloat(String(style.left)) === x + (SETTINGS.cellWidth * scale) / 2,
-        `界面 left=${style.left} 期望 ${x + (SETTINGS.cellWidth * scale) / 2}（格 x=${x} + 半格）`);
-      void rows;
-      check("装饰用 translate(-50%, -100%) 让底边中点贴住锚点",
-        String(style.transform) === "translate(-50%, -100%)", String(style.transform));
-      check("装饰以自身尺寸渲染（不拉伸到一格）",
-        style.width === undefined && style.height === undefined,
-        `width=${style.width} height=${style.height}`);
-      check("宿主 decorAnchorY 确实是 54（64×96 的基准值）", host.decorAnchorY(SETTINGS) === 54,
-        String(host.decorAnchorY(SETTINGS)));
+      const bd = boundsOf({ ground, decor: { "1,2": "tree" }, buildings: [] }, 3, 3);
+      // ★ 用**宿主的** tileLayout 现算这一格的位置（别自己手推 origin —— 推错过一次）。
+      const layout = tilemap.tileLayout(SETTINGS, 3, 3, scale);
+      const ref = tilemap.tileOriginAt(layout, r, c);
+      const cellX = ref.x - bd.left;
+      const cellY = ref.y - bd.top;
+
+      check("★ 装饰贴图左上角对齐格子左上角（整格贴，不额外居中）",
+        Number.parseFloat(String(style.left)) === cellX && Number.parseFloat(String(style.top)) === cellY,
+        `界面 ${style.left},${style.top} 期望 ${cellX},${cellY}`);
+      check("★ 装饰贴图铺满整格（与宿主 `regularizeDecorSprite` 的产物同尺寸）",
+        Number.parseFloat(String(style.width)) === SETTINGS.cellWidth * scale &&
+        Number.parseFloat(String(style.height)) === SETTINGS.cellHeight * scale,
+        `界面 ${style.width}×${style.height} 期望 ${SETTINGS.cellWidth * scale}×${SETTINGS.cellHeight * scale}`);
+      check("装饰不加会破坏对齐的 transform", style.transform === undefined, String(style.transform));
+
+      // 黄金对照：宿主把树画在格内 (left, top) 处；界面整格贴 → 该像素必须落在
+      // 「格子的画面左上角 + (left, top)·scale」。
+      // 造一张「白底 + 深色树」的合成图（装饰规整器要靠与边缘的色差找前景）
+      const src = { width: 96, height: 64, rgba: Buffer.alloc(96 * 64 * 4) };
+      for (let y = 0; y < 64; y++) {
+        for (let x = 0; x < 96; x++) {
+          const o = (y * 96 + x) * 4;
+          // 树冠：中间一团深绿；其余留白
+          const inCrown = x >= 20 && x <= 76 && y >= 6 && y <= 52;
+          const inTrunk = x >= 44 && x <= 52 && y >= 40 && y <= 60;
+          const fg = inCrown || inTrunk;
+          src.rgba[o] = fg ? 40 : 255;
+          src.rgba[o + 1] = fg ? 130 : 255;
+          src.rgba[o + 2] = fg ? 50 : 255;
+          src.rgba[o + 3] = 255;
+        }
+      }
+      const reg = geom.regularizeDecorSprite(src, SETTINGS);
+      const [placedX, placedY] = reg.report.placedAt;
+      check("★ 宿主确实把装饰**居中**合成进整格（界面因此不该再居中一次）",
+        reg.bitmap.width === SETTINGS.cellWidth && reg.bitmap.height === SETTINGS.cellHeight &&
+        placedX > 0 && placedY + reg.report.cellSize[1] === anchorY,
+        `产物 ${reg.bitmap.width}×${reg.bitmap.height}，画在 (${placedX},${placedY})，锚点 ${anchorY}`);
+      // 黄金对照：**宿主与界面算出同一个格子左上角**。
+      //
+      // 这就是「树落在草地上」的充要条件：装饰贴图是整格合成图，
+      // 界面把它整格贴在「格子左上角 − 裁剪偏移」处，而那个格子左上角
+      // 必须等于宿主 `tileOriginAt` 算出来的那一个。
+      //
+      // ⚠️ 别拿「树的像素」去比：宿主画的是**未裁**坐标，界面画的是**裁过**坐标，
+      // 两边差一个裁剪偏移。要比就得把界面那份加回偏移 —— 我第一版漏了/加了两次，
+      // 各错了一轮。比「格子左上角」这个中间量最不容易搞错。
+      const expectLeft = ref.x - bd.left;
+      const expectTop = ref.y - bd.top;
+      check("★ 黄金对照：界面与宿主算出同一个格子左上角（树因此落在草地上）",
+        Number.parseFloat(String(style.left)) === expectLeft && Number.parseFloat(String(style.top)) === expectTop,
+        `界面 ${style.left},${style.top} vs 宿主 ${ref.x},${ref.y} − 偏移 ${bd.left},${bd.top} = ${expectLeft},${expectTop}`);
+      // 顺带钉住「宿主确实把树居中合成进整格」——这正是界面**不该**再居中一次的原因
+      check("★ 宿主把装饰居中合成进整格（界面因此不该再居中一次）",
+        placedX > 0 && placedX < SETTINGS.cellWidth &&
+        placedY + reg.report.cellSize[1] === anchorY,
+        `画在 (${placedX},${placedY})，树高 ${reg.report.cellSize[1]}，锚点 ${anchorY}`);
+      check("宿主 decorAnchorY 确实是 54（64×96 的基准值）", anchorY === 54,
+        String(anchorY));
     }
   }
 
