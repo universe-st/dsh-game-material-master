@@ -25,7 +25,7 @@
  * 不必重新花钱生成。这是本模块最实用的一条降本设计。
  */
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { basename, join } from "node:path";
@@ -619,26 +619,59 @@ export function tileBusy(projectId: string): boolean {
 
 // ── ① 模板（本地，免费）────────────────────────────────────────────────────
 
+/**
+ * 某个形状对应的模板文件名（相对 `template/`）。
+ *
+ * 单格沿用老名字 `cell.png`（老项目与界面预览都认它）；
+ * 其余按包围矩形命名 `grid{C}x{R}.png` —— 2×2 正好是 `grid2x2.png`，
+ * 与老文件名**逐字一致**，所以老项目不用重跑模板。
+ */
+export function templateNameFor(shape: TileShape): string {
+  const [cols, rows] = boundingRectOf(shape);
+  if (cols === 1 && rows === 1) return "cell.png";
+  return `grid${cols}x${rows}.png`;
+}
+
 export async function runTemplateStage(projectId: string): Promise<{ started: boolean; reason?: string }> {
   if (tileBusy(projectId)) return { started: false, reason: "已有任务在跑" };
   const project = await readTileProject(projectId);
   if (project === undefined) throw new Error(`项目不存在：${projectId}`);
   assertSettings(project.settings);
-  void background(projectId, "template", ["cell", "grid2x2"], async (job, report) => {
+  /**
+   * 模板要为项目里**出现的每种形状**各出一张。
+   *
+   * 不这么做的话，非 2×2 的跨格地块（3×1、L 形…）拿不到参考图，
+   * 模型只按提示词自由发挥，底面形状就没人管了。
+   */
+  const shapes = new Map<string, TileShape>();
+  for (const item of project.items) {
+    if (item.kind !== "building") continue;
+    const shape = shapeOf(item);
+    const name = templateNameFor(shape);
+    // 同名（同包围矩形）的只留一个：模板是按**包围矩形**画的，
+    // L 形与它的包围矩形共用一张会误导模型，所以用形状本身做键、
+    // 但文件名按包围矩形 —— 同名冲突时保留第一个，并在下方校验。
+    if (!shapes.has(name)) shapes.set(name, shape);
+  }
+  const targets = [...shapes.keys()];
+  void background(projectId, "template", targets.length > 0 ? targets : ["cell"], async (job, report) => {
     const dir = tileProjectDir(projectId);
     await mkdir(join(dir, "template"), { recursive: true });
-    // 单格模板
+    // 单格模板（地形用）—— 永远出，与项目里有没有建筑无关
     const single = renderTemplate({ size: 2048, cols: 1, rows: 1 });
     await writeFile(join(dir, "template", "cell.png"), encodeBitmap(single.bitmap));
     job.done.push("cell");
     await report();
-    // 2×2 建筑模板：洋红**轮廓**画底面 + 蓝色线框画「能长多高」。
-    // 不能用那份实心洋红菱形 —— 模型会把它当「把这块地填满」，
+    // 每种建筑形状一张：洋红**逐格轮廓**画底面 + 蓝色线框画「能长多高」。
+    // 不能用实心洋红菱形 —— 模型会把它当「把这块地填满」，
     // 实测生成出来是一张平铺的菱形石板地面（没有墙和屋顶）。
-    const grid = renderBuildingTemplate({ settings: project.settings, size: 2048 });
-    await writeFile(join(dir, "template", "grid2x2.png"), encodeBitmap(grid.bitmap));
-    job.done.push("grid2x2");
-    await report();
+    for (const [name, shape] of shapes) {
+      if (name === "cell.png") continue;
+      const grid = renderBuildingTemplate({ settings: project.settings, shape, size: 2048 });
+      await writeFile(join(dir, "template", name), encodeBitmap(grid.bitmap));
+      job.done.push(name);
+      await report();
+    }
   }, async () => {
     await patchTileProject(projectId, (fresh) => {
       // 模板几何变了，下游全部作废；② 要重新花钱
@@ -690,7 +723,9 @@ export async function runGenerateStage(projectId: string, options: GenerateOptio
     await mkdir(join(dir, "cell"), { recursive: true });
     await mkdir(join(dir, "decor"), { recursive: true });
     const templateCell = join(dir, "template", "cell.png");
-    const templateGrid = join(dir, "template", "grid2x2.png");
+    /** 建筑模板按**这个地块自己的形状**取（`grid{C}x{R}.png`）。 */
+    const templateForItem = (entry: TileItem) =>
+      join(dir, "template", templateNameFor(shapeOf(entry)));
 
     for (const target of targets) {
       if (cancelled.has(projectId)) break;
@@ -702,7 +737,7 @@ export async function runGenerateStage(projectId: string, options: GenerateOptio
       await report();
       try {
         const outcome = await generateOne(project, item, variantIndex, {
-          templateCell, templateGrid, dir,
+          templateCell, templateForItem, dir,
           retried: options.retried === true
         });
         await patchTileProject(projectId, (fresh) => {
@@ -751,12 +786,22 @@ async function generateOne(
   project: TileProject,
   item: TileItem,
   variantIndex: number,
-  ctx: { templateCell: string; templateGrid: string; dir: string; retried: boolean }
+  ctx: {
+    templateCell: string;
+    /** 按地块形状取建筑模板（`grid{C}x{R}.png`）。 */
+    templateForItem: (item: TileItem) => string;
+    dir: string;
+    retried: boolean;
+  }
 ): Promise<TileVariant> {
   const config = await loadConfig();
   const images: string[] = [];
   if (item.mode === "template") images.push(await dataUri(ctx.templateCell));
-  if (item.mode === "grid2x2") images.push(await dataUri(ctx.templateGrid));
+  if (item.mode === "grid2x2") {
+    // 按**这个地块的形状**取模板；文件不在就退回单格模板（不至于整块失败）。
+    const file = ctx.templateForItem(item);
+    images.push(await dataUri(existsSync(file) ? file : ctx.templateCell));
+  }
 
   const prompt = buildTilePrompt(item, project.style);
   const result = await generateImage({
@@ -1725,6 +1770,7 @@ export function tileDiamondHeight(project: TileProject): number {
 }
 
 export { ArkError };
+
 
 
 

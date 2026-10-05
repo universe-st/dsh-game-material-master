@@ -775,7 +775,60 @@ section("S4h 任意形状（L 形 / T 形 / 线形）");
     JSON.stringify(shapeOfEntry([1, 1, 2, 2, "grass#0", [[0, 0], [1, 1]]])));
 }
 
-// ★ S4i L 形建筑的**垫底**不能糊住凹口。
+// ★ S4j 形状的**底心**可直接用像素量出来：拿一张极小的不透明贴图，
+// 它落在哪儿就是底心落在哪儿。这条与公式无关，是端到端的独立验证。
+{
+  const tiny = { width: 2, height: 2, rgba: Buffer.alloc(2 * 2 * 4, 0), baseFraction: 0.5 };
+  for (let i = 0; i < 4; i++) {
+    tiny.rgba[i * 4] = 255;
+    tiny.rgba[i * 4 + 3] = 255;
+  }
+  const grass = solidCell(S, [0, 0, 255, 255]);
+  const lookup = new Map([["grass#0", grass], ["bld#0", tiny]]);
+  const probe = (shape) => {
+    const st = emptyMapState(4, 4, "grass");
+    st.cells = Array.from({ length: 4 }, () => Array.from({ length: 4 }, () => "grass"));
+    st.buildings = [[1, 1, "bld#0"]];
+    st.buildingGround = [[1, 1, 2, 2, "grass#0", shape]];
+    const map = assembleMap(lookup, st, { settings: S, families: { grass: ["grass"] } });
+    let sumX = 0;
+    let count = 0;
+    for (let y = 0; y < map.height; y++) {
+      for (let x = 0; x < map.width; x++) {
+        const i = (y * map.width + x) * 4;
+        if (map.rgba[i] > 180 && map.rgba[i + 3] > 200) {
+          count++;
+          sumX += x;
+        }
+      }
+    }
+    // 贴图是 2×2 像素，画出来占 4 个像素，取**质心**才是底心。
+    return { cx: count === 0 ? NaN : sumX / count, count };
+  };
+  const L = [[0, 0], [1, 0], [1, 1]];
+  const SQ = [[0, 0], [0, 1], [1, 0], [1, 1]];
+  const a = probe(L);
+  const b = probe(SQ);
+  check("S4j-1 极小贴图能在渲染结果里被量到（各 4 个像素）",
+    a.count === 4 && b.count === 4, `L=${a.count} 2x2=${b.count}`);
+  // 独立真值：底心一步就是各格菱形中心包围盒中点。
+  const layout = tileLayout(S, 4, 4);
+  const origin = tileOriginAt(layout, 1, 1);
+  const expect = (shape) => {
+    const xs = shape.map(([r, c]) => origin.x + (c - r) * (S.cellWidth / 2) + S.cellWidth / 2);
+    return (Math.min(...xs) + Math.max(...xs)) / 2;
+  };
+  const nearPx = (got, want) => Math.abs(got - want) <= 1;
+  check("S4j-2 L 形的底心 x = 各格菱形中心的中点（像素级）",
+    nearPx(a.cx, expect(L)), `实测 ${a.cx} 期望 ${expect(L)}`);
+  check("S4j-3 2×2 的底心 x = 各格菱形中心的中点（像素级）",
+    nearPx(b.cx, expect(SQ)), `实测 ${b.cx} 期望 ${expect(SQ)}`);
+  check("S4j-4 L 形与 2×2 的底心不同（形状真的生效了）",
+    Math.abs(a.cx - b.cx) > 8, `L=${a.cx} 2x2=${b.cx}`);
+  check("S4j-5 两者相差正好 16px（半个 stepX）",
+    Math.abs((b.cx - a.cx) - 16) <= 1, `差 ${b.cx - a.cx}`);
+}
+
 //
 // 逐格垫底 vs 画一个包围大菱形：后者会把凹口也涂成地面色，
 // 而凹口本来该透出下面的地面（L 形的意义就在于此）。

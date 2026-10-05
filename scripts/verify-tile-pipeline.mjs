@@ -160,6 +160,52 @@ section("② 生成阶段：用研究期的真实 2K 图喂规整（不花钱）
   }
 }
 
+section("形状与模板命名");
+
+// `templateNameFor`：单格沿用老名字 `cell.png`，其余按包围矩形 `grid{C}x{R}.png`
+// —— 2×2 正好是 `grid2x2.png`，与老文件名**逐字一致**，所以老项目不用重跑模板。
+{
+  const cases = [
+    [[[0, 0]], "cell.png"],
+    [[[0, 0], [0, 1], [1, 0], [1, 1]], "grid2x2.png"],
+    [[[0, 0], [0, 1], [0, 2]], "grid3x1.png"],
+    [[[0, 0], [1, 0], [2, 0]], "grid1x3.png"],
+    [[[0, 0], [1, 0], [1, 1]], "grid2x2.png"],          // L 形的包围矩形正好是 2×2
+    [[[0, 0], [0, 1], [0, 2], [1, 1]], "grid3x2.png"]   // T 形 → 3×2
+  ];
+  const bad = cases.filter(([shape, want]) => G.templateNameFor(shape) !== want)
+    .map(([shape, want]) => `${JSON.stringify(shape)} → ${G.templateNameFor(shape)}（期望 ${want}）`);
+  check("templateNameFor：单格 cell.png、其余 grid{C}x{R}.png（2×2 与老名一致）",
+    bad.length === 0, bad.join(" | "));
+}
+
+// 形状规范化：老数据只有 footprint，必须能无损读成矩形；格子集合去重排序。
+{
+  check("normalizeShape：只有 footprint → 矩形形状",
+    JSON.stringify(G.normalizeShape({ footprint: [3, 1] }, undefined))
+      === JSON.stringify([[0, 0], [0, 1], [0, 2]]),
+    JSON.stringify(G.normalizeShape({ footprint: [3, 1] }, undefined)));
+  check("normalizeShape：给 shape 就用它（L 形保留，且排序去重）",
+    JSON.stringify(G.normalizeShape({ shape: [[1, 1], [0, 0], [1, 0]] }, undefined))
+      === JSON.stringify([[0, 0], [1, 0], [1, 1]]),
+    JSON.stringify(G.normalizeShape({ shape: [[1, 1], [0, 0], [1, 0]] }, undefined)));
+  check("normalizeShape：非法 shape 退回 footprint",
+    JSON.stringify(G.normalizeShape({ shape: [[-1, 0]], footprint: [2, 1] }, undefined))
+      === JSON.stringify([[0, 0], [0, 1]]),
+    JSON.stringify(G.normalizeShape({ shape: [[-1, 0]], footprint: [2, 1] }, undefined)));
+  check("normalizeShape：都没有 → 退回 previous 的形状",
+    JSON.stringify(G.normalizeShape({}, { shape: [[0, 0], [1, 1]] }))
+      === JSON.stringify([[0, 0], [1, 1]]),
+    JSON.stringify(G.normalizeShape({}, { shape: [[0, 0], [1, 1]] })));
+  check("boundingRectOf：L 形的包围矩形是 2×2",
+    JSON.stringify(G.boundingRectOf([[0, 0], [1, 0], [1, 1]])) === JSON.stringify([2, 2]),
+    JSON.stringify(G.boundingRectOf([[0, 0], [1, 0], [1, 1]])));
+  check("rectOfShape：实心矩形返回尺寸，L 形返回 undefined",
+    JSON.stringify(G.rectOfShape([[0, 0], [0, 1], [1, 0], [1, 1]])) === JSON.stringify([2, 2])
+    && G.rectOfShape([[0, 0], [1, 0], [1, 1]]) === undefined,
+    `${JSON.stringify(G.rectOfShape([[0, 0], [1, 0], [1, 1]]))}`);
+}
+
 section("相对路径一律用正斜杠（会被拼进资源路由 URL）");
 {
   // ⚠️ 这条钉的是一个只在 Windows 上「看着正常」的坑：
