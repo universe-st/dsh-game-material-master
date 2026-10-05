@@ -622,14 +622,30 @@ export function tileBusy(projectId: string): boolean {
 /**
  * 某个形状对应的模板文件名（相对 `template/`）。
  *
- * 单格沿用老名字 `cell.png`（老项目与界面预览都认它）；
- * 其余按包围矩形命名 `grid{C}x{R}.png` —— 2×2 正好是 `grid2x2.png`，
- * 与老文件名**逐字一致**，所以老项目不用重跑模板。
+ * 命名规则：
+ * - 单格 → `cell.png`（沿用老名字，老项目与界面预览都认它）；
+ * - **实心矩形** → `grid{C}x{R}.png`（2×2 正好是 `grid2x2.png`，与老文件名逐字一致，
+ *   所以老项目不用重跑模板）；
+ * - **非矩形**（L 形 / T 形 / 十字…）→ `shape-{格子集合}.png`，
+ *   例如 L 形是 `shape-0-0_1-0_1-1.png`、T 形是 `shape-0-0_0-1_0-2_1-1.png`。
+ *
+ * ⚠️ 非矩形**不能**按包围矩形命名。L 形与 2×2 的包围矩形都是 2×2，
+ * 两者会撞同一个 `grid2x2.png` —— 先渲染的那张被后渲染的覆盖，
+ * 于是其中一个形状拿到**别人的**参考图，模型照着画出来的底面就是错的。
+ * 用形状本身做名字才能保证「一种形状一张图」。
  */
 export function templateNameFor(shape: TileShape): string {
   const [cols, rows] = boundingRectOf(shape);
   if (cols === 1 && rows === 1) return "cell.png";
-  return `grid${cols}x${rows}.png`;
+  if (rectOfShape(shape) !== undefined) return `grid${cols}x${rows}.png`;
+  // ⚠️ 先排序再拼名字：形状是**集合**，同一个形状用不同顺序传进来
+  // （界面按行优先排、手工写的可能是别的顺序）必须解析到**同一个**文件名，
+  // 否则同一种形状会被渲染两遍、还白占一个文件名。
+  const key = [...shape]
+    .sort((a, b) => (a[0] - b[0]) || (a[1] - b[1]))
+    .map(([r, c]) => `${r}-${c}`)
+    .join("_");
+  return `shape-${key}.png`;
 }
 
 export async function runTemplateStage(projectId: string): Promise<{ started: boolean; reason?: string }> {
@@ -642,15 +658,15 @@ export async function runTemplateStage(projectId: string): Promise<{ started: bo
    *
    * 不这么做的话，非 2×2 的跨格地块（3×1、L 形…）拿不到参考图，
    * 模型只按提示词自由发挥，底面形状就没人管了。
+   *
+   * 文件名由 `templateNameFor` 保证**一种形状一个名字**（非矩形带形状哈希），
+   * 所以同名的必然是同一个形状，用 `Map` 去重既省一次渲染也不会串图。
    */
   const shapes = new Map<string, TileShape>();
   for (const item of project.items) {
     if (item.kind !== "building") continue;
     const shape = shapeOf(item);
     const name = templateNameFor(shape);
-    // 同名（同包围矩形）的只留一个：模板是按**包围矩形**画的，
-    // L 形与它的包围矩形共用一张会误导模型，所以用形状本身做键、
-    // 但文件名按包围矩形 —— 同名冲突时保留第一个，并在下方校验。
     if (!shapes.has(name)) shapes.set(name, shape);
   }
   const targets = [...shapes.keys()];

@@ -31,6 +31,7 @@ import {
   measurementLooksSane,
   regularizeDecorSprite,
   regularizeToCell,
+  renderBuildingTemplate,
   renderTemplate,
   upscale
 } from "../lib/tilegeom.js";
@@ -827,6 +828,46 @@ section("S4h 任意形状（L 形 / T 形 / 线形）");
     Math.abs(a.cx - b.cx) > 8, `L=${a.cx} 2x2=${b.cx}`);
   check("S4j-5 两者相差正好 16px（半个 stepX）",
     Math.abs((b.cx - a.cx) - 16) <= 1, `差 ${b.cx - a.cx}`);
+}
+
+// ★ S4k 建筑模板必须**真的按形状画**。
+//
+// 曾经 `renderBuildingTemplate` 里同时留着「按形状逐格画」和「画一个大包围菱形」
+// 两段代码（改的时候只加了新段、忘了删旧段），后者把前者的结果整个盖住 ——
+// 于是 L 形和 2×2 渲染出**逐字节相同**的模板，形状等于没生效，
+// 而「模板文件名不同」这类断言照样是绿的。
+{
+  const tplL = renderBuildingTemplate({ settings: S, shape: [[0, 0], [1, 0], [1, 1]], size: 256 });
+  const tplSq = renderBuildingTemplate({ settings: S, shape: [[0, 0], [0, 1], [1, 0], [1, 1]], size: 256 });
+  const opaque = (b) => {
+    let n = 0;
+    for (let i = 3; i < b.rgba.length; i += 4) if (b.rgba[i] > 0) n++;
+    return n;
+  };
+  check("S4k-1 L 形模板与 2×2 模板尺寸相同（同包围矩形）",
+    tplL.bitmap.width === tplSq.bitmap.width && tplL.bitmap.height === tplSq.bitmap.height,
+    `L ${tplL.bitmap.width}x${tplL.bitmap.height} 2x2 ${tplSq.bitmap.width}x${tplSq.bitmap.height}`);
+  check("S4k-2 ★ L 形模板的不透明像素**少于** 2×2（凹口是空的）",
+    opaque(tplL.bitmap) < opaque(tplSq.bitmap),
+    `L=${opaque(tplL.bitmap)} 2x2=${opaque(tplSq.bitmap)}`);
+  check("S4k-3 ★ L 形模板与 2×2 不是同一张图（形状真的生效了）",
+    Buffer.compare(tplL.bitmap.rgba, tplSq.bitmap.rgba) !== 0,
+    "两张模板逐字节相同 —— 形状没生效");
+  check("S4k-4 模板登记的底面菱形数 = 形状格数",
+    tplL.diamonds.length === 3 && tplSq.diamonds.length === 4,
+    `L=${tplL.diamonds.length} 2x2=${tplSq.diamonds.length}`);
+  // 3×1 与 2×2 的等距底面**本来就是同一个菱形**（`(3+1)/2 = (2+2)/2`），
+  // 所以两者的模板“应该”一样 —— 别拿它们互相区分，那是个错误判据。
+  // 真正需要区分的是**矩形 vs 非矩形**（上面的 S4k-2/3）。
+  const tpl31 = renderBuildingTemplate({ settings: S, shape: [[0, 0], [0, 1], [0, 2]], size: 256 });
+  check("S4k-5 3×1 与 2×2 共用同一个等距底面（模板相同是正确的）",
+    opaque(tpl31.bitmap) === opaque(tplSq.bitmap),
+    `3x1=${opaque(tpl31.bitmap)} 2x2=${opaque(tplSq.bitmap)}`);
+  // 4×2（和 = 6）与 2×2（和 = 4）必须不同
+  const tpl42 = renderBuildingTemplate({ settings: S, shape: [[0, 0], [0, 1], [0, 2], [0, 3], [1, 0], [1, 1], [1, 2], [1, 3]], size: 256 });
+  check("S4k-6 4×2 的底面比 2×2 大（跨度不同 → 模板不同）",
+    opaque(tpl42.bitmap) > opaque(tplSq.bitmap),
+    `4x2=${opaque(tpl42.bitmap)} 2x2=${opaque(tplSq.bitmap)}`);
 }
 
 //

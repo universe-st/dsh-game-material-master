@@ -162,21 +162,38 @@ section("② 生成阶段：用研究期的真实 2K 图喂规整（不花钱）
 
 section("形状与模板命名");
 
-// `templateNameFor`：单格沿用老名字 `cell.png`，其余按包围矩形 `grid{C}x{R}.png`
-// —— 2×2 正好是 `grid2x2.png`，与老文件名**逐字一致**，所以老项目不用重跑模板。
+// `templateNameFor`：单格 → `cell.png`；实心矩形 → `grid{C}x{R}.png`
+// （2×2 与老文件名逐字一致，所以老项目不用重跑模板）；
+// **非矩形** → 带形状哈希的名字，避免与同包围矩形的矩形撞名。
 {
   const cases = [
     [[[0, 0]], "cell.png"],
     [[[0, 0], [0, 1], [1, 0], [1, 1]], "grid2x2.png"],
     [[[0, 0], [0, 1], [0, 2]], "grid3x1.png"],
     [[[0, 0], [1, 0], [2, 0]], "grid1x3.png"],
-    [[[0, 0], [1, 0], [1, 1]], "grid2x2.png"],          // L 形的包围矩形正好是 2×2
-    [[[0, 0], [0, 1], [0, 2], [1, 1]], "grid3x2.png"]   // T 形 → 3×2
+    [[[0, 0], [1, 0], [1, 1]], "shape-0-0_1-0_1-1.png"],
+    [[[0, 0], [0, 1], [0, 2], [1, 1]], "shape-0-0_0-1_0-2_1-1.png"]
   ];
   const bad = cases.filter(([shape, want]) => G.templateNameFor(shape) !== want)
     .map(([shape, want]) => `${JSON.stringify(shape)} → ${G.templateNameFor(shape)}（期望 ${want}）`);
-  check("templateNameFor：单格 cell.png、其余 grid{C}x{R}.png（2×2 与老名一致）",
+  check("templateNameFor：单格 cell.png、矩形 grid{C}x{R}、非矩形带形状哈希",
     bad.length === 0, bad.join(" | "));
+
+  // ★ 关键回归：L 形与 2×2 的**包围矩形都是 2×2**，但必须拿到不同的模板文件。
+  // 曾经按包围矩形命名，两者撞同一个 `grid2x2.png` —— 先渲染的被覆盖，
+  // 其中一个形状会拿到别人的参考图，模型照着画出来的底面就是错的。
+  const lShape = [[0, 0], [1, 0], [1, 1]];
+  const sqShape = [[0, 0], [0, 1], [1, 0], [1, 1]];
+  const lName = G.templateNameFor(lShape);
+  const sqName = G.templateNameFor(sqShape);
+  check("★ L 形与 2×2 包围矩形相同但模板名不同（不会串图）",
+    lName !== sqName &&
+    JSON.stringify(G.boundingRectOf(lShape)) === JSON.stringify(G.boundingRectOf(sqShape)),
+    `L=${lName} 2x2=${sqName}`);
+  // 同一形状（输入顺序不同）必须解析到同一个文件名，否则会重复渲染
+  check("同形状 → 同模板名（与输入顺序无关）",
+    G.templateNameFor(lShape) === G.templateNameFor([[1, 0], [0, 0], [1, 1]]),
+    `${G.templateNameFor(lShape)} vs ${G.templateNameFor([[1, 0], [0, 0], [1, 1]])}`);
 }
 
 // 形状规范化：老数据只有 footprint，必须能无损读成矩形；格子集合去重排序。

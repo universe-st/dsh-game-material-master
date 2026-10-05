@@ -345,34 +345,31 @@ export function renderTemplate(options: TemplateOptions = {}): TemplateResult {
 /**
  * 底面各格在模板里的**菱形中心**（逻辑单位，未乘缩放系数）。
  *
+ * 坐标以「各格中心的包围盒中点」为原点（最终会平移到 `(cx, baseCy)`）。
+ * 每格的等距偏移：`dx = (dc − dr)·cellWidth/4`、`dy = (dc + dr)·cellWidth/8`
+ * （菱形高 = cellWidth/2，半格步进 = cellWidth/4）。
+ *
  * 为什么按「一格一个菱形」而不是「一个大包围菱形」：
  * L 形、T 形这类**非矩形**占地，用一个包围菱形画出来模型会以为整块都是地基，
  * 于是把凹口也填成地面。逐格画才能把「哪些格是地基」讲清楚。
- * 矩形是它的特例（各格菱形拼起来正好等于包围菱形），所以老行为不变。
- *
- * 坐标以**包围菱形中心**为原点（最终会平移到 `(cx, baseCy)`）。
- * 每格相对锚点的偏移：`dx = (dc − dr)·cellWidth/4`、`dy = (dc + dr)·cellWidth/8`
- * （菱形高 = cellWidth/2，半格步进 = cellWidth/4）。
  */
 export function buildingBaseCells(
   settings: TileSettings,
   shape: Array<[number, number]>
 ): Array<{ cx: number; cy: number }> {
   if (shape.length === 0) return [{ cx: 0, cy: 0 }];
-  let minDR = Infinity, maxDR = -Infinity, minDC = Infinity, maxDC = -Infinity;
-  for (const [r, c] of shape) {
-    if (r < minDR) minDR = r;
-    if (r > maxDR) maxDR = r;
-    if (c < minDC) minDC = c;
-    if (c > maxDC) maxDC = c;
-  }
-  const baseX = ((minDC - minDR) + (maxDC - maxDR)) / 2;
-  const baseY = ((minDC + minDR) + (maxDC + maxDR)) / 2;
   const q = settings.cellWidth / 4;
-  return shape.map(([r, c]) => ({
-    cx: (c - r) * q - baseX * q,
-    cy: (c + r) * (q / 2) - baseY * (q / 2)
-  }));
+  const raw = shape.map(([r, c]) => ({ x: (c - r) * q, y: (c + r) * (q / 2) }));
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const p of raw) {
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.y > maxY) maxY = p.y;
+  }
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+  return raw.map((p) => ({ cx: p.x - cx, cy: p.y - cy }));
 }
 
 export function renderBuildingTemplate(options: {
@@ -438,48 +435,58 @@ export function renderBuildingTemplate(options: {
     }
   };
 
-  // 地基：**逐格**画菱形（浅灰填充 + 洋红轮廓）。
+  // 地基：底面 + 洋红轮廓。
   //
-  // 逐格而不是画一个大包围菱形 —— L 形这类非矩形占地，画包围菱形等于告诉模型
-  // 「凹口也是地基」，它会把凹口填成地面。矩形是特例：各格菱形拼起来正好
-  // 就是那个大菱形，所以老行为不变。
+  // **实心矩形走老路径**（一个大包围菱形），非矩形才逐格画。
+  //
+  // 为什么矩形不逐格：老的 2×2 模板就是这一张大菱形，实测效果没问题；
+  // 改成逐格会**少一圈外轮廓、多一道内部网格线**，与老图不一致 ——
+  // 老项目里已经渲染好的 `grid2x2.png` 就得全部重跑。保持逐字节一致更划算。
+  //
+  // 非矩形必须逐格：画包围大菱形等于告诉模型「凹口也是地基」，
+  // 它会把凹口填成地面 —— L 形就没意义了。
   const baseCells = buildingBaseCells(settings, shape);
   const cellHalfW = (settings.cellWidth / 4) * k;   // 单格菱形半宽
   const cellHalfH = cellHalfW / 2;
-  for (const cell of baseCells) {
-    const bx = cx + cell.cx * k;
-    const by = baseCy + cell.cy * k;
-    const cTop: [number, number] = [bx, by - cellHalfH];
-    const cRight: [number, number] = [bx + cellHalfW, by];
-    const cBottom: [number, number] = [bx, by + cellHalfH];
-    const cLeft: [number, number] = [bx - cellHalfW, by];
-    // 地面（浅灰填充）：告诉模型「这块是地，不要在这里起墙」
-    fillTri([cTop, cRight, cBottom, cLeft], ground);
-    // 地基的洋红轮廓：底面必须与它完全贴合
-    const quad = [cTop, cRight, cBottom, cLeft];
+  const bTop: [number, number] = [cx, baseCy - halfH * k];
+  const bRight: [number, number] = [cx + halfW * k, baseCy];
+  const bBottom: [number, number] = [cx, baseCy + halfH * k];
+  const bLeft: [number, number] = [cx - halfW * k, baseCy];
+  const isRect = rectOfShapeLocal(shape) !== undefined;
+  if (isRect) {
+    // 老路径：一张大菱形，填灰 + 洋红轮廓
+    const quad = [bTop, bRight, bBottom, bLeft];
+    fillTri(quad, ground);
     for (let i = 0; i < 4; i++) {
       const a = quad[i];
       const b = quad[(i + 1) % 4];
       for (let t = -lw; t <= lw; t++) line(rgba, S.w, a[0], a[1] + t, b[0], b[1] + t, magenta, ss);
     }
+  } else {
+    // 非矩形：**逐格**画（每格浅灰 + 洋红），凹口自然留空。
+    for (const cell of baseCells) {
+      const bx = cx + cell.cx * k;
+      const by = baseCy + cell.cy * k;
+      const cTop: [number, number] = [bx, by - cellHalfH];
+      const cRight: [number, number] = [bx + cellHalfW, by];
+      const cBottom: [number, number] = [bx, by + cellHalfH];
+      const cLeft: [number, number] = [bx - cellHalfW, by];
+      const quad = [cTop, cRight, cBottom, cLeft];
+      fillTri(quad, ground);
+      for (let i = 0; i < 4; i++) {
+        const a = quad[i];
+        const b = quad[(i + 1) % 4];
+        for (let t = -lw; t <= lw; t++) line(rgba, S.w, a[0], a[1] + t, b[0], b[1] + t, magenta, ss);
+      }
+    }
   }
 
   // 立方体线框：**包围菱形**的四个顶点往上拉，顶面再画一个同样的轮廓。
   // 高度是整体概念，逐格画会变成一排小盒子。
-  const top: [number, number] = [cx, baseCy - halfH * k];
-  const right: [number, number] = [cx + halfW * k, baseCy];
-  const bottom: [number, number] = [cx, baseCy + halfH * k];
-  const left: [number, number] = [cx - halfW * k, baseCy];
-
-  // 地面（浅灰填充）：告诉模型「这块是地，不要在这里起墙」
-  fillTri([top, right, bottom, left], ground);
-
-  // 地基的洋红轮廓：底面必须与它完全贴合
-  for (let i = 0; i < 4; i++) {
-    const a = [top, right, bottom, left][i];
-    const b = [top, right, bottom, left][(i + 1) % 4];
-    for (let t = -lw; t <= lw; t++) line(rgba, S.w, a[0], a[1] + t, b[0], b[1] + t, magenta, ss);
-  }
+  const top = bTop;
+  const right = bRight;
+  const bottom = bBottom;
+  const left = bLeft;
 
   // 立方体线框：四个角往上拉，顶面再画一个同样的菱形轮廓
   const lift = (p: [number, number]): [number, number] => [p[0], p[1] - boxH * k];
@@ -1236,8 +1243,11 @@ export function buildingTemplateLayout(settings: TileSettings, options: {
   const rows = options.rows ?? 2;
   const heightRatio = options.heightRatio ?? 1.5;
   const pad = options.pad ?? 8;
-  // 包围菱形半宽由**形状**决定（见 tilegen.shapeHalfWidth 的推导）。
-  // 不传形状就退回矩形 `(cols+rows)/2` —— 与老行为逐字一致。
+  // 包围菱形半宽由**形状**决定。
+  // ⚠️ 注意这里用的是「x 极差 + 一格」，对**实心矩形**等价于老公式
+  // `(cols+rows)/2` —— 所以 2×2 的模板与老版本逐字节一致。
+  // 顺带一个反直觉但正确的事实：`3×1` 与 `2×2` 的等距底面**本来就是同一个菱形**
+  // （`(3+1)/2 = (2+2)/2`），所以两者的模板应该一样，不用去区分。
   const halfW = options.shape === undefined
     ? (settings.cellWidth / 2) * ((cols + rows) / 2)
     : shapeHalfWidthLocal(options.shape, settings.cellWidth);
@@ -1276,6 +1286,20 @@ export function rectShapeLocal(cols: number, rows: number): Array<[number, numbe
     for (let c = 0; c < cols; c++) shape.push([r, c]);
   }
   return shape;
+}
+
+/** 形状是否恰好是**实心矩形**（是的话返回 [列, 行]，否则 undefined）。 */
+export function rectOfShapeLocal(shape: Array<[number, number]>): [number, number] | undefined {
+  if (shape.length === 0) return undefined;
+  let maxR = 0;
+  let maxC = 0;
+  for (const [r, c] of shape) {
+    if (r > maxR) maxR = r;
+    if (c > maxC) maxC = c;
+  }
+  const cols = maxC + 1;
+  const rows = maxR + 1;
+  return shape.length === cols * rows ? [cols, rows] : undefined;
 }
 
 /**
@@ -1470,3 +1494,4 @@ export function regularizeDecorSprite(
     }
   };
 }
+
