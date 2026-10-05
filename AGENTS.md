@@ -59,9 +59,9 @@ node scripts/verify-pipeline.mjs   # 抽帧 / 抠像 / 合成（40 项）
 node scripts/verify-feedback.mjs   # 浏览器半区真渲染（119 项）
 node scripts/verify-i18n.mjs       # 中英词条表契约（9 项）
 node scripts/verify-tile.mjs       # 地图地块几何内核（142 项，含反向验证）
-node scripts/verify-tile-pipeline.mjs  # 地图地块数据层与流水线（95 项）
+node scripts/verify-tile-pipeline.mjs  # 地图地块数据层与流水线（98 项）
 node scripts/verify-tile-gateway.mjs   # 地图地块走真实网关（78 项：payload / 验收 / 作废边界 / 建筑 / 布局冻住 / 保存往返）
-node scripts/verify-tile-client.mjs    # 地图地块界面真渲染（195 项，拦「遮罩没出现」「地图不显示」这类静默问题）
+node scripts/verify-tile-client.mjs    # 地图地块界面真渲染（191 项，拦「遮罩没出现」「地图不显示」这类静默问题）
 ```
 
 `scripts/find-missing-i18n.mjs` 不是断言脚本，是**工具**：列出所有还没进词条表的
@@ -179,6 +179,7 @@ npm view dsh-game-material-master dist-tags
   （设置页则裁到 `[role=dialog]` 的范围）。
 - 深链接可以直接把界面切到目标页面：`http://127.0.0.1:<port>/?dsh-gmm=1&module=sprite&project=<id>&stage=videos`。
 - **设置页截图必须处理 API Key 回显**（界面显示脱敏尾号），用局部模糊盖掉再入库。
+
 
 
 

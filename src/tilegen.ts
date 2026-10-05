@@ -1,19 +1,22 @@
 /**
  * 地图地块生成（模块五）· 数据层与流水线。
  *
- * 五个阶段：
- *   ① template  生成模板   本地 · 免费
- *   ② generate  生成地块   真实计费（每类 × 变体一次 Seedream 调用）
- *   ③ review    逐项验收   免费
- *   ④ map       拼成地图   本地 · 免费 · 可反复
- *   ⑤ export    导出       本地 · 免费
+ * 四个阶段：
+ *   ① generate  生成地块   真实计费（每类 × 变体一次 Seedream 调用）
+ *   ② review    逐项验收   免费
+ *   ③ map       拼成地图   本地 · 免费 · 可反复
+ *   ④ export    导出       本地 · 免费
+ *
+ * **参考图（等距模板）不是阶段**：它是「占格形状」的纯函数，
+ * 在 ① 开始时由 `ensureTemplates` 自动准备（按形状 + 格子尺寸的指纹复用）。
+ * 详见该函数的注释。
  *
  * ## 磁盘布局
  *
  * ```
  * $DSH_HOME/game-material-master/tile-jobs/<projectId>/
  *   project.json          唯一状态文件
- *   template/             洋红菱形模板 + 2×2 地基网格
+ *   template/             等距参考图（按形状自动出）+ .stamp.json（指纹）
  *   raw/                  原始生成结果（**保留**）
  *   cell/                 规整后的单元格地块
  *   decor/                独立装饰图层
@@ -644,7 +647,7 @@ export function tileBusy(projectId: string): boolean {
   return job !== undefined && job.running !== null;
 }
 
-// ── ① 模板（本地，免费）────────────────────────────────────────────────────
+// ── 参考图（内部步骤，本地免费；不是用户阶段）──────────────────────────────
 
 /**
  * 某个形状对应的模板文件名（相对 `template/`）。
@@ -770,7 +773,7 @@ export function expectedTemplateNames(project: TileProject): string[] {
   return names.sort();
 }
 
-// ── ② 生成（★计费）────────────────────────────────────────────────────────
+// ── ① 生成（★计费）────────────────────────────────────────────────────────
 
 export interface GenerateOptions {
   keys?: string[];
@@ -1597,7 +1600,7 @@ export interface TileProjectView extends TileProject {
    */
   preview: TilePreview;
   /**
-   * ① 模板阶段**实际产出的模板文件名**（不含目录，按名字排序）。
+   * 参考图预览用的文件名清单（**期望值**，不是目录列表）（不含目录，按名字排序）。
    *
    * 界面照这份列表逐一渲染缩略图 —— 别写死文件名：
    * 模板是「项目里出现哪种形状就出哪种」，写死的话
@@ -1888,6 +1891,7 @@ export function tileDiamondHeight(project: TileProject): number {
 }
 
 export { ArkError };
+
 
 
 
