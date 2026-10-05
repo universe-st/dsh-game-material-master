@@ -5733,13 +5733,27 @@
         if (mapDraft !== null) return mapDraft;
         const rows = Math.max(1, mapRows);
         const cols = Math.max(1, mapCols);
+        /**
+         * 没指定地面时这一格该铺什么。
+         *
+         * ⚠️ **不能留空**。老项目（以及用户曾经用手涂过树 / 建筑的那些格）里
+         * `cells` 存的可能是**装饰或建筑的键** —— 拼图那边这些格子照样铺着地面，
+         * 但界面草稿若直接丢成空串，预览里就出现一个个**白色菱形洞**，
+         * 而「开始编辑布局」打开的正是这份草稿。实测踩过：13 个 tree 格变成白洞。
+         */
+        const groundFill = firstTerrainKey() ?? "";
         const ground = [];
+        const decorFromCells = {};
         for (let r = 0; r < rows; r++) {
           const row = [];
           for (let c = 0; c < cols; c++) {
             const key = project.map?.cells?.[r]?.[c] ?? "";
-            // 老项目里可能有人手涂过装饰/建筑键进 cells —— 那些不算地面
-            row.push(kindOf(key) === "terrain" ? key : "");
+            if (key === "") { row.push(""); continue; }
+            if (kindOf(key) === "terrain") { row.push(key); continue; }
+            // 装饰键（老项目手涂的）：**升格成装饰** + 底下补默认地面。
+            // 只补地面会把用户涂的那棵树弄丢；只留装饰则预览里是个白洞。
+            if (kindOf(key) === "decor") decorFromCells[`${r},${c}`] = key;
+            row.push(groundFill);
           }
           ground.push(row);
         }
@@ -5756,6 +5770,8 @@
           const key = keyOfVariant(String(entry[1]));
           if (key !== "") decor[pos] = key;
         }
+        // 从 `cells` 里升格出来的装饰（老项目手涂的树）优先于记录里的
+        for (const [pos, key] of Object.entries(decorFromCells)) decor[pos] = key;
         const buildings = (project.preview?.buildings ?? []).map((b) => ({
           r: b.r, c: b.c, fw: b.fw, fh: b.fh, key: keyOfVariant(b.cell), under: defaultUnder()
         }));
@@ -5783,13 +5799,15 @@
       };
       const kindOf = (key) => project.preview?.kinds?.[key] ?? "";
       const footprintOf = (key) => project.preview?.footprints?.[key] ?? [1, 1];
-      /** 建筑底面垫底用哪种地面**地块键**（不是贴图路径）。 */
-      const defaultUnder = () => {
+      /** 布局里第一个有贴图的地面地块键（用来补「这格没写地面」的洞）。 */
+      const firstTerrainKey = () => {
         for (const [key, list] of previewEntries()) {
           if ((project.preview?.kinds?.[key] ?? "") === "terrain" && list.length > 0) return key;
         }
-        return "";
+        return null;
       };
+      /** 建筑底面垫底用哪种地面**地块键**（不是贴图路径）。 */
+      const defaultUnder = () => firstTerrainKey() ?? "";
 
       const draftRows = mapDraft?.ground?.length ?? 0;
       const draftCols = mapDraft?.ground?.[0]?.length ?? 0;

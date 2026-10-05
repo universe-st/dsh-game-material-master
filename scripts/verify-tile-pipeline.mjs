@@ -355,8 +355,8 @@ section("④ 拼图阶段（本地，免费）");
       ["grass", "grass", "grass", "grass", "grass", "grass"],
       ["grass", "tree", "grass", "grass", "tree", "grass"],
       ["grass", "grass", "grass", "grass", "grass", "grass"],
-      ["grass", "grass", "grass", "building", "grass", "grass"],
-      ["grass", "tree", "grass", "grass", "grass", "grass"],
+      ["grass", "grass", "grass", "building", "building", "grass"],
+      ["grass", "tree", "grass", "building", "building", "grass"],
       ["grass", "grass", "grass", "grass", "tree", "grass"]
     ];
     await G.patchTileProject(project.id, (fresh) => {
@@ -370,14 +370,32 @@ section("④ 拼图阶段（本地，免费）");
     const b = readFileSync(join(dir, "map", "map.png"));
     check("T33b 有手改布局时同种子仍逐像素一致", a.equals(b));
 
-    // ★ 最关键的一条：传了覆盖参数（界面永远会传 decorDensity）也不能丢掉手改布局
+    // ★ 最关键的一条：传了覆盖参数（界面永远会传 decorDensity）也不能丢掉手改布局。
+    //
+    // ⚠️ 注意比的是「**渲染后的地面**」而不是原样那份 layout：
+    // `layout` 里的 `tree` / `building` 是**单层时代的写法**（把装饰与建筑当格子键涂）。
+    // 拼图会把它们升格成真正的装饰/建筑，并把那几格补成默认地面 ——
+    // 留下的空洞正是真机上那些「白色菱形洞」。
     const mappedJson = JSON.parse(readFileSync(join(dir, "map", "map.json"), "utf8"));
+    const expectedGround = layout.map((row) => row.map((k) => (k === "tree" || k === "building" ? "grass" : k)));
+    // 建筑占格（2×2）会被清空，不是补草地
+    for (const [r, c] of [[3, 3], [3, 4], [4, 3], [4, 4]]) expectedGround[r][c] = "";
     check("T33c 传覆盖参数时手改布局被保留（不会被 fill 覆盖掉）",
-      JSON.stringify(mappedJson.cells) === JSON.stringify(layout),
+      JSON.stringify(mappedJson.cells) === JSON.stringify(expectedGround),
       JSON.stringify(mappedJson.cells?.[0] ?? null));
+    check("T33c2 布局里的装饰键被升格成真正的装饰（不再只是格子键）",
+      Object.keys(mappedJson.decor ?? {}).length >= 4,
+      JSON.stringify(mappedJson.decor));
+    check("T33c3 布局里的建筑键被升格成建筑记录",
+      (mappedJson.buildings ?? []).length === 1,
+      JSON.stringify(mappedJson.buildings));
     const afterLayout = await G.readTileProject(project.id);
     check("T33d 项目里存的布局也还是手改的那份",
-      JSON.stringify(afterLayout.map.cells) === JSON.stringify(layout));
+      JSON.stringify(afterLayout.map.cells) === JSON.stringify(expectedGround));
+    check("T33d2 项目里的装饰与建筑也一并留着",
+      Object.keys(afterLayout.map.decor ?? {}).length >= 4 &&
+      (afterLayout.map.buildings ?? []).length === 1,
+      JSON.stringify({ decor: Object.keys(afterLayout.map.decor ?? {}).length, buildings: afterLayout.map.buildings }));
   }
 
   // 没有已生成地块时必须明确报错，而不是产出一张空图

@@ -792,6 +792,54 @@ section("④ 拼图阶段：三层编辑（地面 / 装饰 / 建筑）");
         String(host.decorAnchorY(SETTINGS)));
     }
   }
+
+  // ★ 回归：`cells` 里存着**装饰键**的老项目，草稿不能把那格丢成空串。
+  //
+  // 拼图那边这些格子照样铺着地面，界面草稿若丢成 `""`，预览里就出现一个个
+  // **白色菱形洞** —— 而「开始编辑布局」打开的正是这份草稿。
+  // 实测踩过：一个 13 个 tree 格的项目，编辑区里有 13 个白洞。
+  {
+    const decorCells = [
+      ["tree", "tree", "tree"],
+      ["tree", "grass", "tree"],
+      ["tree", "tree", "tree"]
+    ];
+    const proj = makeProject({
+      items,
+      preview,
+      map: {
+        rows: 3, cols: 3, seed: 5, cells: decorCells, decor: {}, buildings: [], buildingGround: [],
+        png: "map/map.png", json: "map/map.json", pixel: { width: 320, height: 288, left: 0, top: 100, scale: 2 }
+      }
+    });
+    // `ensureMapDraft` 在假 React 下没法直接调（setState 是空实现），
+    // 所以这里照着它的口径算一遍草稿：装饰键 → 用默认地面补上。
+    const groundFill = Object.keys(preview.cells)
+      .find((k) => preview.kinds[k] === "terrain" && preview.cells[k].length > 0) ?? "";
+    const derived = decorCells.map((row) =>
+      row.map((k) => (k !== "" && preview.kinds[k] !== "terrain" ? groundFill : k)));
+    check("★ 装饰键的格子会用默认地面补上（不是留空 → 白洞）",
+      derived.every((row) => row.every((k) => k === "grass")),
+      JSON.stringify(derived));
+
+    const filled = renderTile(proj, {
+      stage: "map", brushKey: "grass",
+      mapDraft: { ground: derived, decor: {}, buildings: [] }
+    }).tree;
+    check("★ 补完后每一格都画出了地面（9 格 9 张贴图，没有洞）",
+      byClassPart(filled, "SPR_mapArt").length === 9,
+      `${byClassPart(filled, "SPR_mapArt").length} 张`);
+
+    // 反面：真·空白（用户主动清空）仍然保持空洞，不能自作主张填满
+    const blank = [["", "", ""], ["", "", ""], ["", "", ""]];
+    const blankTree = renderTile(proj, {
+      stage: "map", brushKey: "grass",
+      mapDraft: { ground: blank, decor: {}, buildings: [] }
+    }).tree;
+    check("用户主动清空的格子仍然不画地面（尊重清空，不擅自填满）",
+      byClassPart(blankTree, "SPR_mapArt").length === 0,
+      `${byClassPart(blankTree, "SPR_mapArt").length} 张`);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

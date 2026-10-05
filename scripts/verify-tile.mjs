@@ -626,7 +626,6 @@ section("S4 跨格建筑锚点");
   }
   const layout = tileLayout(S, 4, 4);
   const o = tileOriginAt(layout, 1, 1);
-  // 占格菱形（2×2）的中心
   const wantX = o.x + S.cellWidth / 2 + layout.stepX / 2;
   const wantY = o.y + S.cellHeight / 2 + layout.stepY / 2;
   near("S4c 建筑底面中心 x = 占格菱形中心 x", mx / mn, wantX, 2, "px");
@@ -636,6 +635,41 @@ section("S4 跨格建筑锚点");
   const wrongY = o.y + S.cellHeight / 2;
   near("S4e 底面中心 ≠ 锚点格中心（差半格，真机 bug 的判据）",
     my / mn - wrongY, layout.stepY / 2, 2, "px");
+}
+
+// ★ S7 `families` 必须按**地块键**索引，不能按**类别**索引。
+//
+// `state.cells` 存的是地块键（`rock2`），`assembleMap` 直接拿它查
+// `options.families[键]`。传按类别聚合的那份时，凡是「地块键 ≠ 类别名」的
+// （`rock2` 的类别是 `rock`、`dirt2` 的类别是 `dirt`）都会查不到、
+// **整格静默跳过** —— 地图上留下透明菱形洞，而且预校验查的是另一份表、不报错。
+{
+  const grass = solidCell(S, [80, 160, 60, 255]);
+  const rock = solidCell(S, [140, 140, 140, 255]);
+  // 两个地块共用一个类别：rock2 的 family 是 rock
+  const lookup = new Map([["grass#0", grass], ["rock#0", rock], ["rock2#0", rock]]);
+  const st = emptyMapState(3, 3, "grass#0");
+  st.cells = [["grass", "rock2", "grass"], ["rock2", "grass", "rock2"], ["grass", "rock2", "grass"]];
+  // 正确：按地块键索引
+  const byCellKey = { grass: ["grass#0"], rock2: ["rock2#0"] };
+  const ok = assembleMap(lookup, st, { settings: S, families: byCellKey });
+  // 错误：按类别索引（rock2 查不到）
+  const byFamily = { grass: ["grass#0"], rock: ["rock#0", "rock2#0"] };
+  const bad = assembleMap(lookup, st, { settings: S, families: byFamily });
+
+  const opaque = (m) => {
+    let n = 0;
+    for (let i = 0; i < m.width * m.height; i++) if (m.rgba[i * 4 + 3] > 200) n++;
+    return n;
+  };
+  const perCell = opaque(solidCell(S, [80, 160, 60, 255]));   // 单格满铺的不透明像素数
+  check("★ S7a 按地块键索引时 9 格全铺满（无跳过）", opaque(ok) === 9 * perCell,
+    `${opaque(ok)} vs ${9 * perCell}`);
+  // 坏的那份漏掉 5 个 rock2 格 —— 缺口至少 4 格（邻格会盖掉一部分，所以不比精确值）
+  const gap = opaque(ok) - opaque(bad);
+  check("★ S7b 按类别索引会明显漏画（证明必须传地块键表）",
+    gap >= 4 * perCell,
+    `缺口 ${gap}，至少应缺 ${4 * perCell}（5 个 rock2 格）`);
 }
 
 section("S5/S6 边界与守卫");
