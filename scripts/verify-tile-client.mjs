@@ -336,8 +336,9 @@ function makeProject(overrides = {}) {
  */
 // 23 = useLocaleTick(1) + 组件自身 18 个 useState + usePendingTasks(useState + 2×useRef)
 //      + useStudioIntent(useState)。effect / callback 不占状态槽。
+// +1 = 实验性进入提示的 `gateOpen`（`useState`；配套的 `closeGate` 是 useCallback、不占槽）。
 // **新增状态时这个数字必须跟着改** —— 它是「槽位没串位」的唯一护栏。
-const EXPECTED_HOOKS = 27;
+const EXPECTED_HOOKS = 28;
 /**
  * 把测试里写的「扁平 cells 网格」补成三层草稿。
  * 断言里仍然可以只关心地面，所以旧写法继续可用。
@@ -456,7 +457,11 @@ function renderTile(project, options = {}) {
     20261004,                 // 10 mapSeed
     0.08,                     // 11 decorDensity
     false,                    // 12 creating
-    // 13~18：编辑相关草稿（未编辑时全是 null）
+    // 13：实验性进入提示（`gateOpen`）。默认 false = 弹窗已关，
+    // 免得每个用例都被那个弹窗盖住、断言读不到底下的控件。
+    // （要测弹窗的用例自己传 `gateOpen: true`。）
+    drafts.gateOpen ?? false,
+    // 14~19：编辑相关草稿（未编辑时全是 null）
     drafts.editingKey ?? null,
     drafts.itemDraft ?? null,
     drafts.newItem ?? null,

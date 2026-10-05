@@ -20,7 +20,7 @@ DSH 插件「游戏素材大师」：从一张角色设定图出发批量产出�
 | 图片生成 | `image` | 正式 |
 | 序列帧生成 | `sequence` | 正式 |
 | 骨骼动画生成 | `rig` | **实验性**（页签带角标、进入弹窗、模块内常驻提示条） |
-| 地图地块生成 | `tile` | 正式（等距地块 → 拼成地图） |
+| 45°地图地块生成 | `tile` | **实验性**（45° 等距地块 → 拼成地图） |
 
 ---
 
@@ -53,7 +53,7 @@ npm run typecheck    # 只做类型检查
 
 ```bash
 node scripts/verify-host.mjs       # 宿主全链路（317 项）
-node scripts/verify-client.mjs     # 浏览器半区契约（324 项）
+node scripts/verify-client.mjs     # 浏览器半区契约（332 项）
 node scripts/verify-tools.mjs      # 对话调用面（123 项）
 node scripts/verify-pipeline.mjs   # 抽帧 / 抠像 / 合成（40 项）
 node scripts/verify-feedback.mjs   # 浏览器半区真渲染（119 项）
@@ -179,6 +179,7 @@ npm view dsh-game-material-master dist-tags
   （设置页则裁到 `[role=dialog]` 的范围）。
 - 深链接可以直接把界面切到目标页面：`http://127.0.0.1:<port>/?dsh-gmm=1&module=sprite&project=<id>&stage=videos`。
 - **设置页截图必须处理 API Key 回显**（界面显示脱敏尾号），用局部模糊盖掉再入库。
+
 
 
 

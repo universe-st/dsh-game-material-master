@@ -341,7 +341,7 @@ Key 只写入本机 `<DSH_HOME>/game-material-master/config.json`，回传界面
 
 ---
 
-## 模块五：地图地块生成
+## 模块五：45°地图地块生成（实验性）
 
 把「等距地块」变成一张能直接用的地图。整条思路一句话：
 
@@ -1853,6 +1853,7 @@ running 落在下一次 `getProject` 里**：
 ## 许可
 
 [MIT](LICENSE)
+
 
 
 

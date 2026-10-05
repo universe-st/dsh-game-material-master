@@ -903,9 +903,13 @@
       "{n0}: 深链接拦截": "{n0}: deep link interception",
       "{n0}: 深链接引导": "{n0}: deep link guidance",
 
-      // ── 地图地块生成（模块五）──
-      "地图地块生成": "Map tile generation",
-      "等距地块 → 拼成地图：几何交给代码，内容交给 AI": "Isometric tiles → a whole map: geometry by code, content by AI",
+      // ── 45° 地图地块生成（模块五）──
+      "45°地图地块生成": "45° map tile generation",
+      "45° 等距地块 → 拼成地图：几何交给代码，内容交给 AI": "45° isometric tiles → a whole map: geometry by code, content by AI",
+      "45°地图地块生成仍在开发中": "45° map tile generation is still in development",
+      "45°地图地块生成（实验性）": "45° map tile generation (experimental)",
+      "几何是可靠的：等距参考图、拼图与裁剪全部由本地代码计算，并有像素级自检兜底 —— 菱形比例、底面中心、包围盒都不会跑偏。": "The geometry is solid: the isometric reference images, map assembly and cropping are all computed by local code with pixel-level self-checks — diamond ratio, base centre and bounding box will not drift.",
+      "不稳定的是**造型**：生图模型能否照着参考图的占格形状画出正确的建筑，取决于模型本身。实测非矩形占地（L 形、3×1 长条）经常需要反复重跑才可接受。": "What is unstable is the **artwork**: whether the image model can draw a correct building from the footprint shape in the reference image depends on the model itself. In practice non-rectangular footprints (L-shapes, 3x1 strips) often need several re-runs before they are acceptable.",
       "参考图（自动生成，免费）": "Reference image (auto-generated, free)",
       "待生成": "Pending",
       "还没生成 —— 点「生成全部地块」时会自动渲染": "Not generated yet — it will be rendered automatically when you click Generate all tiles",
@@ -1409,12 +1413,14 @@
     }
 
     /**
-     * 模块④「骨骼动画生成」还是实验性功能。
+     * 实验性模块的呈现材料。
      *
      * `experimental` 只影响**呈现**：页签上加角标、进入时弹一次说明、模块里常驻一条提示条。
      * 功能本身一概不拦——链路照常可用，只是要让用户先知道现状，并把共建入口摆出来。
      */
-    const RIG_EXPERIMENTAL_REPO = "https://github.com/universe-st/dsh-game-material-master";
+    const EXPERIMENTAL_REPO = "https://github.com/universe-st/dsh-game-material-master";
+
+    /** 模块④「骨骼动画生成」的实验性说明。 */
     function make_RIG_EXPERIMENTAL_POINTS() {
       return [
       T("功能还不完善：拆件质量取决于生图模型，自动装配与骨骼推导对真实立绘经常需要人工校正，导出的 Spine / DragonBones 产物也还没经足够的引擎侧验证。"),
@@ -1424,15 +1430,31 @@
     }
     let RIG_EXPERIMENTAL_POINTS = make_RIG_EXPERIMENTAL_POINTS();
 
+    /**
+     * 模块⑤「45°地图地块生成」也是实验性功能。
+     *
+     * 为什么标实验性：几何管线（参考图、拼图、裁剪）全部是本地代码算的、有像素级自检，
+     * 这块可靠；**不稳定的是「AI 能不能照着占格形状画出对的造型」** ——
+     * 实测非矩形占地（L 形、3×1 长条）经常要人工反复重跑才能接受。
+     */
+    function make_TILE_EXPERIMENTAL_POINTS() {
+      return [
+      T("几何是可靠的：等距参考图、拼图与裁剪全部由本地代码计算，并有像素级自检兜底 —— 菱形比例、底面中心、包围盒都不会跑偏。"),
+      T("不稳定的是**造型**：生图模型能否照着参考图的占格形状画出正确的建筑，取决于模型本身。实测非矩形占地（L 形、3×1 长条）经常需要反复重跑才可接受。"),
+      T("发现问题或有改进想法，欢迎到 GitHub 仓库一起开发。")
+    ];
+    }
+    let TILE_EXPERIMENTAL_POINTS = make_TILE_EXPERIMENTAL_POINTS();
 
-    /** 四个功能模块。插件是「大师」，每个模块管一类素材。 */
+
+    /** 五个功能模块。插件是「大师」，每个模块管一类素材。 */
     function make_MODULES() {
       return [
       { key: "sprite", title: T("八方向图生成"), hint: T("一张设定图 → 8 方向 × 8 帧精灵图") },
       { key: "image", title: T("图片生成"), hint: T("按提示词出图，可带参考图，支持抠绿幕导出 PNG") },
       { key: "sequence", title: T("序列帧生成"), hint: T("图/视频参考生成视频 → 抽帧 → 抠像 → 合成与播放预览") },
       { key: "rig", title: T("骨骼动画生成"), hint: T("拆件 → 装配定位 → 推骨骼与动画 → 打包 Spine 图集"), experimental: true },
-      { key: "tile", title: T("地图地块生成"), hint: T("等距地块 → 拼成地图：几何交给代码，内容交给 AI") }
+      { key: "tile", title: T("45°地图地块生成"), hint: T("45° 等距地块 → 拼成地图：几何交给代码，内容交给 AI"), experimental: true }
     ];
     }
     let MODULES = make_MODULES();
@@ -5153,6 +5175,16 @@
       const [mapSeed, setMapSeed] = React.useState(20261004);
       const [decorDensity, setDecorDensity] = React.useState(0.08);
       const [creating, setCreating] = React.useState(false);
+      /**
+       * 实验性进入提示：TileModule 就是「进入了模块⑤」，页签切换与深链接都会
+       * 重新挂载它，所以放在这里等于「每次进入都弹」；勾过「本次会话不再提示」就不弹。
+       *
+       * ⚠️ Hook 必须在**任何提前 return 之前**（下面 `project === null` 那条
+       * 早返回会绕过它）—— 顺序一变就是 React error #310，整块白屏。
+       * `verify-tile-client.mjs` 的 Hook 顺序契约会拦。
+       */
+      const [gateOpen, setGateOpen] = React.useState(experimentalGateMuted.tile !== true);
+      const closeGate = React.useCallback(() => setGateOpen(false), []);
       /** 正在编辑哪个地块（key）；null = 没有在编辑。 */
       const [editingKey, setEditingKey] = React.useState(null);
       /** 该地块的草稿（点「保存」才提交，避免每敲一个字就作废产物）。 */
@@ -5427,6 +5459,8 @@
 
       if (project === null) {
         return h("div", { className: "SPR_module" },
+          gateOpen ? h(TileExperimentalDialog, { onClose: closeGate }) : null,
+          h(ExperimentalBar, null),
           header,
           h("div", { className: "SPR_empty" }, T("还没有地图地块项目——取个名字点「新建项目」开始。")),
           notice === null ? null : h("div", { className: `SPR_notice SPR_notice-${notice.kind}` }, notice.text)
@@ -7041,6 +7075,8 @@
         : exportStage;
 
       return h("div", { className: "SPR_module" },
+        gateOpen ? h(TileExperimentalDialog, { onClose: closeGate }) : null,
+        h(ExperimentalBar, null),
         header,
         steps,
         notice === null ? null : h("div", { className: `SPR_notice SPR_notice-${notice.kind}` }, notice.text),
@@ -10693,25 +10729,29 @@
     }
 
     /**
-     * 「本次会话不再提示」的选择。
+     * 「本次会话不再提示」的选择（**按模块各记一份**）。
      *
-     * 刻意放在 React 状态之外：切模块时 RigModule 会卸载重建，只有闭包变量才跨挂载
+     * 刻意放在 React 状态之外：切模块时组件会卸载重建，只有闭包变量才跨挂载
      * 记得住这次选择。刷新页面即恢复提示（会话级，不落盘、不写进任务数据）。
+     *
+     * ⚠️ 必须**按模块分开**：共用一个标志的话，用户在骨骼动画那边勾了
+     * 「不再提示」，进 45° 地图地块时弹窗就再也不出现了 —— 两个模块的
+     * 实验性说明内容完全不同，那样等于静默漏掉一次告知。
      */
-    let rigGateMuted = false;
+    const experimentalGateMuted = { rig: false, tile: false };
 
     /**
-     * 进入模块④时的实验性说明弹窗。
+     * 实验性说明弹窗（模块④ / ⑤ 共用）。
      *
      * 只解释现状 + 给共建入口，没有「继续 / 取消」这类功能性按钮——功能本身照常可用，
      * 这里拦的只是「不知情地把它当稳定功能用」。
      */
-    function RigExperimentalDialog({ onClose }) {
+    function ExperimentalDialog({ moduleKey, title, ariaLabel, points, onClose }) {
       const [mute, setMute] = React.useState(false);
       const close = React.useCallback(() => {
-        if (mute) rigGateMuted = true;
+        if (mute) experimentalGateMuted[moduleKey] = true;
         onClose();
-      }, [mute, onClose]);
+      }, [mute, moduleKey, onClose]);
 
       // Esc 关闭：弹窗盖住整个工作台，键盘退出是最低限度的礼貌。
       React.useEffect(() => {
@@ -10729,7 +10769,7 @@
           className: "SPR_gateMask",
           role: "dialog",
           "aria-modal": "true",
-          "aria-label": T("骨骼动画生成（实验性）"),
+          "aria-label": ariaLabel,
           onClick: close
         },
         h(
@@ -10739,13 +10779,13 @@
             "div",
             { className: "SPR_gateHead" },
             h("span", { className: "SPR_expTag" }, T("实验性")),
-            h("span", { className: "SPR_gateTitle" }, T("骨骼动画生成仍在开发中"))
+            h("span", { className: "SPR_gateTitle" }, title)
           ),
-          RIG_EXPERIMENTAL_POINTS.map((text, index) => h("p", { key: index, className: "SPR_gateBody" }, text)),
+          points.map((text, index) => h("p", { key: index, className: "SPR_gateBody" }, text)),
           h(
             "a",
-            { className: "SPR_link", href: RIG_EXPERIMENTAL_REPO, target: "_blank", rel: "noreferrer" },
-            RIG_EXPERIMENTAL_REPO
+            { className: "SPR_link", href: EXPERIMENTAL_REPO, target: "_blank", rel: "noreferrer" },
+            EXPERIMENTAL_REPO
           ),
           h(
             "div",
@@ -10758,7 +10798,7 @@
             ),
             h(
               "a",
-              { className: "SPR_btn", href: RIG_EXPERIMENTAL_REPO, target: "_blank", rel: "noreferrer" },
+              { className: "SPR_btn", href: EXPERIMENTAL_REPO, target: "_blank", rel: "noreferrer" },
               T("去 GitHub 仓库")
             ),
             h(Btn, { onClick: close, primary: true, "data-testid": "rig-experimental-ok" }, T("我知道了"))
@@ -10768,7 +10808,7 @@
     }
 
     /** 模块内常驻的实验性提示条：弹窗关掉之后，标记不能跟着消失。 */
-    function RigExperimentalBar() {
+    function ExperimentalBar() {
       return h(
         "div",
         { className: "SPR_expBar" },
@@ -10776,11 +10816,33 @@
         h("span", { className: "SPR_expBarText" }, T("该模块功能尚不完善，仍在开发中；若你需要它，欢迎到")),
         h(
           "a",
-          { className: "SPR_link", href: RIG_EXPERIMENTAL_REPO, target: "_blank", rel: "noreferrer" },
+          { className: "SPR_link", href: EXPERIMENTAL_REPO, target: "_blank", rel: "noreferrer" },
           T("GitHub 仓库")
         ),
         h("span", { className: "SPR_expBarText" }, T("一起开发。"))
       );
+    }
+
+    /** 进入模块④时的实验性说明弹窗（骨骼动画）。 */
+    function RigExperimentalDialog({ onClose }) {
+      return h(ExperimentalDialog, {
+        moduleKey: "rig",
+        title: T("骨骼动画生成仍在开发中"),
+        ariaLabel: T("骨骼动画生成（实验性）"),
+        points: RIG_EXPERIMENTAL_POINTS,
+        onClose
+      });
+    }
+
+    /** 进入模块⑤时的实验性说明弹窗（45° 地图地块）。 */
+    function TileExperimentalDialog({ onClose }) {
+      return h(ExperimentalDialog, {
+        moduleKey: "tile",
+        title: T("45°地图地块生成仍在开发中"),
+        ariaLabel: T("45°地图地块生成（实验性）"),
+        points: TILE_EXPERIMENTAL_POINTS,
+        onClose
+      });
     }
 
     /**
@@ -10805,7 +10867,7 @@
       const [showReference, setShowReference] = React.useState(true);
       // 实验性进入提示：RigModule 恰好就是「进入了模块④」，页签切换和深链接都会
       // 重新挂载它，所以放在这里等于「每次进入都弹」；勾过「本次会话不再提示」就不弹。
-      const [gateOpen, setGateOpen] = React.useState(rigGateMuted !== true);
+      const [gateOpen, setGateOpen] = React.useState(experimentalGateMuted.rig !== true);
       const closeGate = React.useCallback(() => setGateOpen(false), []);
       const [anim, setAnim] = React.useState("idle");
       const [promptDraft, setPromptDraft] = React.useState("");
@@ -11011,7 +11073,7 @@
         // 弹窗是 position:fixed，放在这个滚动容器里也照样盖住整个工作台，
         // 不必为此把 RigModule 再包一层 Fragment。
         gateOpen ? h(RigExperimentalDialog, { onClose: closeGate }) : null,
-        h(RigExperimentalBar, null),
+        h(ExperimentalBar, null),
         h(
           "div",
           { className: "SPR_toolbar" },
@@ -12132,3 +12194,5 @@
     return bundleModule.exports;
   }
 });
+
+

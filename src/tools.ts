@@ -438,7 +438,7 @@ const CALL_DESCRIPTION = [
   "  runRigBones({jobId})【本地生成骨架与动画，同时产出 Spine 4.2 skeleton.json 与 DragonBones 5.5 skeleton_ske.json】/",
   "  runRigAtlas({jobId})【本地打包图集，同时产出 Spine .atlas 与 DragonBones _tex.json】",
   "  ★ 自动摆位不准时用 setRigLayoutHints：先 read_image 看 getRigJob 返回的 partsMontagePath（部件按 partsOrder 顺序排列）",
-  "地图地块生成（模块五）：listTileProjects() / createTileProject({name,style?,lang?,settings?}) / getTileProject({projectId,lang?}) /",
+  "45°地图地块生成（模块五，**实验性**）：listTileProjects() / createTileProject({name,style?,lang?,settings?}) / getTileProject({projectId,lang?}) /",
   "  deleteTileProject({projectId}) / saveTileProject({projectId,lang?,name?,style?,items?,settings?,resetItemsToDefault?})【改 style / items / settings 会让已生成的地块作废，重跑要花钱】/",
   "  runTileItems({projectId,keys?})【★花钱：按清单逐类生成，每个变体一次 Seedream 调用】/ runTileItem({projectId,key,variant?})【★花钱：只重跑某一张】/",
   "  setTileApproved({projectId,key?,variant?,approved})【② 验收，只打勾不作废任何东西】/",
@@ -570,7 +570,7 @@ export function registerStudioTools(host: StudioToolHost, gateway: GameStudioGat
               rig: buildOpenLink({ module: "rig" }),
               tile: buildOpenLink({ module: "tile" })
             },
-            hint: "用 game_material_status({module,id}) 看某个目标的细节；八方向图的四步是 images → videos → frames → sheet，地图地块是 generate → review → map → export。"
+            hint: "用 game_material_status({module,id}) 看某个目标的细节；八方向图的四步是 images → videos → frames → sheet，45°地图地块是 generate → review → map → export。"
           };
         }
         // ⚠️ 这里**不能**再按 module 短路：`status({module:'tile', id})` 也走到这里，
@@ -1107,6 +1107,7 @@ function intakeFor(module: ModuleKey, id: string, told: Set<string>, config: any
     if (config?.arkApiKeySet !== true) {
       blockers.push("还没配置火山方舟 API Key（生图必需）：设置 → 游戏素材大师 → 火山方舟 API Key，配好点「测试连接」。");
     }
+    known.实验性 = "45°地图地块生成是实验性功能：几何（参考图/拼图/裁剪）由本地代码算、有像素级自检，可靠；不稳定的是「AI 能否照着占格形状画出对的造型」，非矩形占地经常要重跑。";
     known.四个阶段 = "① 生成地块（★计费；参考图会按占格形状自动渲染，不用手动准备）→ ② 验收 → ③ 拼成地图（本地免费，可反复）→ ④ 导出";
     known.几何由代码保证 = "等距参考图由本地代码按「占格形状」渲染（严格 2:1 等距），AI 只负责填内容。实测这样菱形比例达标率 100%";
     known.默认地块清单 = "9 类地形（草/土/石/灌木，各 1~2 变体）+ 4 个独立装饰（树/松树/巨石）+ 1 栋跨 2×2 格建筑";
