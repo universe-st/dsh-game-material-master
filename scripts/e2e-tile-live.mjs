@@ -47,17 +47,20 @@ await tilegen.patchTileProject(project.id, (fresh) => {
 const kept = await tilegen.readTileProject(project.id);
 console.log(`  保留 ${kept.items.length} 类：${kept.items.map((i) => `${i.key}(${i.kind})`).join("、")}`);
 
-// ── ② 模板（免费）────────────────────────────────────────────────────────
-step(2, "生成模板（本地渲染，免费）");
-await tilegen.runTemplateStage(project.id);
-await waitIdle(project.id);
+// ── ② 参考图（免费）──────────────────────────────────────────────────────
+// 原来的「① 模板」阶段已经取消：参考图由生成阶段内部按占格形状自动渲染
+// （见 src/tilegen.ts runGenerateStage 里的 ensureTemplates 调用）。
+// 这里只把参考图先渲染出来，好在花钱之前确认菱形比例对不对。
+step(2, "渲染参考图（本地计算，免费）");
+const rendered = await tilegen.ensureTemplates(await tilegen.readTileProject(project.id));
+console.log(`  本次渲染 ${rendered.length} 张${rendered.length === 0 ? "（复用已有，指纹未变）" : `：${rendered.join("、")}`}`);
 const tpl = join(tilegen.tileProjectDir(project.id), "template", "cell.png");
 const tplBitmap = await tilemedia.decodeFile(tpl);
 const tplBounds = await measureForeground(tplBitmap);
 console.log(`  template/cell.png ${tplBitmap.width}×${tplBitmap.height}`);
 console.log(`  菱形 ${tplBounds.w}×${tplBounds.h}，比例 ${(tplBounds.w / tplBounds.h).toFixed(4)}`);
 if (Math.abs(tplBounds.w / tplBounds.h - 2) > 0.01) {
-  console.error("  ✗ 模板比例不对，后面全不可信");
+  console.error("  ✗ 参考图比例不对，后面全不可信");
   process.exit(1);
 }
 

@@ -36,8 +36,8 @@ await G.patchTileProject(project.id, (fresh) => {
   fresh.items = fresh.items.filter((item) => usable.some((u) => u.key === item.key)).map((item) => ({ ...item, variantCount: 1 }));
   fresh.map = { ...fresh.map, rows: 8, cols: 8, seed: 20261004 };
 });
-await G.runTemplateStage(project.id);
-await waitIdle(project.id);
+// 参考图（原「① 模板」阶段，现已并入生成阶段）——本地渲染，免费
+await G.ensureTemplates(await G.readTileProject(project.id));
 
 // ── 用源项目的 raw 重新规整（几何按当前代码算）─────────────────────────────
 for (const item of usable) {
