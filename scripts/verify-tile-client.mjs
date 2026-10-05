@@ -690,10 +690,14 @@ section("④ 拼图阶段：三层编辑（地面 / 装饰 / 建筑）");
     groundUnder: "cell/grass.v1.png"
   };
   const ground = [["grass", "grass", "grass"], ["grass", "grass", "dirt"], ["grass", "grass", "grass"]];
+  // 建筑锚点放 (0,0)，占格 (0,0)(0,1)(1,0)(1,1) —— 必须整个落在 3×3 图内，
+  // 否则「缺地面」的判定会因为越界而误判（越界格查不到地面 → 以为要垫底）。
+  // 占格铺草地（`paint` 现在的做法），所以垫底不该再出现。
+  // 装饰放 (1,2)：**必须在建筑占格之外** —— 占格里的装饰会被抑制（正确行为）。
   const draft = {
     ground,
-    decor: { "1,1": "tree" },
-    buildings: [{ r: 2, c: 1, fw: 2, fh: 2, key: "building", under: "cell/grass.v1.png" }]
+    decor: { "1,2": "tree" },
+    buildings: [{ r: 0, c: 0, fw: 2, fh: 2, key: "building", under: "grass" }]
   };
   const items = [
     makeItem({ key: "grass", label: "草地", kind: "terrain", family: "grass" }),
@@ -721,7 +725,7 @@ section("④ 拼图阶段：三层编辑（地面 / 装饰 / 建筑）");
   check("★ 树那一格同时有草地（装饰不顶掉地面）",
     arts.some((n) => String(n.props.alt).startsWith("1,1 ") && String(n.props.src).includes("grass")),
     arts.map((n) => n.props.alt).join(" | "));
-  check("装饰贴在树那一格", String(decors[0]?.props.alt) === "decor 1,1", String(decors[0]?.props.alt));
+  check("装饰贴在树那一格", String(decors[0]?.props.alt) === "decor 1,2", String(decors[0]?.props.alt));
   // ★ 2×2 建筑：占格的地面被让开，建筑按占格宽摆
   check("建筑单独成层", builds.length === 1, `${builds.length} 个`);
   const bimg = collect(builds[0], (n) => n.type === "img")[0];
@@ -735,8 +739,9 @@ section("④ 拼图阶段：三层编辑（地面 / 装饰 / 建筑）");
     const originX = (rows - 1) * stepX, originY = ch * scale;
     const trimLeft = 0, trimTop = 100;
     const fw = 2, fh = 2;   // 夹具里那栋楼是 2×2
-    const x = Math.round(originX + (1 - 2) * stepX) - trimLeft;
-    const y = Math.round(originY + (1 + 2) * stepY) - trimTop;
+    const br = 0, bc = 0;   // 锚点 (0,0)
+    const x = Math.round(originX + (bc - br) * stepX) - trimLeft;
+    const y = Math.round(originY + (bc + br) * stepY) - trimTop;
     // ★ 底面中心 = **占格菱形**的中心（2×2 时比锚点格中心右/下各半格）。
     // 写成锚点格中心就是真机那个「建筑浮在半空、垫底偏半格」的 bug。
     const anchorX = x + (cw * scale) / 2;
@@ -752,10 +757,17 @@ section("④ 拼图阶段：三层编辑（地面 / 装饰 / 建筑）");
       Number.parseFloat(String(bimg?.props["data-by"] ?? "0")) - anchorY === stepY / 2,
       `差 ${Number.parseFloat(String(bimg?.props["data-by"] ?? "0")) - anchorY}px`);
   }
-  check("被建筑占掉的格子不再画地面",
-    !arts.some((n) => String(n.props.alt).startsWith("2,1 ") || String(n.props.alt).startsWith("2,2 ")),
+  // ★ 语义变了：建筑占格现在**照画地面**（与宿主 `place()` 同口径）。
+  //
+  // 以前占格被清空，只能靠一块裁成菱形的纯色垫底去堵洞 —— 那块垫底和周围
+  // 有纹理的草地格格不入，真机上看着像建筑拖着一块塑料板。
+  // 现在占格铺真地面，垫底只在「占格确实缺地面」时才补。
+  check("★ 建筑占格照画地面（不再是空洞）",
+    ["0,0", "0,1", "1,0", "1,1"].every((pos) =>
+      arts.some((n) => String(n.props.alt).startsWith(`${pos} `))),
     arts.map((n) => n.props.alt).join(" | "));
-  check("建筑底面有垫底（SPR_mapUnder）", byClassPart(tree, "SPR_mapUnder").length === 1,
+  check("占格有地面时不再叠那块纯色垫底",
+    byClassPart(tree, "SPR_mapUnder").length === 0,
     `${byClassPart(tree, "SPR_mapUnder").length} 个`);
 
   // ★ 红警盖房子式幽灵预览：选 2×2 建筑笔刷、光标停在某格时，

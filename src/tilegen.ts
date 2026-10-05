@@ -976,12 +976,17 @@ function decorateState(
   /**
    * 放置一栋建筑。
    *
-   * ⚠️ 放完必须把占格的键**清空** —— 留着的话 `assembleMap` 会把这些格子当成
+   * ⚠️ 占格的键**不能留着建筑键** —— 留着的话 `assembleMap` 会把这些格子当成
    * 「地面地块」，再拿同一个建筑贴图当 1 格地面画 4 次，地图上多出一大块残影。
    *
-   * ⚠️ 清空之后**布局里就再也看不到这栋楼了**（键没了）。所以 `buildings` 与
+   * ⚠️ 但也**不能清成空串**：空串等于这一格什么都不铺，建筑底面菱形的四个角
+   * 是透明的，露出来的就是**一块纯色垫底**（`fillDiamondSolid` 填的平均色），
+   * 和周围有纹理的草地格格不入 —— 看着像建筑拖着一块塑料板。
+   * 所以这里把它换成**默认地面**：该铺的地面照铺，建筑贴图盖在上面。
+   *
+   * ⚠️ 换成地面之后**布局里就再也看不到这栋楼了**（键没了）。所以 `buildings` 与
    * `buildingGround` 必须作为「已放置」的记录一起存回去，重跑时先沿用它们；
-   * 只看 `cells` 的话，第二次拼图时建筑的键已经被自己清掉了 —— 楼会凭空消失。
+   * 只看 `cells` 的话，第二次拼图时建筑的键已经被自己换掉了 —— 楼会凭空消失。
    *
    * `ground` 存的是**变体名**（`grass#0`）—— `lookup` 的键就是这个形状。
    */
@@ -992,10 +997,12 @@ function decorateState(
     if (out.buildings.some((b) => b[0] === r && b[1] === c)) return;
     out.buildings.push([r, c, name]);
     (out.buildingGround ??= []).push([r, c, fw, fh, ground]);
+    // 占格铺回默认地面（地块键，不是变体名 —— `cells` 存的是地块键）
+    const fillKey = groundItemKey !== "" ? groundItemKey : groundFillKey(families);
     for (let dr = 0; dr < fh; dr++) {
       for (let dc = 0; dc < fw; dc++) {
         occupied.add(`${r + dr},${c + dc}`);
-        out.cells[r + dr][c + dc] = "";
+        if (fillKey !== "") out.cells[r + dr][c + dc] = fillKey;
       }
     }
   };

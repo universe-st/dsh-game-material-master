@@ -366,8 +366,13 @@ section("④ 拼图 / ⑤ 导出（走网关，免费）");
       const b1 = await studio.getTileProject({ projectId: id });
       check("建筑被记进了 buildings", (b1.map.buildings ?? []).length === 1,
         JSON.stringify(b1.map.buildings));
-      check("建筑的占格被清空（否则同一精灵会被当 1 格地面重复画）",
-        b1.map.cells[2][2] === "" && b1.map.cells[3][3] === "",
+      // ★ 语义变了：占格铺**真地面**，不是空串、也不是建筑键。
+      //
+      // 清成空串的话那一格什么都不铺，建筑底面菱形的四个角露出纯色垫底，
+      // 和周围有纹理的草地格格不入（真机上像建筑拖着一块塑料板）。
+      // 现在占格铺默认地面，建筑贴图盖上去。
+      check("★ 建筑的占格铺回了地面（不是空串，也不是建筑键）",
+        b1.map.cells[2][2] === "grass" && b1.map.cells[3][3] === "grass",
         JSON.stringify(b1.map.cells[2]));
       check("建筑底面记了垫底地面，且是**变体名**（lookup 的键就是它）",
         (b1.map.buildingGround ?? []).length === 1 && String(b1.map.buildingGround[0][4]).includes("#"),
@@ -469,8 +474,8 @@ section("④ 拼图 / ⑤ 导出（走网关，免费）");
       check("layouts 的占格与垫底地面一并落盘",
         JSON.stringify(L.map.buildingGround?.[0]?.slice(0, 4)) === "[2,2,2,2]",
         JSON.stringify(L.map.buildingGround));
-      check("回传 layouts 时占格被留空（不重复画地面）",
-        L.map.cells[2][2] === "" && L.map.cells[3][3] === "",
+      check("★ 回传 layouts 时占格铺了地面（不是空串）",
+        L.map.cells[2][2] === "grass" && L.map.cells[3][3] === "grass",
         JSON.stringify(L.map.cells[2]));
 
       // ★ 多栋建筑 + 装饰的**保存往返**：一栋都不能丢。
@@ -500,9 +505,9 @@ section("④ 拼图 / ⑤ 导出（走网关，免费）");
       check("★ preview 也看到 4 栋（界面据此画预览）",
         (R.preview?.buildings ?? []).length === 4,
         String((R.preview?.buildings ?? []).length));
-      check("建筑占格都被清空（拼图不会再画一遍地面）",
+      check("★ 建筑占格都铺着地面（不再被清空成空串）",
         R.map.buildings.every(([br, bc]) =>
-          R.map.cells[br][bc] === "" && R.map.cells[br + 1][bc + 1] === ""),
+          R.map.cells[br][bc] !== "" && R.map.cells[br + 1][bc + 1] !== ""),
         JSON.stringify(R.map.cells.map((row) => row.join(""))));
 
       // ★ 「大格子铺了之后清不掉」：显式传 layouts:[] 要能把楼拆干净，

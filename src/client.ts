@@ -6034,10 +6034,14 @@
           );
           const under = defaultUnder();
           buildings = [...buildings, { r, c, fw, fh, key, under }];
-          // 占格的地面清空：拼图会把这块单独画成建筑，这里留着会重复画一遍
+          // 占格铺**真实地面**（不是清空）。
+          //
+          // 清空的话这一格什么都不铺，建筑底面菱形的四个角是透明的，露出来的
+          // 就是那块纯色垫底 —— 和周围有纹理的草地格格不入（看着像拖了块塑料板）。
+          // 铺上地面之后建筑贴图盖上去，边角自然和草地接上。宿主 `place()` 同口径。
           for (let dr = 0; dr < fh; dr++) {
             for (let dc = 0; dc < fw; dc++) {
-              ground[r + dr][c + dc] = "";
+              ground[r + dr][c + dc] = under;
               delete decor[`${r + dr},${c + dc}`];
             }
           }
@@ -6181,10 +6185,29 @@
         const decor = [];
         const builds = [];
         const cells = [];
-        // 建筑底面的垫底：建筑贴图只覆盖它自己那块形状，底面菱形的四角是透明的，
-        // 不垫一层就会露出洞（与宿主 `fillDiamondSolid` 同一个目的）。
-        // 用 `<img>` 再 `clip-path` 裁成菱形摆进去 —— 天然带地面配色。
+        // 建筑底面的垫底。
+        //
+        // ⚠️ 只在占格地面**没铺满**时才需要它：占格现在铺着真地面，
+        // 底面菱形的四角由邻格的草地盖住，再叠一块裁成菱形的贴图反而会在
+        // 草地上压出一个边界硬朗的菱形（原来那块「塑料板」就是这么来的）。
+        // 所以逐格检查：谁缺地面，就给它垫一块。
+        const groundCovered = new Set();
         for (const b of mapDraft.buildings) {
+          for (let dr = 0; dr < b.fh; dr++) {
+            for (let dc = 0; dc < b.fw; dc++) {
+              const key = mapDraft.ground[b.r + dr]?.[b.c + dc];
+              if (typeof key === "string" && key !== "") groundCovered.add(`${b.r + dr},${b.c + dc}`);
+            }
+          }
+        }
+        for (const b of mapDraft.buildings) {
+          const missing = [];
+          for (let dr = 0; dr < b.fh; dr++) {
+            for (let dc = 0; dc < b.fw; dc++) {
+              if (!groundCovered.has(`${b.r + dr},${b.c + dc}`)) missing.push(`${b.r + dr},${b.c + dc}`);
+            }
+          }
+          if (missing.length === 0 || b.under === "") continue;
           const x = Math.round(originX + (b.c - b.r) * stepX) - trimLeft;
           const y = Math.round(originY + (b.c + b.r) * stepY) - trimTop;
           const w = cw * ((b.fw + b.fh) / 2) * scale;
@@ -6193,22 +6216,20 @@
           // 用锚点格中心的话垫底会往左上偏半格，建筑看着像浮在半空。
           const baseX = x + (cw * scale) / 2 + ((b.fw - 1) * stepX) / 2;
           const baseY = y + (ch * scale) / 2 + ((b.fh - 1) * stepY) / 2;
-          if (b.under !== "") {
-            // 垫底的草贴图：先按地块键查第一张（草通常只有一个变体）
-            const underArt = (project.preview?.cells?.[b.under] ?? [])[0] ?? b.under;
-            under.push(h("img", {
-              key: `u${b.r},${b.c}`,
-              className: "SPR_mapArt SPR_mapUnder",
-              src: artUrl(underArt),
-              alt: `under ${b.r},${b.c}`,
-              style: {
-                left: `${baseX - w / 2}px`,
-                top: `${baseY - hh / 2}px`,
-                width: `${w}px`, height: `${hh}px`,
-                clipPath: "polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)"
-              }
-            }));
-          }
+          // 垫底的草贴图：先按地块键查第一张（草通常只有一个变体）
+          const underArt = (project.preview?.cells?.[b.under] ?? [])[0] ?? b.under;
+          under.push(h("img", {
+            key: `u${b.r},${b.c}`,
+            className: "SPR_mapArt SPR_mapUnder",
+            src: artUrl(underArt),
+            alt: `under ${b.r},${b.c}`,
+            style: {
+              left: `${baseX - w / 2}px`,
+              top: `${baseY - hh / 2}px`,
+              width: `${w}px`, height: `${hh}px`,
+              clipPath: "polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)"
+            }
+          }));
         }
         // 被建筑占掉的格子不画地面（与宿主口径一致：建筑单独 blit）
         const occupiedByBuilding = new Set();
@@ -6237,7 +6258,11 @@
             const x = Math.round(originX + (c - r) * stepX) - trimLeft;
             const y = Math.round(originY + (c + r) * stepY) - trimTop;
             const occupied = occupiedByBuilding.has(`${r},${c}`);
-            const art = key === "" || occupied ? null : variantArt(key, r, c);
+            // ⚠️ 建筑占格**照画地面**（不再因为 occupied 就跳过）。
+            // 宿主 `place()` 现在也把占格铺回默认地面，两边必须一致：
+            // 占格空着的话建筑底面菱形的四个角会露出纯色垫底，
+            // 和周围有纹理的草地格格不入。
+            const art = key === "" ? null : variantArt(key, r, c);
             if (art !== null) {
               layers.push(h("img", {
                 key: `a${r},${c}`,

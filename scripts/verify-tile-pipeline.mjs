@@ -375,11 +375,11 @@ section("④ 拼图阶段（本地，免费）");
     // ⚠️ 注意比的是「**渲染后的地面**」而不是原样那份 layout：
     // `layout` 里的 `tree` / `building` 是**单层时代的写法**（把装饰与建筑当格子键涂）。
     // 拼图会把它们升格成真正的装饰/建筑，并把那几格补成默认地面 ——
-    // 留下的空洞正是真机上那些「白色菱形洞」。
+    // 留空的话正是真机上那些「白色菱形洞」。
+    //
+    // 建筑占格也补地面（不是清空）：清了的话建筑底面菱形的四角会露出纯色垫底。
     const mappedJson = JSON.parse(readFileSync(join(dir, "map", "map.json"), "utf8"));
     const expectedGround = layout.map((row) => row.map((k) => (k === "tree" || k === "building" ? "grass" : k)));
-    // 建筑占格（2×2）会被清空，不是补草地
-    for (const [r, c] of [[3, 3], [3, 4], [4, 3], [4, 4]]) expectedGround[r][c] = "";
     check("T33c 传覆盖参数时手改布局被保留（不会被 fill 覆盖掉）",
       JSON.stringify(mappedJson.cells) === JSON.stringify(expectedGround),
       JSON.stringify(mappedJson.cells?.[0] ?? null));
