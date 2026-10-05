@@ -378,6 +378,68 @@ for (const file of files) {
   }
 }
 
+// ── Hook 必须全在早退之前：漏一个就白屏 ────────────────────────────────
+//
+// React 要求组件每次渲染的 Hook 数量与顺序一致。这些模块组件里都有
+// 「没有选中项目就 return 空态」的早退分支；只要有一个 `useState` / `useRef` /
+// `useEffect` 被写到那条 `return` 之后，「有没有项目」一变化 Hook 数就变了 ——
+// React 直接抛 error #310（Rendered more hooks than during the previous render），
+// **整个面板白屏**，而不是某一块坏掉。
+//
+// 实测踩过：给地图编辑器加撤销栈时把 `useRef` 放在了早退之后。
+{
+  const clientText = readFileSync(fileURLToPath(new URL("../src/client.ts", import.meta.url)), "utf8");
+  const lines = clientText.split("\n");
+  // 组件边界：`function XxxModule(props) {` 到下一个顶层 `function`
+  const starts = [...clientText.matchAll(/^\s{4}function (\w*Module)\(props\)\s*\{/gm)];
+  check("浏览器半区能定位到模块组件", starts.length >= 4, `${starts.length} 个`);
+  for (let i = 0; i < starts.length; i++) {
+    const name = starts[i][1];
+    const from = clientText.slice(0, starts[i].index).split("\n").length;
+    const to = i + 1 < starts.length
+      ? clientText.slice(0, starts[i + 1].index).split("\n").length
+      : lines.length;
+    // 只认**组件顶层**（缩进 6 空格）的早退。两种写法都要认：
+    //   `if (project === null) {`  ← 实际的写法
+    //   `return h(...)`
+    // 缩进更深的 `return` 都在 useCallback / 内层函数体里，与 Hook 顺序无关
+    // （它们甚至在 Hook 之前就存在，硬判会假红）。
+    let earlyReturn = -1;
+    for (let n = from; n < to; n++) {
+      if (/^\s{6}(?:return\b|if \()/.test(lines[n - 1])) { earlyReturn = n; break; }
+    }
+    if (earlyReturn < 0) continue;
+    // 从组件起点按**花括号配平**算出「顶层语句」的行号集合：只有深度回到
+    // 组件函数体的那一层（深度 1）才算顶层。`const [x] = useState(...)` 是浅层，
+    // `useEffect(() => { ... })` 的箭头函数体是深层 —— 用深度区分，不用缩进猜。
+    const componentBody = [];
+    {
+      let depth = 0;
+      let started = false;
+      for (let n = from; n < to; n++) {
+        const line = lines[n - 1];
+        if (!started) {
+          if (line.includes("{")) { started = true; depth = 1; }
+          continue;
+        }
+        if (depth === 1) componentBody.push(n);
+        for (const ch of line) {
+          if (ch === "{") depth++;
+          else if (ch === "}") depth--;
+        }
+        if (depth <= 0) break;
+      }
+    }
+    // 顶层 Hook 全部必须在早退之前
+    const bad = componentBody
+      .filter((n) => n > earlyReturn)
+      .filter((n) => /React\.use(State|Ref|Effect|Callback|Memo|LayoutEffect)\b/.test(lines[n - 1]))
+      .map((n) => `${n}:${lines[n - 1].trim().slice(0, 60)}`);
+    check(`${name}：Hook 全在早退（第 ${earlyReturn} 行）之前`, bad.length === 0,
+      bad.slice(0, 3).join(" | "));
+  }
+}
+
 // ── 宿主后台任务 key：浏览器半区与宿主是两份实现，只能靠文本契约对齐 ──────
 //
 // 界面判断「这一批还在跑」靠宿主运行表里的任务（`project.jobs[].targets`）：

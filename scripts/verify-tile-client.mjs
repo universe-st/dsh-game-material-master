@@ -36,7 +36,7 @@ function section(title) {
 }
 
 // ── 假 React：createElement 产出纯对象，Hook 按槽位取值 ──────────────────
-const HOOK = { slots: [], cursor: 0 };
+const HOOK = { slots: [], refs: [], cursor: 0 };
 
 const ReactStub = {
   Fragment: Symbol.for("react.fragment"),
@@ -54,7 +54,12 @@ const ReactStub = {
   useRef(initial) {
     const index = HOOK.cursor++;
     if (process.env.TRACE_HOOKS === "1") console.log(`  useRef #${index}`);
-    return { current: initial };
+    // ⚠️ ref 必须**跨渲染保持同一个对象**（真 React 就是这样）。
+    // 每次返回新对象的话，写进 `.current` 的东西下一次渲染就没了 ——
+    // 依赖 ref 存状态的功能（比如地图编辑器的撤销栈）在这里会看起来完全坏掉，
+    // 而真机上其实是好的（假绿的反面：假红）。
+    if (HOOK.refs[index] === undefined) HOOK.refs[index] = { current: initial };
+    return HOOK.refs[index];
   },
   useEffect() {},
   useLayoutEffect() {},
@@ -325,7 +330,7 @@ function makeProject(overrides = {}) {
 // 23 = useLocaleTick(1) + 组件自身 18 个 useState + usePendingTasks(useState + 2×useRef)
 //      + useStudioIntent(useState)。effect / callback 不占状态槽。
 // **新增状态时这个数字必须跟着改** —— 它是「槽位没串位」的唯一护栏。
-const EXPECTED_HOOKS = 24;
+const EXPECTED_HOOKS = 25;
 /**
  * 把测试里写的「扁平 cells 网格」补成三层草稿。
  * 断言里仍然可以只关心地面，所以旧写法继续可用。
@@ -371,6 +376,10 @@ function renderTile(project, options = {}) {
     undefined, undefined, undefined, undefined
   ];
   HOOK.cursor = 0;
+  // ref 槽位跟着本次渲染重新开始算。
+  // ⚠️ 对象**不**清空：`useRef` 跨渲染要拿到同一个对象，否则
+  // 依赖 ref 存状态的功能（撤销栈）在这里会假红 —— 见 useRef 的注释。
+  // 需要干净历史的用例自己调 resetRefs()。
   const tree = TileModule({ api });
   // ⚠️ **立刻物化**整棵树。
   //
@@ -799,6 +808,22 @@ section("④ 拼图阶段：三层编辑（地面 / 装饰 / 建筑）");
     const oneCells = byClassPart(one, "SPR_mapCell").filter((n) => String(n.props.className).includes("SPR_mapCell-ghost"));
     check("单格笔刷只高亮一格", oneCells.length === 1, `${oneCells.length} 格`);
     check("没有光标时不画幽灵", byClassPart(mk(null, "building"), "SPR_mapGhost").length === 0);
+
+    // ★ 撤销 / 重做：编辑态要给按钮，而且「还没画过」时两边都该是禁用的。
+    //
+    // 这里只能断言**渲染出来的控件**；真正的撤销行为在真机浏览器里走查
+    // （假 React 的 setState 是空实现，栈推不动）。
+    const editTree = mk(null, "grass");
+    const btnLabels = collect(editTree, (n) => n.type === "button").map((n) => textOf(n.children ?? []));
+    check("★ 编辑态有「撤销」按钮", btnLabels.some((t) => t === "撤销"), btnLabels.slice(0, 12).join("|"));
+    check("★ 编辑态有「重做」按钮", btnLabels.some((t) => t === "重做"), btnLabels.slice(0, 12).join("|"));
+    const undoBtn = collect(editTree, (n) => n.type === "button" && textOf(n.children ?? []) === "撤销")[0];
+    const redoBtn = collect(editTree, (n) => n.type === "button" && textOf(n.children ?? []) === "重做")[0];
+    check("刚打开编辑时「撤销」是禁用的（还没有可撤的）", undoBtn?.props?.disabled === true,
+      String(undoBtn?.props?.disabled));
+    check("刚打开编辑时「重做」是禁用的", redoBtn?.props?.disabled === true,
+      String(redoBtn?.props?.disabled));
+    check("提示里写了快捷键", allText(editTree).includes("Ctrl+Z"), allText(editTree).slice(0, 120));
   }
 
   // ★ 回归：草稿里装饰必须存**地块键**（`tree`），不能存贴图路径。

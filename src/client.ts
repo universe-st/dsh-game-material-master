@@ -1001,6 +1001,11 @@
       "正在渲染模板…": "Rendering templates…",
       "还没有模板 —— 点「生成模板（免费）」立刻看到结果。": "No templates yet — click 'Generate templates (free)' to see them right away.",
       "重跑中…": "Re-running…",
+      "已撤销。": "Undone.",
+      "已重做。": "Redone.",
+      "撤销": "Undo",
+      "快捷键：Ctrl+Z 撤销 / Ctrl+Shift+Z 重做；Esc 放下笔刷；在地图上按住 Ctrl 滚轮切笔刷。":
+        "Shortcuts: Ctrl+Z undo / Ctrl+Shift+Z redo; Esc puts the brush down; hold Ctrl and scroll over the map to cycle brushes.",
       "超出地图范围": "Outside the map",
       "放不下：占 {n0}×{n1} 格，这里会超出边界": "Does not fit: needs {n0}x{n1} cells and would go past the edge",
       "放不下：会压到 ({n0},{n1}) 那栋建筑": "Does not fit: would overlap the building at ({n0},{n1})",
@@ -4999,6 +5004,21 @@
        * —— 只高亮一格的话，用户根本不知道这一下会盖多大一片。
        */
       const [hoverCell, setHoverCell] = React.useState(null);
+      /**
+       * 撤销 / 重做栈。
+       *
+       * 放在 `useRef` 里而不是 `useState`：它只在提交草稿时读写，
+       * 不需要触发重渲染，放 state 里只会多一个 Hook 槽位、还容易漏同步。
+       *
+       * 跨格摆放已经在改结构了 —— 误放一栋 2×2 却只能「放弃修改」整份丢掉重来，
+       * 那是不能接受的。
+       *
+       * ⚠️ **必须放在所有 `return` 之前**。组件下面有个 `if (project === null) return`，
+       * 把 Hook 放到它后面会让「有没有项目」改变 Hook 数量 —— React 直接抛
+       * error #310（Rendered more hooks than during the previous render），
+       * 整个面板白屏。实测踩过。
+       */
+      const historyRef = React.useRef({ stack: [], index: -1 });
       const tasks = usePendingTasks();
       const intent = useStudioIntent();
 
@@ -5088,6 +5108,46 @@
         const timer = setInterval(() => { void reload(projectId); }, 1500);
         return () => clearInterval(timer);
       }, [busy, projectId, reload]);
+
+      /**
+       * 键盘交互 —— 常见地图编辑器都有的那几件。
+       *
+       * 只在**编辑态**生效（`mapDraft !== null`），而且光标在输入框里时一律让路：
+       * 不然用户在地图格子里打字（重命名之类）时按 Esc / Ctrl+Z 会误伤。
+       *
+       * 撤销/重做的实现先从这个 effect 里内联，别去调下面定义的 `undoSave`——
+       * 那些 const 在早退之后，而**这个 effect 必须在早退之前**
+       * （Hook 顺序，见 `verify-client.mjs` 的「Hook 全在早退之前」契约）。
+       */
+      React.useEffect(() => {
+        if (typeof window === "undefined") return undefined;
+        const onKey = (event) => {
+          if (mapDraft === null) return;
+          const tag = String(event.target?.tagName ?? "").toLowerCase();
+          if (tag === "input" || tag === "textarea" || tag === "select") return;
+          if (event.key === "Escape") {
+            // Esc：收起幽灵预览 + 放下笔刷（等于「我不放了」）
+            setHoverCell(null);
+            setBrushKey(null);
+            return;
+          }
+          const meta = event.ctrlKey || event.metaKey;
+          if (!meta) return;
+          const key = String(event.key ?? "").toLowerCase();
+          const isUndo = key === "z" && !event.shiftKey;
+          const isRedo = (key === "z" && event.shiftKey) || key === "y";
+          if (!isUndo && !isRedo) return;
+          const h = historyRef.current;
+          const target = isRedo ? h.index + 1 : h.index - 1;
+          if (target < 0 || target >= h.stack.length) return;
+          event.preventDefault();
+          h.index = target;
+          setMapDraft(h.stack[target]);
+          setNotice({ kind: "info", text: isRedo ? T("已重做。") : T("已撤销。") });
+        };
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+      }, [mapDraft]);
 
       const run = React.useCallback(async (label, fn) => {
         setNotice(null);
@@ -5794,7 +5854,8 @@
           r: b.r, c: b.c, fw: b.fw, fh: b.fh, key: keyOfVariant(b.cell), under: defaultUnder()
         }));
         const draft = { ground, decor, buildings };
-        setMapDraft(draft);
+        // 第一份草稿也进历史（index 0）—— 撤销到根就该看到「刚打开编辑」的样子
+        commitDraft(draft);
         return draft;
       };
 
@@ -5828,6 +5889,39 @@
       const defaultUnder = () => firstTerrainKey() ?? "";
       /** 拆楼时把占格补回它原来的垫底地面；没有就退回默认地面。 */
       const underKeyOf = (building) => building.under ?? defaultUnder();
+
+      /** 换一份草稿并记一笔历史。**所有改动草稿的地方都该走它**，否则撤销会跳步。 */
+      function commitDraft(draft) {
+        const h = historyRef.current;
+        // 截断 redo 分支：撤销之后又画了新东西，原来那条「未来」就作废了
+        h.stack = h.stack.slice(0, h.index + 1);
+        h.stack.push(draft);
+        // 只留最近 60 步：每步都是整份快照（14×14 也就 196 个短字符串）
+        if (h.stack.length > 60) h.stack = h.stack.slice(h.stack.length - 60);
+        h.index = h.stack.length - 1;
+        setMapDraft(draft);
+      }
+
+      const undoSave = () => {
+        const h = historyRef.current;
+        if (h.index <= 0) return false;
+        h.index -= 1;
+        setMapDraft(h.stack[h.index]);
+        setNotice({ kind: "info", text: T("已撤销。") });
+        return true;
+      };
+
+      const redoSave = () => {
+        const h = historyRef.current;
+        if (h.index >= h.stack.length - 1) return false;
+        h.index += 1;
+        setMapDraft(h.stack[h.index]);
+        setNotice({ kind: "info", text: T("已重做。") });
+        return true;
+      };
+
+      const canUndo = historyRef.current.index > 0;
+      const canRedo = historyRef.current.index < historyRef.current.stack.length - 1;
 
       const draftRows = mapDraft?.ground?.length ?? 0;
       const draftCols = mapDraft?.ground?.[0]?.length ?? 0;
@@ -5914,7 +6008,7 @@
           const { rest } = liftBuildingAt(r, c, ground, decor);
           ground[r][c] = "";
           delete decor[`${r},${c}`];
-          setMapDraft({ ground, decor, buildings: rest });
+          commitDraft({ ground, decor, buildings: rest });
           setCellKey(`${r},${c}`);
           return;
         }
@@ -5926,7 +6020,7 @@
           // 存路径的话两份数据对不上，重载后装饰会静默消失。
           const { rest } = liftBuildingAt(r, c, ground, decor);
           decor[`${r},${c}`] = key;
-          setMapDraft({ ground, decor, buildings: rest });
+          commitDraft({ ground, decor, buildings: rest });
         } else if (kind === "building") {
           const verdict = placementOk(r, c);
           if (!verdict.ok) {
@@ -5947,13 +6041,13 @@
               delete decor[`${r + dr},${c + dc}`];
             }
           }
-          setMapDraft({ ground, decor, buildings });
+          commitDraft({ ground, decor, buildings });
         } else {
           // 地面（含未知键）：只动地面层；压在建筑上的话先把楼收回来
           const { rest } = liftBuildingAt(r, c, ground, decor);
           ground[r][c] = key;
           delete decor[`${r},${c}`];
-          setMapDraft({ ground, decor, buildings: rest });
+          commitDraft({ ground, decor, buildings: rest });
         }
         setCellKey(`${r},${c}`);
       };
@@ -5976,7 +6070,7 @@
         }
         // 超出新边界的建筑丢掉（留着会让拼图跳过它，预览与出图就不一致了）
         const buildings = (current.buildings ?? []).filter((b) => b.r + b.fh <= rows && b.c + b.fw <= cols);
-        setMapDraft({ ground, decor, buildings });
+        commitDraft({ ground, decor, buildings });
       };
 
       const saveMapDraft = async () => {
@@ -6010,7 +6104,7 @@
           for (let c = 0; c < cols; c++) row.push(key);
           ground.push(row);
         }
-        setMapDraft({
+        commitDraft({
           ground,
           decor: key === "" ? {} : { ...current.decor },
           buildings: key === "" ? [] : current.buildings
@@ -6294,7 +6388,23 @@
                 className: "SPR_mapEditorCanvas",
                 style: { width: `${canvasW}px`, height: `${canvasH}px` },
                 // 光标移出画布就收起幽灵预览（否则它一直挂在最后停的那一格）
-                onMouseLeave: () => setHoverCell(null)
+                onMouseLeave: () => setHoverCell(null),
+                /**
+                 * 滚轮切笔刷 —— 地图编辑器的老习惯：手不用离开地图就能换笔。
+                 * `deltaY < 0`（向上滚）往前进一格，向下滚往后退。
+                 * **只有按住 Ctrl 才接管**：普通滚动要留给页面本身，否则用户
+                 * 想上下翻面板却被吞掉，体验更差。
+                 */
+                onWheel: (event) => {
+                  if (!event.ctrlKey) return;
+                  const list = ["__erase__", ...project.items.map((it) => it.key)];
+                  if (list.length === 0) return;
+                  const at = list.indexOf(brushKey);
+                  const step = event.deltaY > 0 ? -1 : 1;
+                  const next = list[(at + step + list.length) % list.length];
+                  event.preventDefault();
+                  setBrushKey(next);
+                }
               },
                 under,
                 layers,
@@ -6371,6 +6481,10 @@
                   T("开始编辑布局"))
               )
             : h("div", { className: "SPR_tileEditorRow" },
+                h("button", { type: "button", className: "SPR_btn", disabled: !canUndo, onClick: () => undoSave() },
+                  T("撤销")),
+                h("button", { type: "button", className: "SPR_btn", disabled: !canRedo, onClick: () => redoSave() },
+                  T("重做")),
                 h("button", { type: "button", className: "SPR_btn", onClick: () => fillDraft(brushKey === "__erase__" ? "" : (brushKey ?? "")) },
                   T("全刷成当前笔刷")),
                 h("button", { type: "button", className: "SPR_btn", onClick: () => fillDraft("") }, T("全部清空")),
@@ -6391,7 +6505,9 @@
               ),
           mapDraft === null ? null : mapCellGrid(),
           h("p", { className: "SPR_muted" },
-            T("涂改只改草稿，点「保存布局」才写回项目；之后再点「铺成地图」出图。手动改布局不会作废已生成的地块。"))
+            T("涂改只改草稿，点「保存布局」才写回项目；之后再点「铺成地图」出图。手动改布局不会作废已生成的地块。")),
+          mapDraft === null ? null : h("p", { className: "SPR_muted" },
+            T("快捷键：Ctrl+Z 撤销 / Ctrl+Shift+Z 重做；Esc 放下笔刷；在地图上按住 Ctrl 滚轮切笔刷。"))
         ),
         // ⚠️ 判据是 `map.png`（宿主真实给的字段），**不是** `map.ready`。
         // 宿主从来没算过 `ready`，所以写成 `map.ready === true` 时**拼好的地图
