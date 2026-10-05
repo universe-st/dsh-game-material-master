@@ -1678,7 +1678,7 @@
 .SPR_mapBrushLabel{font-size:11px;color:var(--dsw-alias-label-tertiary);white-space:nowrap}
 /* 还没生成的参考图：占位块，**不挂 <img>**（挂了就是 404 裂图） */
 .SPR_tileAsset-pending{opacity:.62}
-.SPR_thumb-pending{display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--dsw-alias-label-tertiary);background:var(--dsw-alias-bg-layer-2);border:1px dashed var(--dsw-alias-border-l2);border-radius:8px;min-width:96px;min-height:96px;box-sizing:border-box}
+.SPR_thumb-pending{display:flex;align-items:center;justify-content:center;font-size:11px;line-height:1;color:var(--dsw-alias-label-tertiary);background:var(--dsw-alias-bg-layer-2);border:1px dashed var(--dsw-alias-border-l2);border-radius:8px;min-width:96px;min-height:96px;box-sizing:border-box}
 /* 形状编辑器：小网格点选占格。左上角是锚点（恒亮、不可取消）。 */
 .SPR_shapeEditor{display:flex;flex-direction:column;gap:4px}
 .SPR_shapeGrid{display:inline-block;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:3px;background:var(--dsw-alias-bg-layer-2)}

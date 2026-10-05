@@ -237,6 +237,43 @@ section("形状与模板命名");
     `${JSON.stringify(G.rectOfShape([[0, 0], [1, 0], [1, 1]]))}`);
 }
 
+section("★ 非矩形形状要写进提示词（真机踩过）");
+{
+  // ⚠️ 为什么必须写：形状以前**只用参考图里的洋红轮廓**表达。
+  // 真机实测（Seedream 5.0 flash）：L 形（缺一格）生成出来是
+  // 「一栋方楼中间一个天井」—— 底面仍然填满整个 2×2 包围菱形
+  // （量非透明行宽度：1921 → 611 对称收敛到一点，就是完整菱形）。
+  // 模型显然把「缺的那格」理解成内院，而不是「这格不属于建筑」。
+  check("★ 矩形不写形状描述（本来没歧义，别啰嗦）",
+    G.describeShape([[0, 0], [0, 1], [1, 0], [1, 1]]) === undefined &&
+    G.describeShape([[0, 0], [0, 1], [0, 2]]) === undefined);
+  const l = G.describeShape([[0, 0], [1, 0], [1, 1]]);
+  check("★ L 形会写形状描述", typeof l === "string" && l.length > 20, String(l).slice(0, 40));
+  check("★ 描述里说清「共几格 / 占几格 / 哪格是空地」",
+    l.includes("2×2") && l.includes("3 格") && l.includes("第 1 行第 2 列"), l);
+  check("★ 明确「不要当天井/内院围起来」（这正是真机上出的错）",
+    l.includes("天井") && l.includes("内院"), l);
+  check("★ 明确「以参考图的洋红轮廓为准」（文字只是辅助）",
+    l.includes("洋红轮廓"), l);
+  // 方位词只用行列序号：等轴测下「左上/右上」和格子的行列不是一回事
+  check("★ 不用「左上/右上」这类方位词（等轴测下会让模型猜错）",
+    !/左上|右上|左下|右下/.test(l), l);
+  const t = G.describeShape([[0, 0], [0, 1], [0, 2], [1, 1]]);
+  check("T 形：两个缺口都列出来",
+    t.includes("第 2 行第 1 列") && t.includes("第 2 行第 3 列"), t);
+  const cross = G.describeShape([[0, 1], [1, 0], [1, 1], [1, 2], [2, 1]]);
+  check("十字：四角都列出来", (cross.match(/第 \d 行第 \d 列/g) ?? []).length === 4, cross);
+  // 走完整提示词：非矩形必须真的出现在 buildTilePrompt 里
+  const item = { key: "lhouse", label: "L 屋", kind: "building", family: "building",
+    footprint: [2, 2], shape: [[0, 0], [1, 0], [1, 1]], content: "石头房子", mode: "grid2x2", variantCount: 1 };
+  const prompt = G.buildTilePrompt(item, "像素风");
+  check("★ buildTilePrompt 真的把形状描述带进去了",
+    prompt.includes("占地形状") && prompt.includes("天井"), prompt.slice(0, 200));
+  const rectItem = { ...item, shape: [[0, 0], [0, 1], [1, 0], [1, 1]] };
+  check("矩形走 buildTilePrompt 时不带形状描述",
+    !G.buildTilePrompt(rectItem, "像素风").includes("占地形状"));
+}
+
 section("相对路径一律用正斜杠（会被拼进资源路由 URL）");
 {
   // ⚠️ 这条钉的是一个只在 Windows 上「看着正常」的坑：
