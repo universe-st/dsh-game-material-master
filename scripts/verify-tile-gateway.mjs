@@ -504,6 +504,24 @@ section("④ 拼图 / ⑤ 导出（走网关，免费）");
         R.map.buildings.every(([br, bc]) =>
           R.map.cells[br][bc] === "" && R.map.cells[br + 1][bc + 1] === ""),
         JSON.stringify(R.map.cells.map((row) => row.join(""))));
+
+      // ★ 「大格子铺了之后清不掉」：显式传 layouts:[] 要能把楼拆干净，
+      // 并且占格**补回地面**（否则拆完留下四个洞，看着还是没清掉）。
+      await studio.saveTileMapCells({
+        projectId: id,
+        cells: Array.from({ length: 8 }, () => Array.from({ length: 8 }, () => "grass")),
+        seed: 11,
+        decor: {},
+        layouts: []
+      });
+      const lifted = await studio.getTileProject({ projectId: id });
+      check("★ 显式清空 layouts 后建筑记录全清（不留幽灵建筑）",
+        (lifted.map.buildings ?? []).length === 0,
+        JSON.stringify(lifted.map.buildings));
+      check("★ 拆楼后占格回到地面（不是四个洞）",
+        lifted.map.cells[2][2] === "grass" && lifted.map.cells[3][3] === "grass",
+        JSON.stringify(lifted.map.cells[2]));
+      check("拆楼后 preview 里也没有建筑了", (lifted.preview?.buildings ?? []).length === 0);
     }
 
     // ── 装饰回传：**地块键**与**贴图路径**两种写法都要认 ──────────────

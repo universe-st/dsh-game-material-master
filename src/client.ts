@@ -1001,12 +1001,13 @@
       "正在渲染模板…": "Rendering templates…",
       "还没有模板 —— 点「生成模板（免费）」立刻看到结果。": "No templates yet — click 'Generate templates (free)' to see them right away.",
       "重跑中…": "Re-running…",
+      "超出地图范围": "Outside the map",
+      "放不下：占 {n0}×{n1} 格，这里会超出边界": "Does not fit: needs {n0}x{n1} cells and would go past the edge",
+      "放不下：会压到 ({n0},{n1}) 那栋建筑": "Does not fit: would overlap the building at ({n0},{n1})",
       "地面": "Ground",
       "装饰": "Decor",
       "建筑": "Building",
       "{n0} · 占 {n1}×{n2} 格": "{n0} · takes {n1}x{n2} cells",
-      "这里放不下这栋建筑（占 {n0}×{n1} 格，且不能压在别的建筑上）":
-        "The building does not fit here (it needs {n0}x{n1} cells and cannot overlap another building)",
       "{n0}（{n1}/{n2}）": "{n0} ({n1}/{n2})",
       "新增地块": "Add tile",
       "新增": "Add",
@@ -1662,6 +1663,14 @@
 /* 地图布局编辑器：等距叠层，每个格子裁成菱形，只有菱形那部分能点 */
 .SPR_mapBrush{display:flex;gap:6px;flex-wrap:wrap}
 /* 笔刷按用途分组：地面 / 装饰 / 建筑，避免「刷树把草顶掉」这种误会 */
+/* 幽灵预览（红警盖房子那套）：占格外框 + 可放/不可放配色 */
+.SPR_mapGhost{position:absolute;pointer-events:none;z-index:5}
+.SPR_mapGhostCell{position:absolute;border:2px solid transparent;box-sizing:border-box;clip-path:polygon(50% 0%,100% 50%,50% 100%,0% 50%)}
+.SPR_mapGhost-ok .SPR_mapGhostCell{background:rgba(80,220,120,0.28);border-color:rgba(40,180,80,0.9)}
+.SPR_mapGhost-bad .SPR_mapGhostCell{background:rgba(240,80,80,0.30);border-color:rgba(200,40,40,0.9)}
+/* 占格高亮：能放=绿底，不能放=红底（只高亮一格时用户不知道会盖多大一片） */
+.SPR_mapCell-ghostOk{background:rgba(80,220,120,0.22)}
+.SPR_mapCell-ghostBad{background:rgba(240,80,80,0.24)}
 .SPR_mapBrushGroup{display:inline-flex;align-items:center;gap:6px;padding:2px 6px;border-radius:8px;border:1px dashed var(--dsw-alias-border-l2)}
 .SPR_mapBrushLabel{font-size:11px;color:var(--dsw-alias-label-tertiary);white-space:nowrap}
 .SPR_mapEditorWrap{overflow:auto;max-height:460px;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;background:var(--dsw-alias-bg-layer-3);padding:8px}
@@ -4982,6 +4991,14 @@
       const [cellKey, setCellKey] = React.useState(null);
       /** 地图布局草稿（点格子/擦除都只改它，点「保存布局」才提交）。 */
       const [mapDraft, setMapDraft] = React.useState(null);
+      /**
+       * 光标停在哪一格（`"r,c"`）。
+       *
+       * 红警盖房子那种「幽灵预览」要用它：选了 2×2 的建筑笔刷后，
+       * 鼠标移到哪就把**整块占格**高亮出来，并当场告诉用户能不能放
+       * —— 只高亮一格的话，用户根本不知道这一下会盖多大一片。
+       */
+      const [hoverCell, setHoverCell] = React.useState(null);
       const tasks = usePendingTasks();
       const intent = useStudioIntent();
 
@@ -5054,6 +5071,7 @@
         setNewItem(null);
         setCellKey(null);
         setMapDraft(null);
+        setHoverCell(null);
         setNameDraft("");
         setStyleDraft("");
         await reload(id);
@@ -5808,9 +5826,78 @@
       };
       /** 建筑底面垫底用哪种地面**地块键**（不是贴图路径）。 */
       const defaultUnder = () => firstTerrainKey() ?? "";
+      /** 拆楼时把占格补回它原来的垫底地面；没有就退回默认地面。 */
+      const underKeyOf = (building) => building.under ?? defaultUnder();
 
       const draftRows = mapDraft?.ground?.length ?? 0;
       const draftCols = mapDraft?.ground?.[0]?.length ?? 0;
+
+      /** 笔刷的用途（`terrain` / `decor` / `building`），空笔刷返回 `""`。 */
+      const brushKind = () =>
+        brushKey === null || brushKey === "__erase__" ? "" : kindOf(brushKey);
+      /** 建筑笔刷的占格。非建筑笔刷恒为 `[1, 1]`。 */
+      const brushFootprint = () => {
+        if (brushKind() !== "building" || brushKey === null) return [1, 1];
+        return footprintOf(brushKey);
+      };
+
+      /**
+       * 落点校验 —— 红警盖房子那套：**先看能不能放，再决定画成绿的还是红的**。
+       *
+       * 不校验直接放的话，拼图会在放置阶段把它跳过 ——
+       * 界面上看着楼在那儿，出图却没有（预览与成品对不上，用户会以为丢东西）。
+       */
+      const placementOk = (r, c) => {
+        const draft = ensureMapDraft();
+        const [fw, fh] = brushFootprint();
+        const rows = draft.ground.length;
+        const cols = draft.ground[0]?.length ?? 0;
+        if (!Number.isFinite(r) || !Number.isFinite(c)) return { ok: false, reason: T("超出地图范围") };
+        if (r < 0 || c < 0 || r + fh > rows || c + fw > cols) {
+          return { ok: false, reason: T("放不下：占 {n0}×{n1} 格，这里会超出边界", { n0: fw, n1: fh }) };
+        }
+        if (brushKind() === "building") {
+          const clash = draft.buildings.find(
+            (b) => !(r + fh <= b.r || b.r + b.fh <= r || c + fw <= b.c || b.c + b.fw <= c)
+          );
+          if (clash !== undefined) {
+            return { ok: false, reason: T("放不下：会压到 ({n0},{n1}) 那栋建筑", { n0: clash.r, n1: clash.c }) };
+          }
+        }
+        return { ok: true, reason: "" };
+      };
+
+      /** 占格里的所有格子（放预览高亮用）。 */
+      const footprintCells = (r, c) => {
+        const [fw, fh] = brushFootprint();
+        const out = [];
+        for (let dr = 0; dr < fh; dr++) for (let dc = 0; dc < fw; dc++) out.push(`${r + dr},${c + dc}`);
+        return out;
+      };
+
+      /**
+       * 拆掉压在 (r,c) 上的建筑。返回**是否拆掉了**。
+       *
+       * ⚠️ 这是「大格子铺了之后清不掉」的正解：用户拿地面/装饰笔刷去点一栋楼时，
+       * 期望的是**把那块地方收回来**，而不是在地基下面偷偷改草地（楼还杵在那儿，
+       * 看着就像「清不掉」）。所以任何笔刷点到建筑占格，都先把那栋楼拆掉。
+       */
+      const liftBuildingAt = (r, c, ground, decor) => {
+        const draft = ensureMapDraft();
+        const hit = draft.buildings.filter(
+          (b) => r >= b.r && r < b.r + b.fh && c >= b.c && c < b.c + b.fw
+        );
+        for (const b of hit) {
+          // 占格补回默认草地，否则拆完留下一个洞
+          for (let dr = 0; dr < b.fh; dr++) {
+            for (let dc = 0; dc < b.fw; dc++) {
+              if (ground[b.r + dr]?.[b.c + dc] !== undefined) ground[b.r + dr][b.c + dc] = underKeyOf(b);
+              delete decor[`${b.r + dr},${b.c + dc}`];
+            }
+          }
+        }
+        return { hit, rest: draft.buildings.filter((b) => !hit.includes(b)) };
+      };
 
       /**
        * 涂一格。按笔刷的**用途**决定写哪一层 —— 这是「树下面有草地」和
@@ -5820,15 +5907,14 @@
         const draft = ensureMapDraft();
         const ground = draft.ground.map((row) => [...row]);
         const decor = { ...draft.decor };
-        let buildings = draft.buildings.map((b) => ({ ...b }));
         if (ground[r] === undefined || ground[r][c] === undefined) return;
 
-        // 橡皮擦：三层一起擦（用户想「这一格清干净」）
+        // 橡皮擦：把这一格**彻底清干净**。压在这儿的建筑整块拆掉（红警里拆楼）。
         if (key === "") {
+          const { rest } = liftBuildingAt(r, c, ground, decor);
           ground[r][c] = "";
           delete decor[`${r},${c}`];
-          buildings = buildings.filter((b) => !(r >= b.r && r < b.r + b.fh && c >= b.c && c < b.c + b.fw));
-          setMapDraft({ ground, decor, buildings });
+          setMapDraft({ ground, decor, buildings: rest });
           setCellKey(`${r},${c}`);
           return;
         }
@@ -5838,19 +5924,22 @@
           // 装饰只动装饰层：草地原样留着。
           // ⚠️ 存的是**地块键**（`tree`），不是贴图路径 —— 宿主按 key#index 查变体，
           // 存路径的话两份数据对不上，重载后装饰会静默消失。
+          const { rest } = liftBuildingAt(r, c, ground, decor);
           decor[`${r},${c}`] = key;
+          setMapDraft({ ground, decor, buildings: rest });
         } else if (kind === "building") {
-          const [fw, fh] = footprintOf(key);
-          // 占格要完整落在图内，且不能压在别的建筑上（否则拼图会把它跳过，
-          // 用户看到的预览与出图又会不一致）
-          const inside = r + fh <= ground.length && c + fw <= (ground[0]?.length ?? 0);
-          const clash = buildings.some((b) => !(r + fh <= b.r || b.r + b.fh <= r || c + fw <= b.c || b.c + b.fw <= c));
-          if (!inside || clash) {
-            setNotice({ kind: "error", text: T("这里放不下这栋建筑（占 {n0}×{n1} 格，且不能压在别的建筑上）", { n0: fw, n1: fh }) });
+          const verdict = placementOk(r, c);
+          if (!verdict.ok) {
+            setNotice({ kind: "error", text: verdict.reason });
             return;
           }
-          buildings = buildings.filter((b) => !(r >= b.r && r < b.r + b.fh && c >= b.c && c < b.c + b.fw));
-          buildings.push({ r, c, fw, fh, key, under: defaultUnder() });
+          const [fw, fh] = brushFootprint();
+          // 先拆掉压在占格上的旧楼（同一块地重放 = 换一栋）
+          let buildings = draft.buildings.filter(
+            (b) => r + fh <= b.r || b.r + b.fh <= r || c + fw <= b.c || b.c + b.fw <= c
+          );
+          const under = defaultUnder();
+          buildings = [...buildings, { r, c, fw, fh, key, under }];
           // 占格的地面清空：拼图会把这块单独画成建筑，这里留着会重复画一遍
           for (let dr = 0; dr < fh; dr++) {
             for (let dc = 0; dc < fw; dc++) {
@@ -5858,12 +5947,14 @@
               delete decor[`${r + dr},${c + dc}`];
             }
           }
+          setMapDraft({ ground, decor, buildings });
         } else {
-          // 地面（含未知键）：只动地面层
+          // 地面（含未知键）：只动地面层；压在建筑上的话先把楼收回来
+          const { rest } = liftBuildingAt(r, c, ground, decor);
           ground[r][c] = key;
           delete decor[`${r},${c}`];
+          setMapDraft({ ground, decor, buildings: rest });
         }
-        setMapDraft({ ground, decor, buildings });
         setCellKey(`${r},${c}`);
       };
 
@@ -6032,6 +6123,20 @@
             for (let dc = 0; dc < b.fw; dc++) occupiedByBuilding.add(`${b.r + dr},${b.c + dc}`);
           }
         }
+
+        // ── 幽灵预览的几何：光标格 + 笔刷占格 + 落点校验 ──────────────
+        const ghostCells = new Set<string>();  // 元素是 "r,c"
+        let ghostOk = true;
+        let ghostReason = "";
+        if (hoverCell !== null) {
+          const at = hoverCell.split(",");
+          const hr = Number(at[0]);
+          const hc = Number(at[1]);
+          const verdict = placementOk(hr, hc);
+          ghostOk = verdict.ok;
+          ghostReason = verdict.reason;
+          for (const cell of footprintCells(hr, hc)) ghostCells.add(cell);
+        }
         for (let r = 0; r < rows; r++) {
           for (let c = 0; c < cols; c++) {
             const key = mapDraft.ground[r][c];
@@ -6076,17 +6181,51 @@
             cells.push(h("button", {
               key: `${r},${c}`,
               type: "button",
-              className: `SPR_mapCell${key === "" ? " SPR_mapCell-empty" : ""}${cellKey === `${r},${c}` ? " SPR_mapCell-active" : ""}`,
+              className: `SPR_mapCell${key === "" ? " SPR_mapCell-empty" : ""}${cellKey === `${r},${c}` ? " SPR_mapCell-active" : ""}${ghostCells.has(`${r},${c}`) ? (ghostOk ? " SPR_mapCell-ghostOk" : " SPR_mapCell-ghostBad") : ""}`,
               style: {
                 left: `${x}px`, top: `${y}px`,
                 width: `${cw * scale}px`, height: `${ch * scale}px`,
                 // 只让菱形那部分可点：菱形在单元格里位于 y ∈ [1/3, 2/3]
                 clipPath: "polygon(50% 33.3%, 100% 50%, 50% 66.7%, 0% 50%)"
               },
-              title: `${r},${c} · ${key === "" ? T("空格") : key}`,
+              title: ghostCells.has(`${r},${c}`) && !ghostOk
+                ? `${r},${c} · ${ghostReason}`
+                : `${r},${c} · ${key === "" ? T("空格") : key}`,
+              onMouseEnter: () => setHoverCell(`${r},${c}`),
+              onFocus: () => setHoverCell(`${r},${c}`),
               onClick: () => paint(r, c, brushKey === "__erase__" ? "" : (brushKey ?? ""))
             }, h("span", { className: "SPR_mapCellLabel" }, key === "" ? "" : key.slice(0, 4))));
           }
+        }
+
+        // ★ 红警盖房子那种「幽灵预览」：光标停在哪，就把**整块占格**画出来。
+        //
+        // 只高亮一格时，选了 2×2 建筑的用户根本不知道这一下会盖多大一片。
+        // 能放画绿、不能放画红（越界 / 压到别的建筑），并在格子的 title 里写明原因。
+        //
+        // ⚠️ 只画占格那几块（`ghostCells`），**不要另画一圈外框** ——
+        // 两者会叠在同一个容器里越堆越多（实测同一批格子被画了 5 遍，
+        // 并且因为共用 `builds` 还被当成建筑重复了一遍）。
+        const ghost = [];
+        if (ghostCells.size > 0) {
+          ghost.push(h("div", {
+            key: "ghost",
+            className: `SPR_mapGhost${ghostOk ? " SPR_mapGhost-ok" : " SPR_mapGhost-bad"}`,
+            style: { left: "0px", top: "0px", width: `${canvasW}px`, height: `${canvasH}px` }
+          }, ...Array.from(ghostCells, (cell) => {
+            const at = cell.split(",");
+            const gr = Number(at[0]);
+            const gc = Number(at[1]);
+            return h("div", {
+              key: `g${cell}`,
+              className: "SPR_mapGhostCell",
+              style: {
+                left: `${Math.round(originX + (gc - gr) * stepX) - trimLeft}px`,
+                top: `${Math.round(originY + (gc + gr) * stepY) - trimTop}px`,
+                width: `${cw * scale}px`, height: `${ch * scale}px`
+              }
+            });
+          })));
         }
 
         // ★ 跨格建筑：按**占格**摆，不是按一格。
@@ -6151,11 +6290,17 @@
               className: "SPR_mapEditorScaler",
               style: { width: `${canvasW}px`, height: `${canvasH}px`, transform: `scale(${fit})` }
             },
-              h("div", { className: "SPR_mapEditorCanvas", style: { width: `${canvasW}px`, height: `${canvasH}px` } },
+              h("div", {
+                className: "SPR_mapEditorCanvas",
+                style: { width: `${canvasW}px`, height: `${canvasH}px` },
+                // 光标移出画布就收起幽灵预览（否则它一直挂在最后停的那一格）
+                onMouseLeave: () => setHoverCell(null)
+              },
                 under,
                 layers,
                 decor,
                 builds,
+                ghost,
                 cells
               )
             )
@@ -6231,10 +6376,18 @@
                 h("button", { type: "button", className: "SPR_btn", onClick: () => fillDraft("") }, T("全部清空")),
                 h("button", { type: "button", className: "SPR_btn SPR_btn-primary", onClick: () => void run(T("保存布局"), saveMapDraft) },
                   T("保存布局")),
-                h("button", { type: "button", className: "SPR_btn", onClick: () => { setMapDraft(null); setCellKey(null); } }, T("放弃修改")),
+                h("button", { type: "button", className: "SPR_btn", onClick: () => { setMapDraft(null); setCellKey(null); setHoverCell(null); } }, T("放弃修改")),
                 h("span", { className: "SPR_muted" },
-                  cellKey === null ? T("共 {n0} 行 × {n1} 列", { n0: draftRows, n1: draftCols })
-                    : T("正在编辑 {n0} · 当前是「{n1}」", { n0: cellKey, n1: (mapDraft[Number(cellKey.split(",")[0])]?.[Number(cellKey.split(",")[1])] || T("空格")) }))
+                  cellKey === null
+                    ? T("共 {n0} 行 × {n1} 列", { n0: draftRows, n1: draftCols })
+                    : T("正在编辑 {n0} · 当前是「{n1}」", {
+                        n0: cellKey,
+                        n1: (() => {
+                          const at = cellKey.split(",");
+                          const key = mapDraft.ground?.[Number(at[0])]?.[Number(at[1])] ?? "";
+                          return key === "" ? T("空格") : key;
+                        })()
+                      }))
               ),
           mapDraft === null ? null : mapCellGrid(),
           h("p", { className: "SPR_muted" },

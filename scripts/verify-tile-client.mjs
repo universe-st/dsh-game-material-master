@@ -325,7 +325,7 @@ function makeProject(overrides = {}) {
 // 23 = useLocaleTick(1) + 组件自身 18 个 useState + usePendingTasks(useState + 2×useRef)
 //      + useStudioIntent(useState)。effect / callback 不占状态槽。
 // **新增状态时这个数字必须跟着改** —— 它是「槽位没串位」的唯一护栏。
-const EXPECTED_HOOKS = 23;
+const EXPECTED_HOOKS = 24;
 /**
  * 把测试里写的「扁平 cells 网格」补成三层草稿。
  * 断言里仍然可以只关心地面，所以旧写法继续可用。
@@ -365,7 +365,9 @@ function renderTile(project, options = {}) {
     // 草稿是**三层**的：地面 / 装饰 / 建筑（见 client.ts 里 ensureMapDraft 的注释）。
     // 传数组会被当成旧形状而炸，所以这里统一补成对象。
     normalizeDraft(drafts.mapDraft),
-    // 19~22 是 usePendingTasks / useStudioIntent 内部的状态槽，测试没法从外面注入
+    // 21：幽灵预览的光标格（红警盖房式的占格高亮）
+    drafts.hoverCell ?? null,
+    // 22~25 是 usePendingTasks / useStudioIntent 内部的状态槽，测试没法从外面注入
     undefined, undefined, undefined, undefined
   ];
   HOOK.cursor = 0;
@@ -746,6 +748,58 @@ section("④ 拼图阶段：三层编辑（地面 / 装饰 / 建筑）");
     arts.map((n) => n.props.alt).join(" | "));
   check("建筑底面有垫底（SPR_mapUnder）", byClassPart(tree, "SPR_mapUnder").length === 1,
     `${byClassPart(tree, "SPR_mapUnder").length} 个`);
+
+  // ★ 红警盖房子式幽灵预览：选 2×2 建筑笔刷、光标停在某格时，
+  // **整块占格**都要高亮（只高亮一格的话用户不知道会盖多大一片），
+  // 并且能放画绿、不能放画红。
+  {
+    const mk = (hover, brush) => renderTile(
+      makeProject({
+        items, preview,
+        map: { rows: 3, cols: 3, seed: 5, cells: ground, decor: {}, buildings: [], buildingGround: [], png: "map/map.png", json: "map/map.json", pixel: { width: 320, height: 288, left: 0, top: 100, scale: 2 } }
+      }),
+      { stage: "map", brushKey: brush, mapDraft: { ground, decor: {}, buildings: [] }, hoverCell: hover }
+    ).tree;
+
+    // 2×2 建筑笔刷、光标在 (0,0)：占格 (0,0)(0,1)(1,0)(1,1) 四格都该高亮
+    const ghostOk = mk("0,0", "building");
+    const okCells = byClassPart(ghostOk, "SPR_mapCell").filter((n) => String(n.props.className).includes("SPR_mapCell-ghostOk"));
+    check("★ 选 2×2 笔刷时整块占格都高亮（不是只高亮一格）", okCells.length === 4,
+      `${okCells.length} 格：${okCells.map((n) => n.props.title).join(" | ")}`);
+    check("幽灵预览画出了占格外框", byClassPart(ghostOk, "SPR_mapGhost").length === 1,
+      `${byClassPart(ghostOk, "SPR_mapGhost").length} 个`);
+    check("能放时用「可放」配色",
+      String(byClassPart(ghostOk, "SPR_mapGhost")[0]?.props.className).includes("SPR_mapGhost-ok"));
+
+    // 光标在 (2,2)：2×2 会越界 → 红框 + 原因。
+    // 占格是 (2,2)(2,3)(3,2)(3,3)，只有 (2,2) 落在 3×3 图内，
+    // 其余三格在**图外**、没有可渲染的格子 —— 所以只断言图内那一格变色 + 红框。
+    const ghostBad = mk("2,2", "building");
+    const badGhost = byClassPart(ghostBad, "SPR_mapGhost");
+    check("★ 越界时画红框（不可放）",
+      badGhost.length === 1 && String(badGhost[0].props.className).includes("SPR_mapGhost-bad"),
+      String(badGhost[0]?.props.className));
+    const badCells = byClassPart(ghostBad, "SPR_mapCell").filter((n) => String(n.props.className).includes("SPR_mapCell-ghostBad"));
+    check("越界时图内那一格标成不可放", badCells.length === 1, `${badCells.length} 格`);
+    check("★ 不可放的格子 title 里写明原因（不是「点了没反应」）",
+      badCells.every((n) => String(n.props.title).includes("超出边界")),
+      badCells.map((n) => n.props.title).join(" | "));
+    // 幽灵层里画的是**占格那几块**（越界时也照画，只是配色变红）——
+    // 不再额外描一圈外框：两套节点会叠在同一个容器里越堆越多（实测踩过）。
+    const ghostNodes = collect(badGhost[0], (n) => String(n.props?.className ?? "").includes("SPR_mapGhostCell"));
+    check("★ 越界时幽灵仍按整块占格画（4 块），只是配色变红",
+      ghostNodes.length === 4 && String(badGhost[0].props.className).includes("SPR_mapGhost-bad"),
+      `${ghostNodes.length} 块 / ${badGhost[0].props.className}`);
+    check("★ 幽灵不混进建筑层（否则会被当成建筑重复渲染）",
+      byClassPart(ghostBad, "SPR_mapBuild").length === 0,
+      `${byClassPart(ghostBad, "SPR_mapBuild").length} 个`);
+
+    // 单格笔刷仍然只高亮一格
+    const one = mk("1,1", "grass");
+    const oneCells = byClassPart(one, "SPR_mapCell").filter((n) => String(n.props.className).includes("SPR_mapCell-ghost"));
+    check("单格笔刷只高亮一格", oneCells.length === 1, `${oneCells.length} 格`);
+    check("没有光标时不画幽灵", byClassPart(mk(null, "building"), "SPR_mapGhost").length === 0);
+  }
 
   // ★ 回归：草稿里装饰必须存**地块键**（`tree`），不能存贴图路径。
   // 存路径的话后面按键查变体查不到，装饰会**静默全丢**（实测预览里树一个都不剩）。
