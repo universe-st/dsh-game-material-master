@@ -25,6 +25,7 @@
  * 不必重新花钱生成。这是本模块最实用的一条降本设计。
  */
 
+import { readFileSync } from "node:fs";
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { basename, join } from "node:path";
@@ -48,8 +49,8 @@ import {
   type TileGeomReport,
   type TileSettings
 } from "./tilegeom.js";
-import { assembleMap, emptyMapState, pickVariantIndex, trimTransparent, type TileMapState } from "./tilemap.js";
-import { decodeFile, encodeBitmap, sniffImageExt, type Bitmap } from "./tilemedia.js";
+import { assembleMap, cropBitmap, emptyMapState, measureAssemblyBounds, pickVariantIndex, trimTransparent, type TileMapState } from "./tilemap.js";
+import { decodeFile, encodeBitmap, pngSize, sniffImageExt, type Bitmap } from "./tilemedia.js";
 
 export type TileStage = "template" | "generate" | "review" | "map" | "export";
 export const TILE_STAGES: TileStage[] = ["template", "generate", "review", "map", "export"];
@@ -873,7 +874,13 @@ export async function runMapStage(projectId: string, options: MapOptions = {}): 
       families: byCellKey,
       background: options.background ?? [0, 0, 0, 0]
     });
-    const trimmed = trimTransparent(assembled);
+    // ★ 裁剪与上报用**同一个矩形**（几何口径），这样界面的坐标换算必然成立。
+    //
+    // 以前是 `trimTransparent` 自己去量不透明像素、再把量到的 `left/top` 报给界面 ——
+    // 界面算不出同一个值，两份数据一旦不同步就是「房子上移一格 /
+    // 点到的格子和涂到的差一格」。现在两边共用 `measureAssemblyBounds`。
+    const bounds = measureAssemblyBounds(lookup, decorated, { settings: project.settings, families: byCellKey });
+    const trimmed = cropBitmap(assembled, bounds);
     // 交付尺寸放大 2 倍（最近邻，保持像素画硬边）
     const big = upscale(trimmed, 2);
     await writeFile(join(dir, "map", "map.png"), encodeBitmap(big));
@@ -896,7 +903,12 @@ export async function runMapStage(projectId: string, options: MapOptions = {}): 
         ...decorated,
         png: "map/map.png",
         json: "map/map.json",
-        // 记下成品的像素信息：界面叠可点格子时要用 left/top 对齐裁剪后的画布
+        // 记下成品的像素信息：界面叠可点格子时要用 left/top 对齐裁剪后的画布。
+        //
+        // ⚠️ 必须与上面 `cropBitmap` 用的是**同一个矩形**（`trimmed.left/top` 就是
+        // 夹过之后的真值）。界面拿 `measureAssemblyBounds` 各算一遍也得到同一个值，
+        // 所以不会出现「宿主的值是旧的、界面已经按新布局排好了」这种错位 ——
+        // 那正是「房子上移一格 / 点到的格子和涂到的不是同一格」的来源。
         pixel: {
           width: big.width,
           height: big.height,
@@ -1337,10 +1349,34 @@ export interface TilePreview {
   ground: number[][];
   /** 装饰：`"行,列"` → `[变体下标, 贴图相对路径]`。 */
   decor: Record<string, [number, string]>;
-  /** 跨格建筑：锚点行列 + 占格 + 变体下标 + 贴图相对路径 + 底面比例。 */
-  buildings: Array<{ r: number; c: number; fw: number; fh: number; index: number; cell: string; baseFraction: number }>;
+  /** 跨格建筑：锚点行列 + 占格 + 变体下标 + 贴图相对路径 + 底面比例 + 高宽比。 */
+  buildings: Array<{
+    r: number; c: number; fw: number; fh: number; index: number;
+    cell: string; baseFraction: number;
+    /** 贴图自然「高 / 宽」。界面算包围盒要用 —— 它不解码贴图，拿不到自然尺寸。 */
+    ratio: number;
+  }>;
   /** 建筑底面垫底用的地面贴图相对路径（没有建筑时为 null）。 */
   groundUnder: string | null;
+}
+
+/**
+ * 量一张贴图的「自然高 / 宽」。
+ *
+ * ⚠️ **同步**读：`tileView` 是每次读项目都会走的同步路径，为了一个比例把它改成
+ * async 会牵动所有调用点（gateway / 工具面 / 自检）。这里只读 PNG 文件头的
+ * 前 24 字节（`pngSize`），代价极小。
+ * 读不到就退回 1（宽高相等的保守假设）。
+ */
+function spriteRatio(projectId: string, rel: string): number {
+  try {
+    const head = readFileSync(tileAssetPath(projectId, rel));
+    const size = pngSize(head);
+    if (size.width > 0 && size.height > 0) return size.height / size.width;
+  } catch {
+    // 文件不在或不是 PNG：退回 1
+  }
+  return 1;
 }
 
 export function tilePreview(project: TileProject): TilePreview {
@@ -1423,7 +1459,10 @@ export function tilePreview(project: TileProject): TilePreview {
       fh: entry?.[3] ?? 2,
       index: found.index,
       cell: found.cell,
-      baseFraction: found.baseFraction
+      baseFraction: found.baseFraction,
+      // 自然高宽比：从 PNG 文件头量（不进内存解整图）。界面算包围盒要用它，
+      // 而浏览器半区拿不到自然尺寸（贴图是异步加载的）。
+      ratio: spriteRatio(project.id, found.cell)
     });
   }
 
@@ -1529,3 +1568,8 @@ export function tileDiamondHeight(project: TileProject): number {
 }
 
 export { ArkError };
+
+
+
+
+

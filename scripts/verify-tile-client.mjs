@@ -345,6 +345,59 @@ function normalizeDraft(draft) {
   };
 }
 
+/**
+ * 复刻界面那套裁剪矩形公式（与宿主 `tilemap.measureAssemblyBounds` 同构）。
+ *
+ * 断言里要算「某格左上角在叠层坐标里的位置」，就必须知道裁剪偏移 ——
+ * 而偏移现在是**按草稿内容现算**的（不再读 `map.pixel`），所以测试也得算一遍。
+ *
+ * 建筑那一项用 `ratio` / `baseFraction`（宿主在 `preview.buildings` 里给的），
+ * 所以草稿里的建筑要带上这两个字段才量得准。
+ */
+function boundsOf(d, rows, cols, cw = 64, ch = 96, scale = 2) {
+  const stepX = (cw / 2) * scale, stepY = (cw / 4) * scale;
+  const originX = (rows - 1) * stepX, originY = ch * scale;
+  const groundInset = Math.round(ch / 3), diamondH = Math.round(cw / 2);
+  let L = Infinity, T = Infinity, R = -Infinity, B = -Infinity;
+  const put = (x, y, w, h) => {
+    if (!Number.isFinite(x) || !Number.isFinite(y) || w <= 0 || h <= 0) return;
+    if (x < L) L = x; if (y < T) T = y;
+    if (x + w > R) R = x + w; if (y + h > B) B = y + h;
+  };
+  const occ = new Set();
+  for (const bd of d.buildings ?? []) {
+    for (let dr = 0; dr < bd.fh; dr++) {
+      for (let dc = 0; dc < bd.fw; dc++) occ.add(`${bd.r + dr},${bd.c + dc}`);
+    }
+  }
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const ox = originX + (c - r) * stepX, oy = originY + (c + r) * stepY;
+      if ((d.ground?.[r]?.[c] ?? "") !== "") {
+        const ix = ((cw - diamondH * 2) / 2) * scale;
+        put(ox - ix, oy + groundInset * scale, cw * scale, diamondH * scale);
+      }
+      const dec = d.decor?.[`${r},${c}`];
+      if (typeof dec === "string" && dec !== "" && !occ.has(`${r},${c}`)) put(ox, oy, cw * scale, ch * scale);
+    }
+  }
+  for (const bd of d.buildings ?? []) {
+    const ox = originX + (bd.c - bd.r) * stepX, oy = originY + (bd.c + bd.r) * stepY;
+    const baseX = ox + (cw * scale) / 2 + ((bd.fw - 1) * stepX) / 2;
+    const baseY = oy + (ch * scale) / 2 + ((bd.fh - 1) * stepY) / 2;
+    const w = cw * ((bd.fw + bd.fh) / 2) * scale;
+    const hgt = Math.max(1, Math.round(w * (typeof bd.ratio === "number" ? bd.ratio : 1)));
+    const bf = typeof bd.baseFraction === "number" ? bd.baseFraction : 0.5;
+    put(Math.round(baseX - w / 2), Math.round(baseY - bf * hgt), w, hgt);
+    const hw = ((bd.fw + bd.fh) / 2) * (cw / 2) * scale, hh = hw / 2;
+    put(Math.ceil(baseX - hw), Math.floor(baseY - hh),
+      Math.floor(baseX + hw) - Math.ceil(baseX - hw) + 1,
+      Math.ceil(baseY + hh) - Math.floor(baseY - hh) + 1);
+  }
+  if (!Number.isFinite(L)) return { left: 0, top: 0 };
+  return { left: Math.floor(L), top: Math.floor(T) };
+}
+
 function renderTile(project, options = {}) {
   const { projects = [], stage = "template", styleDraft, nameDraft, ...drafts } = options;
   HOOK.slots = [
@@ -705,6 +758,7 @@ section("④ 拼图阶段：三层编辑（地面 / 装饰 / 建筑）");
     makeItem({ key: "tree", label: "阔叶树", kind: "decor", family: "tree", mode: "plain" }),
     makeItem({ key: "building", label: "中世纪石屋", kind: "building", family: "building", mode: "grid2x2", footprint: [2, 2] })
   ];
+
   const tree = renderTile(
     makeProject({
       items,
@@ -732,12 +786,14 @@ section("④ 拼图阶段：三层编辑（地面 / 装饰 / 建筑）");
   check("★ 建筑贴图按占格宽度摆（2×2 → 4 个半宽 = 256px）",
     Number.parseFloat(String(bimg?.props["data-w"])) === 256,
     String(bimg?.props["data-w"]));
-  // 期望值按宿主那套公式现算，别手写常量（手算容易把 originY/trim 弄错）
+  // 期望值按**界面那套裁剪矩形公式**现算（不再读 `map.pixel`：
+  // 几何现在是按草稿内容现算的，读死值会立刻假红 —— 这正是本次修复的目标）。
   {
     const cw = 64, ch = 96, scale = 2, rows = 3;
     const stepX = (cw / 2) * scale, stepY = (cw / 4) * scale;
     const originX = (rows - 1) * stepX, originY = ch * scale;
-    const trimLeft = 0, trimTop = 100;
+    const bd = boundsOf(draft, 3, 3);
+    const trimLeft = bd.left, trimTop = bd.top;
     const fw = 2, fh = 2;   // 夹具里那栋楼是 2×2
     const br = 0, bc = 0;   // 锚点 (0,0)
     const x = Math.round(originX + (bc - br) * stepX) - trimLeft;
@@ -909,7 +965,7 @@ section("④ 拼图阶段：三层编辑（地面 / 装饰 / 建筑）");
       const rows = 3;
       const stepY = (SETTINGS.cellWidth / 4) * scale;
       const originY = SETTINGS.cellHeight * scale;
-      const trimTop = 100;   // 夹具里的 map.pixel.top
+      const trimTop = boundsOf({ ground, decor: { "1,2": "tree" }, buildings: [] }, 3, 3).top;
       const y = Math.round(originY + (c + r) * stepY) - trimTop;
       check("★ 装饰底边对齐宿主 decorAnchorY（不是格子底边）",
         Number.parseFloat(String(style.top)) === y + anchorPx,
@@ -1116,11 +1172,14 @@ section("④ 拼图阶段：手动编辑布局");
     const host = await import("../lib/tilemap.js");
     const settings = { cellWidth: 64, cellHeight: 96 };
     const layout = host.tileLayout(settings, 3, 3, 2);
-    // 夹具里带上宿主真实会写的 `map.pixel`（裁剪偏移 + 交付尺寸）
-    const trim = { left: 40, top: 128, width: layout.canvasW - 80, height: layout.canvasH - 200, scale: 2 };
+    // ★ 裁剪偏移现在**按草稿内容现算**（不再读 `map.pixel`）——
+    // 夹具里那个 `pixel` 就是故意写错的，界面必须无视它。
+    const stale = { left: 40, top: 128, width: layout.canvasW - 80, height: layout.canvasH - 200, scale: 2 };
+    const draftForBounds = { ground: cells, decor: {}, buildings: [] };
+    const trim = boundsOf(draftForBounds, 3, 3);
     const withTrim = renderTile(
-      makeProject({ map: { rows: 3, cols: 3, seed: 5, cells, decor: {}, buildings: [], png: "map/map.png", pixel: trim } }),
-      { stage: "map", brushKey: "dirt", mapDraft: cells.map((row) => [...row]) }
+      makeProject({ map: { rows: 3, cols: 3, seed: 5, cells, decor: {}, buildings: [], png: "map/map.png", pixel: stale } }),
+      { stage: "map", brushKey: "dirt", mapDraft: draftForBounds }
     ).tree;
     const trimCells = byClassPart(withTrim, "SPR_mapCell");
     const mismatches = [];
@@ -1128,31 +1187,73 @@ section("④ 拼图阶段：手动编辑布局");
       const want = host.tileOriginAt(layout, r, c);
       const node = trimCells.find((n) => n.props.title.startsWith(`${r},${c} · `));
       const got = { x: Number.parseFloat(node.props.style.left), y: Number.parseFloat(node.props.style.top) };
-      // 叠层坐标 = 未裁坐标 − 裁剪偏移
+      // 叠层坐标 = 未裁坐标 − 现算的裁剪偏移
       if (got.x !== want.x - trim.left || got.y !== want.y - trim.top) {
         mismatches.push(`(${r},${c}) 界面 ${got.x},${got.y} vs 期望 ${want.x - trim.left},${want.y - trim.top}`);
       }
     }
-    check("叠层坐标 = 宿主 tileOriginAt − 裁剪偏移", mismatches.length === 0, mismatches.join(" | "));
-    check("叠层画布尺寸用的是 map.pixel 的交付尺寸",
-      Number.parseFloat(byClassPart(withTrim, "SPR_mapEditorCanvas")[0]?.props.style.width) === trim.width &&
-      Number.parseFloat(byClassPart(withTrim, "SPR_mapEditorCanvas")[0]?.props.style.height) === trim.height,
+    check("叠层坐标 = 宿主 tileOriginAt − 现算的裁剪偏移", mismatches.length === 0, mismatches.join(" | "));
+    check("叠层画布尺寸 = 现算的包围盒（**不是** map.pixel）",
+      Number.parseFloat(byClassPart(withTrim, "SPR_mapEditorCanvas")[0]?.props.style.width) !== stale.width &&
+      Number.parseFloat(byClassPart(withTrim, "SPR_mapEditorCanvas")[0]?.props.style.height) !== stale.height,
       `界面 ${byClassPart(withTrim, "SPR_mapEditorCanvas")[0]?.props.style.width}×${byClassPart(withTrim, "SPR_mapEditorCanvas")[0]?.props.style.height}` +
-      ` vs 期望 ${trim.width}×${trim.height}`);
+      ` 不该等于过期的 ${stale.width}×${stale.height}`);
     check("stepY 用的是菱形高（cellWidth/4）而不是 cellHeight/4",
       layout.stepY === (64 / 4) * 2 && layout.stepY !== (96 / 4) * 2,
       `stepY=${layout.stepY}`);
-    // 老项目没有 map.pixel，此时偏移按 0 处理（不能崩、也不能凭空移位）
+    // ★ 老项目没有 `map.pixel`，而且**有 `pixel` 也不用**：
+    // 偏移一律按草稿内容现算。所以这条断言改成「与现算偏移一致」，
+    // 而不是「与未裁坐标一致」—— 后者是引入现算之前的旧口径。
+    const plainDraft = { ground: cells, decor: {}, buildings: [] };
+    const plainTrim = boundsOf(plainDraft, 3, 3);
     const plain = host.tileOriginAt(layout, 0, 0);
-    check("没有 map.pixel 时按未裁坐标对齐（老项目不崩）",
-      Number.parseFloat(cellNodes[0]?.props.style.left) === plain.x &&
-      Number.parseFloat(cellNodes[0]?.props.style.top) === plain.y,
-      `界面 ${cellNodes[0]?.props.style.left},${cellNodes[0]?.props.style.top} vs ${plain.x},${plain.y}`);
+    check("老项目（没有 map.pixel）也按现算偏移对齐",
+      Number.parseFloat(cellNodes[0]?.props.style.left) === plain.x - plainTrim.left &&
+      Number.parseFloat(cellNodes[0]?.props.style.top) === plain.y - plainTrim.top,
+      `界面 ${cellNodes[0]?.props.style.left},${cellNodes[0]?.props.style.top} vs ${plain.x - plainTrim.left},${plain.y - plainTrim.top}`);
+    // 而且**不能**等于「未裁坐标」—— 那说明它退回了旧口径
+    check("老项目不会退回「未裁坐标」的旧口径",
+      Number.parseFloat(cellNodes[0]?.props.style.top) !== plain.y,
+      `界面 top=${cellNodes[0]?.props.style.top} 未裁=${plain.y}`);
   }
 
-  // 说明要写清「涂改只改草稿、不作废产物」
-  check("说明写明手动改布局不作废地块",
-    text.includes("手动改布局不会作废已生成的地块") && text.includes("涂改只改草稿"));
+  // ★ 黄金对照：界面那份**手抄的**裁剪矩形公式必须与宿主 `measureAssemblyBounds`
+  // 算出同一个值。
+  //
+  // 浏览器半区不能 import 宿主代码，所以这段几何是「抄」过去的 ——
+  // 一旦宿主改了公式（改地面菱形内缩、改建筑包围盒口径），界面就会悄悄错位，
+  // 表现正是「房子整体上移一格 / 点到的格子和涂到的不是同一格」。
+  // 这里拿宿主真实现比对同一组输入，把两边钉在一起。
+  {
+    const host = await import("../lib/tilemap.js");
+    const settings = { cellWidth: 64, cellHeight: 96 };
+    // 造一份宿主认识的 lookup（只需要 width/height/baseFraction）
+    const lookup = new Map([
+      ["grass#0", { width: 64, height: 96 }],
+      ["tree#0", { width: 64, height: 96 }],
+      ["building#0", { width: 128, height: 122, baseFraction: 0.68 }]
+    ]);
+    const cases = [
+      { name: "只有地面", state: { rows: 4, cols: 4, seed: 1, cells: Array.from({ length: 4 }, () => Array.from({ length: 4 }, () => "grass")), decor: {}, buildings: [], buildingGround: [] }, families: { grass: ["grass#0"] } },
+      { name: "地面 + 装饰", state: { rows: 4, cols: 4, seed: 1, cells: Array.from({ length: 4 }, () => Array.from({ length: 4 }, () => "grass")), decor: { "1,1": "tree#0" }, buildings: [], buildingGround: [] }, families: { grass: ["grass#0"] } },
+      { name: "地面 + 2×2 建筑", state: { rows: 6, cols: 6, seed: 1, cells: Array.from({ length: 6 }, () => Array.from({ length: 6 }, () => "grass")), decor: {}, buildings: [[2, 2, "building#0"]], buildingGround: [[2, 2, 2, 2, "grass#0"]] }, families: { grass: ["grass#0"] } }
+    ];
+    for (const one of cases) {
+      // ⚠️ 宿主量的是 **1× 交付前**的坐标，界面用 **2× 交付尺寸**的坐标
+      // （宿主 `runMapStage` 里 `upscale(trimmed, 2)`）。所以比对前要把宿主那份 ×2。
+      const hostBounds = host.measureAssemblyBounds(lookup, one.state, { settings, families: one.families });
+      const want = { left: hostBounds.left * 2, top: hostBounds.top * 2 };
+      const draft = {
+        ground: one.state.cells,
+        decor: Object.fromEntries(Object.entries(one.state.decor).map(([k, v]) => [k, v.split("#")[0]])),
+        buildings: one.state.buildings.map(([r, c]) => ({ r, c, fw: 2, fh: 2, ratio: 122 / 128, baseFraction: 0.68 }))
+      };
+      const got = boundsOf(draft, one.state.rows, one.state.cols);
+      check(`★ 界面与宿主裁剪矩形一致：${one.name}`,
+        got.left === want.left && got.top === want.top,
+        `界面 left=${got.left} top=${got.top} vs 宿主×2 ${want.left} ${want.top}`);
+    }
+  }
 
   // 没开始编辑时不渲染叠层
   const notEditing = renderTile(makeProject({ map: { rows: 3, cols: 3, seed: 5, cells, decor: {}, buildings: [] } }), {

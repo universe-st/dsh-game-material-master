@@ -212,8 +212,145 @@ export function pickVariantIndex(seed: number, r: number, c: number, count: numb
   return h % count;
 }
 
-export function assembleMap(
-  lookup: Map<string, Bitmap>,
+/**
+ * 拼图内容的像素包围盒（未裁坐标，1× 交付前的尺寸）。
+ *
+ * ★ 这是**宿主与界面共用的唯一几何口径**。
+ *
+ * 为什么必须共用：成品图是裁过边的（`trimTransparent`），而界面把可点格子叠在
+ * **裁过**的预览图上，所以它必须知道「内容相对未裁画布偏移了多少」。
+ * 这个偏移只跟**网格与画了什么类别**有关，跟具体抽到哪个变体无关
+ * （变体之间尺寸一致，只有装饰贴图的高度参差），所以可以纯几何算出来。
+ *
+ * ⚠️ 这里是**几何包围盒**，不是「不透明像素包围盒」，两者差别在**地面菱形**
+ * 与**装饰贴图**：
+ *   · 地面贴图是整格 64×96，但菱形只占 `[cellH/3, cellH/3 + cellW/2]` 那一段
+ *     —— 直接按整格算会让上边界高出一格（实测差 31px，正好是「房子上移一格」）。
+ *   · 装饰贴图高度参差（树比石头高），这里按整格算，宁可略微保守。
+ * 保守是可接受的：差几个像素只是外层多留一点白，而**错一格**就是点错格子。
+ */
+export interface AssemblyBounds {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/** 只量几何、不画像素。 */
+export function measureAssemblyBounds(
+  lookup: Map<string, { width: number; height: number; baseFraction?: number }>,
+  state: TileMapState,
+  options: AssembleOptions
+): AssemblyBounds {
+  const { settings } = options;
+  const layout = tileLayout(settings, state.rows, state.cols);
+  const cellW = settings.cellWidth;
+  const cellH = settings.cellHeight;
+  // 地面菱形在单元格里的位置：上下各留 cellH/3 给装饰（见 tilegeom 的注释）
+  const groundInset = Math.round(cellH / 3);
+  const diamondH = Math.round(cellW / 2);
+
+  let left = Infinity;
+  let top = Infinity;
+  let right = -Infinity;
+  let bottom = -Infinity;
+  const put = (x: number, y: number, w: number, h: number) => {
+    if (!Number.isFinite(x) || !Number.isFinite(y) || w <= 0 || h <= 0) return;
+    if (x < left) left = x;
+    if (y < top) top = y;
+    if (x + w > right) right = x + w;
+    if (y + h > bottom) bottom = y + h;
+  };
+
+  for (let r = 0; r < state.rows; r++) {
+    for (let c = 0; c < state.cols; c++) {
+      const origin = tileOriginAt(layout, r, c);
+      const family = state.cells[r]?.[c] ?? "";
+      if (family !== "") {
+        // 地面：菱形那一段（水平方向按整格，菱形只占中间 cellW，差不了多少）
+        const insetX = Math.round((cellW - diamondH * 2) / 2);
+        put(origin.x - insetX, origin.y + groundInset, cellW, diamondH);
+      }
+      const decorName = state.decor[`${r},${c}`];
+      if (typeof decorName === "string" && decorName !== "") {
+        put(origin.x, origin.y, cellW, cellH);
+      }
+    }
+  }
+
+  const groundByBuilding = new Map<string, { fw: number; fh: number }>();
+  for (const entry of state.buildingGround ?? []) {
+    groundByBuilding.set(`${entry[0]},${entry[1]}`, { fw: entry[2], fh: entry[3] });
+  }
+  for (const [r, c, name] of state.buildings ?? []) {
+    const sprite = lookup.get(name);
+    const origin = tileOriginAt(layout, r, c);
+    const foot = groundByBuilding.get(`${r},${c}`);
+    const fw = foot?.fw ?? 1;
+    const fh = foot?.fh ?? 1;
+    const baseX = origin.x + cellW / 2 + ((fw - 1) * (cellW / 2)) / 2;
+    const baseY = origin.y + cellH / 2 + ((fh - 1) * (cellW / 4)) / 2;
+    if (sprite !== undefined) {
+      const base = typeof sprite.baseFraction === "number"
+        ? sprite.baseFraction * sprite.height
+        : sprite.height - cellH / 2;
+      put(Math.round(baseX - sprite.width / 2), Math.round(baseY - base), sprite.width, sprite.height);
+    }
+    // 垫底菱形（`fillDiamondSolid` 的口径）
+    const halfW = ((fw + fh) / 2) * (cellW / 2);
+    const halfH = halfW / 2;
+    put(
+      Math.ceil(baseX - halfW),
+      Math.floor(baseY - halfH),
+      Math.floor(baseX + halfW) - Math.ceil(baseX - halfW) + 1,
+      Math.ceil(baseY + halfH) - Math.floor(baseY - halfH) + 1
+    );
+  }
+
+  if (!Number.isFinite(left)) return { left: 0, top: 0, width: 0, height: 0 };
+  // 不做额外留白：宿主用**同一个矩形**裁剪（`cropBitmap`），
+  // 所以「矩形 → map.png」是恒等映射，多留白只会平白多一圈透明边。
+  const l = Math.floor(left);
+  const t = Math.floor(top);
+  return {
+    left: l,
+    top: t,
+    width: Math.ceil(right) - l,
+    height: Math.ceil(bottom) - t
+  };
+}
+
+/**
+ * 按**给定的**矩形裁剪（与 `trimTransparent` 的区别：矩形是调用方算好的）。
+ *
+ * 为什么不让 `trimTransparent` 自己去量：那样「裁剪矩形」就成了**不透明像素的
+ * 函数**，界面算不出同一个值来（它不解码贴图）。于是宿主的 `pixel` 与界面按布局
+ * 算出的偏移会各说各话 —— 真机上就是「房子上移一格 / 点到的格子和涂到的差一格」。
+ *
+ * 现在裁剪与上报用**同一个矩形**：界面拿 `measureAssemblyBounds` 各算一遍，
+ * 必然一致。矩形超出画布的部分会被夹住，返回的 `left/top` 是**夹过之后**的真值，
+ * 所以坐标换算永远成立。
+ */
+export function cropBitmap(src: Bitmap, rect: AssemblyBounds): Bitmap & { left: number; top: number } {
+  const left = Math.max(0, Math.min(rect.left, Math.max(0, src.width - 1)));
+  const top = Math.max(0, Math.min(rect.top, Math.max(0, src.height - 1)));
+  const right = Math.max(left + 1, Math.min(rect.left + rect.width, src.width));
+  const bottom = Math.max(top + 1, Math.min(rect.top + rect.height, src.height));
+  const w = right - left;
+  const h = bottom - top;
+  const rgba = Buffer.alloc(w * h * 4);
+  for (let y = 0; y < h; y++) {
+    src.rgba.copy(
+      rgba,
+      y * w * 4,
+      ((y + top) * src.width + left) * 4,
+      ((y + top) * src.width + left + w) * 4
+    );
+  }
+  return Object.assign({ width: w, height: h, rgba }, { left, top }) as Bitmap & { left: number; top: number };
+}
+
+export function assembleMap(  lookup: Map<string, Bitmap>,
   state: TileMapState,
   options: AssembleOptions
 ): Bitmap {
