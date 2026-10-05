@@ -719,18 +719,27 @@ section("④ 拼图阶段：三层编辑（地面 / 装饰 / 建筑）");
     String(bimg?.props["data-w"]));
   // 期望值按宿主那套公式现算，别手写常量（手算容易把 originY/trim 弄错）
   {
-    const cw = 64, ch = 96, scale = 2, rows = 3, cols = 3;
+    const cw = 64, ch = 96, scale = 2, rows = 3;
     const stepX = (cw / 2) * scale, stepY = (cw / 4) * scale;
     const originX = (rows - 1) * stepX, originY = ch * scale;
     const trimLeft = 0, trimTop = 100;
+    const fw = 2, fh = 2;   // 夹具里那栋楼是 2×2
     const x = Math.round(originX + (1 - 2) * stepX) - trimLeft;
     const y = Math.round(originY + (1 + 2) * stepY) - trimTop;
-    check("建筑底面中心对到锚点格的几何中心",
+    // ★ 底面中心 = **占格菱形**的中心（2×2 时比锚点格中心右/下各半格）。
+    // 写成锚点格中心就是真机那个「建筑浮在半空、垫底偏半格」的 bug。
+    const anchorX = x + (cw * scale) / 2;
+    const anchorY = y + (ch * scale) / 2;
+    const wantX = anchorX + ((fw - 1) * stepX) / 2;
+    const wantY = anchorY + ((fh - 1) * stepY) / 2;
+    check("★ 建筑底面中心对到**占格菱形**的中心（不是锚点格中心）",
       bimg !== undefined &&
-      Number.parseFloat(String(bimg.props["data-bx"])) === x + (cw * scale) / 2 &&
-      Number.parseFloat(String(bimg.props["data-by"])) === y + (ch * scale) / 2,
-      `bx=${bimg?.props["data-bx"]} by=${bimg?.props["data-by"]} 期望 ${x + (cw * scale) / 2},${y + (ch * scale) / 2}`);
-    void cols;
+      Number.parseFloat(String(bimg.props["data-bx"])) === wantX &&
+      Number.parseFloat(String(bimg.props["data-by"])) === wantY,
+      `bx=${bimg?.props["data-bx"]} by=${bimg?.props["data-by"]} 期望 ${wantX},${wantY}`);
+    check("★ 底面中心比锚点格中心低半格（2×2 的判据）",
+      Number.parseFloat(String(bimg?.props["data-by"] ?? "0")) - anchorY === stepY / 2,
+      `差 ${Number.parseFloat(String(bimg?.props["data-by"] ?? "0")) - anchorY}px`);
   }
   check("被建筑占掉的格子不再画地面",
     !arts.some((n) => String(n.props.alt).startsWith("2,1 ") || String(n.props.alt).startsWith("2,2 ")),

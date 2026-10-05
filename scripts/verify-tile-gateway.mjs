@@ -472,6 +472,38 @@ section("④ 拼图 / ⑤ 导出（走网关，免费）");
       check("回传 layouts 时占格被留空（不重复画地面）",
         L.map.cells[2][2] === "" && L.map.cells[3][3] === "",
         JSON.stringify(L.map.cells[2]));
+
+      // ★ 多栋建筑 + 装饰的**保存往返**：一栋都不能丢。
+      //
+      // 真机踩过：界面草稿里有几栋楼，存回去时只剩一部分 —— 因为落盘只认
+      // 「cells 里还留着的建筑键」，而拼图会把占格清空。现在靠显式 layouts，
+      // 这里钉住「4 栋进、4 栋出」。
+      await studio.saveTileMapCells({
+        projectId: id,
+        cells: Array.from({ length: 8 }, () => Array.from({ length: 8 }, () => "grass")),
+        seed: 11,
+        decor: { "0,1": "tree", "1,5": "tree" },
+        layouts: [
+          { r: 0, c: 0, width: 2, height: 2, key: "building", under: "grass#0" },
+          { r: 0, c: 4, width: 2, height: 2, key: "building", under: "grass#0" },
+          { r: 4, c: 0, width: 2, height: 2, key: "building", under: "grass#0" },
+          { r: 4, c: 4, width: 2, height: 2, key: "building", under: "grass#0" }
+        ]
+      });
+      const R = await studio.getTileProject({ projectId: id });
+      check("★ 4 栋建筑经过一次保存往返后一栋不少",
+        (R.map.buildings ?? []).length === 4,
+        JSON.stringify((R.map.buildings ?? []).map((b) => `${b[0]},${b[1]}`)));
+      check("★ 往返后装饰也一栋不少",
+        Object.keys(R.map.decor ?? {}).length === 2,
+        JSON.stringify(R.map.decor));
+      check("★ preview 也看到 4 栋（界面据此画预览）",
+        (R.preview?.buildings ?? []).length === 4,
+        String((R.preview?.buildings ?? []).length));
+      check("建筑占格都被清空（拼图不会再画一遍地面）",
+        R.map.buildings.every(([br, bc]) =>
+          R.map.cells[br][bc] === "" && R.map.cells[br + 1][bc + 1] === ""),
+        JSON.stringify(R.map.cells.map((row) => row.join(""))));
     }
 
     // ── 装饰回传：**地块键**与**贴图路径**两种写法都要认 ──────────────

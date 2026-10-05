@@ -40,6 +40,8 @@ import {
   countInteriorHoles,
   emptyMapState,
   mulberry32,
+  tileLayout,
+  tileOriginAt,
   trimTransparent
 } from "../lib/tilemap.js";
 
@@ -586,6 +588,54 @@ section("S4 跨格建筑锚点");
   }
   check("S4 建筑真的被画上去了", maxX > minX, `x ${minX}..${maxX}`);
   near("S4b 建筑宽度 = 贴图宽度", maxX - minX + 1, 128, 2, "px");
+}
+
+// ★ S4c 跨格建筑的**底面中心**必须落在「占格菱形」的中心，不是锚点格中心。
+//
+// 真机踩过：2×2 建筑（锚点在左上那格）的底面比锚点格中心右移半格、下移半格，
+// 而地面垫底画在锚点格中心 —— 于是垫底整个往左上偏半格，
+// 建筑看着像**浮在半空**（脚下那块地面没跟上）。
+{
+  const ground = solidCell(S, [124, 176, 66, 255]);
+  // 建筑底面画成一条 2px 的洋红线，用来量它到底落在哪
+  const bw = 128, bh = 96, baseRow = 80;
+  const building = { width: bw, height: bh, rgba: Buffer.alloc(bw * bh * 4, 0) };
+  for (let x = 0; x < bw; x++) {
+    for (let dy = 0; dy < 2; dy++) {
+      const i = ((baseRow + dy) * bw + x) * 4;
+      building.rgba[i] = 255; building.rgba[i + 1] = 0; building.rgba[i + 2] = 255; building.rgba[i + 3] = 255;
+    }
+  }
+  building.baseFraction = baseRow / bh;
+  const lookup = new Map([["grass#0", ground], ["bld#0", building]]);
+  const st = emptyMapState(4, 4, "grass");
+  st.cells = Array.from({ length: 4 }, () => Array.from({ length: 4 }, () => "grass"));
+  st.buildings = [[1, 1, "bld#0"]];
+  st.buildingGround = [[1, 1, 2, 2, "grass#0"]];
+  const map = assembleMap(lookup, st, { settings: S, families: { grass: ["grass"] } });
+
+  // 量洋红线的中心
+  let mx = 0, mn = 0, my = 0;
+  for (let y = 0; y < map.height; y++) {
+    for (let x = 0; x < map.width; x++) {
+      const i = (y * map.width + x) * 4;
+      if (map.rgba[i] > 200 && map.rgba[i + 1] < 60 && map.rgba[i + 2] > 200 && map.rgba[i + 3] > 200) {
+        mx += x; mn++; my += y;
+      }
+    }
+  }
+  const layout = tileLayout(S, 4, 4);
+  const o = tileOriginAt(layout, 1, 1);
+  // 占格菱形（2×2）的中心
+  const wantX = o.x + S.cellWidth / 2 + layout.stepX / 2;
+  const wantY = o.y + S.cellHeight / 2 + layout.stepY / 2;
+  near("S4c 建筑底面中心 x = 占格菱形中心 x", mx / mn, wantX, 2, "px");
+  near("S4d 建筑底面中心 y = 占格菱形中心 y", my / mn, wantY, 2, "px");
+  // 反面：不能等于锚点格中心（那正是真机那个 bug）。
+  // 2×2 时两者差 `stepY/2 = 8`，所以拿锚点格中心去比会差整整 8px。
+  const wrongY = o.y + S.cellHeight / 2;
+  near("S4e 底面中心 ≠ 锚点格中心（差半格，真机 bug 的判据）",
+    my / mn - wrongY, layout.stepY / 2, 2, "px");
 }
 
 section("S5/S6 边界与守卫");
