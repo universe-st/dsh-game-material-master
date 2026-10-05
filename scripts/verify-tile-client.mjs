@@ -770,6 +770,44 @@ section("④ 拼图阶段：三层编辑（地面 / 装饰 / 建筑）");
     byClassPart(tree, "SPR_mapUnder").length === 0,
     `${byClassPart(tree, "SPR_mapUnder").length} 个`);
 
+  // ★ 回归：老数据的建筑占格是**空串**（旧版 `place()` 会清空）。
+  // 打开编辑时要**自动补上默认地面** —— 不补的话界面会一直给它们叠那块纯色
+  // 垫底（真机上是「建筑拖着塑料板」），而且用户得先手动保存一次才会好。
+  //
+  // `ensureMapDraft` 在假 React 下没法直接跑（setState 是空实现），
+  // 所以照着它的口径推一遍草稿：占格空串 → 用建筑自己的 `under` 补上。
+  {
+    const emptyFootprint = [["", "", "grass"], ["", "", "grass"], ["grass", "grass", "grass"]];
+    const legacyBuildings = [{ r: 0, c: 0, fw: 2, fh: 2, key: "building", under: "grass" }];
+    const backfilled = emptyFootprint.map((row) => [...row]);
+    for (const bd of legacyBuildings) {
+      for (let dr = 0; dr < bd.fh; dr++) {
+        for (let dc = 0; dc < bd.fw; dc++) {
+          if (backfilled[bd.r + dr]?.[bd.c + dc] === "") backfilled[bd.r + dr][bd.c + dc] = bd.under;
+        }
+      }
+    }
+    check("★ 老数据的占格空串会被补成地块键（不是留空）",
+      backfilled[0][0] === "grass" && backfilled[1][1] === "grass",
+      JSON.stringify(backfilled));
+
+    const legacy = renderTile(
+      makeProject({
+        items, preview,
+        map: {
+          rows: 3, cols: 3, seed: 5, cells: emptyFootprint, decor: {}, buildings: [], buildingGround: [],
+          png: "map/map.png", json: "map/map.json", pixel: { width: 320, height: 288, left: 0, top: 100, scale: 2 }
+        }
+      }),
+      { stage: "map", brushKey: "grass", mapDraft: { ground: backfilled, decor: {}, buildings: legacyBuildings } }
+    ).tree;
+    const legacyArts = byClassPart(legacy, "SPR_mapArt").filter((n) => !String(n.props.className).includes("Under"));
+    check("★ 补完之后 9 格都有地面（没有洞）", legacyArts.length === 9, `${legacyArts.length} 张`);
+    check("★ 补完之后不再需要那块纯色垫底",
+      byClassPart(legacy, "SPR_mapUnder").length === 0,
+      `${byClassPart(legacy, "SPR_mapUnder").length} 个`);
+  }
+
   // ★ 红警盖房子式幽灵预览：选 2×2 建筑笔刷、光标停在某格时，
   // **整块占格**都要高亮（只高亮一格的话用户不知道会盖多大一片），
   // 并且能放画绿、不能放画红。

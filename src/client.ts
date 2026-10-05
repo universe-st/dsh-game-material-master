@@ -5853,6 +5853,18 @@
         const buildings = (project.preview?.buildings ?? []).map((b) => ({
           r: b.r, c: b.c, fw: b.fw, fh: b.fh, key: keyOfVariant(b.cell), under: defaultUnder()
         }));
+        // ★ 老数据的建筑占格是**空串**（旧版 `place()` 会把它清空）。
+        // 这里补上默认地面 —— 不补的话界面会一直给它们叠那块纯色垫底
+        // （真机上就是「建筑拖着塑料板」），而且用户得先手动保存一次才会好。
+        for (const b of buildings) {
+          for (let dr = 0; dr < b.fh; dr++) {
+            for (let dc = 0; dc < b.fw; dc++) {
+              const row = ground[b.r + dr];
+              if (row === undefined) continue;
+              if (row[b.c + dc] === "") row[b.c + dc] = b.under !== "" ? b.under : groundFill;
+            }
+          }
+        }
         const draft = { ground, decor, buildings };
         // 第一份草稿也进历史（index 0）—— 撤销到根就该看到「刚打开编辑」的样子
         commitDraft(draft);
