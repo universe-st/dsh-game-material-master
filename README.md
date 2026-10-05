@@ -37,7 +37,8 @@
 > 对真实立绘经常需要人工校正（agent 视觉先验或手工拖放），导出的 Spine / DragonBones 产物也还没经过
 > 足够的引擎侧验证。界面上该模块带「实验性」角标，并在每次进入时弹窗说明。本文只展示前三个模块。
 > 如果你需要它、或者想一起把它做扎实，欢迎到
-> [GitHub 仓库](https://github.com/universe-st/dsh-game-material-master) 参与开发。
+> [GitHub 仓库](https://github.com/universe-st/dsh-game-material-master) 参与开发，
+> 或加入 **QQ 群 `1126382236`**（见文末「交流与反馈」）。
 
 ---
 
@@ -305,6 +306,13 @@ T("第 {n0} 帧", { n0: index + 1 })                        // 带插值，英�
 - **自动装配只对「部件就是参考图上整块肢体」的素材可靠**；真实立绘走生图拆件时，
   建议用 agent 视觉先验或手工拖放校正（这些步骤都不花钱）。
 - MiniMax 偶发内容审核拒绝（实测约 10%），换一版更中性的提示词重试即可。
+
+## 交流与反馈
+
+- **QQ 群：`1126382236`**（群名「DSH游戏素材大师插件」）——新版本发布、路线图和踩坑经验都在群里同步，
+  欢迎进群获取最新动态，也欢迎直接参与开发：提需求、报 bug、认领模块都可以在群里聊。
+- 也可以在 [GitHub Issues](https://github.com/universe-st/dsh-game-material-master/issues)
+  提 issue 或直接发 PR。
 
 ## 许可
 
