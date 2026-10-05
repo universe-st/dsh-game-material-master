@@ -2045,6 +2045,19 @@
       React.useEffect(() => {
         if (!focused) setText(String(value ?? ""));
       }, [value, focused]);
+      /**
+       * ⚠️ 必须传 `onChange`（不是 `onCommit`）。
+       *
+       * 曾经有 5 个调用点写成 `onCommit`，而这里解构的是 `onChange` ——
+       * 于是 `onChange` 是 `undefined`，一失焦就抛 `onChange is not a function`，
+       * **值永远同步不进草稿**：用户改了「变体数 / 占格」，点保存看着成功，
+       * 实际提交的还是旧值（真机表现：「改了变体数保存后还是 2」）。
+       *
+       * 这里主动校验一次并把错误说清楚 —— 静默失败比直接报错难查得多。
+       */
+      if (onChange === undefined) {
+        throw new Error(`NumField「${label ?? ""}」缺少 onChange —— 是不是写成了 onCommit？`);
+      }
       const commit = () => {
         const parsed = Number(text);
         if (text.trim() === "" || !Number.isFinite(parsed)) {
@@ -2057,7 +2070,7 @@
       };
       return h(
         "label",
-        { className: "SPR_field" },
+        { className: "SPR_field", "data-num-field": "1" },
         h("span", { className: "SPR_fieldLabel" }, label),
         h("input", {
           className: "SPR_input",
@@ -5505,7 +5518,7 @@
               h(NumField, {
                 className: "SPR_input SPR_input-num",
                 value: itemDraft.variantCount, min: 1, max: 6, step: 1,
-                onCommit: (next) => set({ variantCount: Math.max(1, Math.min(6, next)) })
+                onChange: (next) => set({ variantCount: Math.max(1, Math.min(6, next)) })
               })
             ),
             h("label", { className: "SPR_field" },
@@ -5522,12 +5535,12 @@
                 h(NumField, {
                   className: "SPR_input SPR_input-num",
                   value: itemDraft.footprint[0], min: 1, max: 4, step: 1,
-                  onCommit: (next) => set({ footprint: [Math.max(1, Math.min(4, next)), itemDraft.footprint[1]] })
+                  onChange: (next) => set({ footprint: [Math.max(1, Math.min(4, next)), itemDraft.footprint[1]] })
                 }),
                 h(NumField, {
                   className: "SPR_input SPR_input-num",
                   value: itemDraft.footprint[1], min: 1, max: 4, step: 1,
-                  onCommit: (next) => set({ footprint: [itemDraft.footprint[0], Math.max(1, Math.min(4, next))] })
+                  onChange: (next) => set({ footprint: [itemDraft.footprint[0], Math.max(1, Math.min(4, next))] })
                 })
               )
             )
@@ -5707,7 +5720,7 @@
               h(NumField, {
                 className: "SPR_input SPR_input-num",
                 value: newItem.variantCount, min: 1, max: 6, step: 1,
-                onCommit: (next) => setNewItem({ ...newItem, variantCount: Math.max(1, Math.min(6, next)) })
+                onChange: (next) => setNewItem({ ...newItem, variantCount: Math.max(1, Math.min(6, next)) })
               })
             ),
             h("label", { className: "SPR_field" },
@@ -5839,7 +5852,7 @@
       const numberField = (label, value, setValue, min, max, step) =>
         h("label", { className: "SPR_field SPR_field-inline" },
           h("span", { className: "SPR_fieldLabel" }, label),
-          h(NumField, { className: "SPR_input SPR_input-num", value, min, max, step, onCommit: (next) => setValue(next) })
+          h(NumField, { className: "SPR_input SPR_input-num", value, min, max, step, onChange: (next) => setValue(next) })
         );
 
       /**

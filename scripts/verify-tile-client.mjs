@@ -697,6 +697,48 @@ section("② 生成阶段：地块清单的增 / 删 / 改");
     !allText(samePrompt).includes("保存后这个地块的已生成产物会作废") &&
     allText(samePrompt).includes("只改名称 / 类别 / 变体数不会作废产物"));
 
+  // ★ 回归：数字输入框必须把新值**真的**交给上层。
+  //
+  // 曾经的 bug：5 处 `NumField` 传的是 `onCommit`，而组件解构的是 `onChange`
+  // —— 失焦时抛 `onChange is not a function`，`itemDraft` 永远拿到旧值。
+  // 界面看着一切正常、点保存也提示成功，实际提交的是旧数字
+  // （真机表现就是「改了草地变体数、保存后还是 2」）。
+  check("★ 编辑态的数字输入框带 data-num-field 标记（可被断言找到）",
+    byClassPart(editing, "SPR_field").filter((n) => n.props["data-num-field"] === "1").length >= 3,
+    `${byClassPart(editing, "SPR_field").filter((n) => n.props["data-num-field"] === "1").length} 个`);
+  // 组件层：拿到 `onCommit` 而不是 `onChange` 时必须**当场报错**，不许静默。
+  {
+    const label = byClassPart(editing, "SPR_field").find((n) => n.props["data-num-field"] === "1");
+    const numInput = (Array.isArray(label?.props?.children) ? label.props.children : [label?.props?.children])
+      .map((c) => c?.props?.children).flat().find((c) => c?.type === "input");
+    // 输入 5 → 失焦：必须调用一次 onChange（把 5 交出去），且不抛异常
+    let threw = null;
+    try {
+      numInput?.props?.onChange?.({ target: { value: "5" } });
+      numInput?.props?.onBlur?.();
+    } catch (error) {
+      threw = String(error?.message ?? error);
+    }
+    check("★ 数字输入框失焦不抛异常（曾经抛 onChange is not a function）", threw === null, String(threw));
+  }
+  // 源码契约：**所有** `NumField` 调用点都只能用 `onChange`。
+  // 纯渲染断言拦不住这个 —— 组件照样渲染出来，只是回调悄悄丢了。
+  {
+    const source = readFileSync(target, "utf8");
+    const bad = [];
+    const lines = source.split(/\r?\n/);
+    for (let i = 0; i < lines.length; i++) {
+      if (!/h\(NumField/.test(lines[i])) continue;
+      let seg = lines[i];
+      for (let j = i; j < Math.min(lines.length, i + 10) && !/onCommit:|onChange:/.test(seg); j++) {
+        if (j > i) seg += " " + lines[j];
+      }
+      if (/onCommit:/.test(seg)) bad.push(i + 1);
+    }
+    check("★ 没有 NumField 调用点误用 onCommit（组件只认 onChange）",
+      bad.length === 0, `误用的行：${bad.join(", ")}`);
+  }
+
   // 新增表单
   const adding = renderTile(makeProject(), {
     stage: "generate",
