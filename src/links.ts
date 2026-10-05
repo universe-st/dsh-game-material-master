@@ -38,8 +38,14 @@ export type StudioModule = (typeof STUDIO_MODULES)[number];
 /** 八方向图的四个阶段。 */
 export const SPRITE_STAGES = ["images", "videos", "frames", "sheet"] as const;
 
-/** 地图地块的五个阶段。 */
-export const TILE_STAGES = ["template", "generate", "review", "map", "export"] as const;
+/**
+ * 地图地块的四个阶段。
+ *
+ * ⚠️ 这里**故意不含 `template`**：模板（参考图）已经不是单独一步了，
+ * 它在「生成地块」开始时按当前占格形状自动准备（见 `tilegen.ensureTemplates`）。
+ * 老的 `stage=template` 深链接会被忽略（`TILE_STAGES.includes` 不通过）。
+ */
+export const TILE_STAGES = ["generate", "review", "map", "export"] as const;
 
 /** 一次「打开界面」的意图。字段全部可选：缺省表示保持界面当前状态。 */
 export interface OpenIntent {

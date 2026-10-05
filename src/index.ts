@@ -750,9 +750,6 @@ export class GameStudioGateway extends TypertRemoteService {
     });
     return tilegen.tileView(next);
   }
-  async runTileTemplate(payload: any) {
-    return tilegen.runTemplateStage(asString(asRecord(payload).projectId));
-  }
   async runTileItems(payload: any) {
     const input = asRecord(payload);
     const keys = Array.isArray(input.keys) ? input.keys.filter((k: unknown) => typeof k === "string") : undefined;

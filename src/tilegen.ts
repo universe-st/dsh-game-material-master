@@ -25,7 +25,7 @@
  * 不必重新花钱生成。这是本模块最实用的一条降本设计。
  */
 
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { basename, join } from "node:path";
@@ -52,8 +52,22 @@ import {
 import { assembleMap, cropBitmap, emptyMapState, measureAssemblyBounds, pickVariantIndex, shapeOfEntry, trimTransparent, type TileMapState } from "./tilemap.js";
 import { decodeFile, encodeBitmap, pngSize, sniffImageExt, type Bitmap } from "./tilemedia.js";
 
-export type TileStage = "template" | "generate" | "review" | "map" | "export";
-export const TILE_STAGES: TileStage[] = ["template", "generate", "review", "map", "export"];
+/**
+ * 用户可见的阶段。
+ *
+ * ⚠️ 这里**故意不含 `template`**：模板已经改成「生成地块时自动准备」的内部步骤，
+ * 不再是单独一步。
+ *
+ * 但 `invalidateFrom` 的作废顺序里**仍然保留 `template` 这个锚点**（见
+ * `TILE_INVALIDATION_ORDER`）—— 它是「几何规格变了 → 连模板带下游全部作废」的起点。
+ * 两者不是一回事，别合并。
+ */
+export type TileStage = "generate" | "review" | "map" | "export";
+export const TILE_STAGES: TileStage[] = ["generate", "review", "map", "export"];
+
+/** 作废顺序（含内部的 `template` 锚点）。 */
+export type TileInternalStage = "template" | TileStage;
+export const TILE_INVALIDATION_ORDER: TileInternalStage[] = ["template", "generate", "review", "map", "export"];
 
 export type TileItemKind = "terrain" | "decor" | "building";
 /** 生成方式：模板填充 / 白底单图 / 2×2 地基网格。 */
@@ -382,12 +396,21 @@ export const SERVABLE_TILE_DIRS = new Set(["template", "raw", "cell", "decor", "
 
 function freshStages(): Record<TileStage, TileStageState> {
   return {
-    template: { status: "idle" },
     generate: { status: "idle" },
     review: { status: "idle" },
     map: { status: "idle" },
     export: { status: "idle" }
   };
+}
+
+/**
+ * 读老项目时把已废弃的 `stages.template` 丢掉。
+ *
+ * 模板不再是阶段了，留着这个键会让界面/工具读到一条永远 idle 的幽灵阶段。
+ */
+function dropLegacyTemplateStage(project: TileProject): void {
+  const stages = project.stages as Record<string, unknown>;
+  if ("template" in stages) delete stages.template;
 }
 
 export async function createTileProject(name: string, options: {
@@ -434,6 +457,8 @@ export async function readTileProject(id: string, lang?: string): Promise<TilePr
     logs: Array.isArray(raw.logs) ? raw.logs : [],
     style: typeof raw.style === "string" && raw.style !== "" ? raw.style : defaultTileStyle(lang)
   };
+  // `template` 已经不是一个阶段了 —— 老项目里那条记录要丢掉
+  dropLegacyTemplateStage(project);
   return project;
 }
 
@@ -586,13 +611,15 @@ export function buildTilePrompt(item: TileItem, style: string): string {
 
 export interface TileJob {
   projectId: string;
-  kind: "template" | "generate" | "map" | "export";
+  kind: "generate" | "map" | "export";
   /** 本次作业覆盖的目标集合 —— 界面遮罩必须按它盖住**还没轮到**的项。 */
   targets: string[];
   done: string[];
   running: string | null;
   startedAt: number;
   error?: string;
+  /** 作业期间的说明行（界面直接显示）。 */
+  logs?: string[];
 }
 
 const jobs = new Map<string, TileJob>();
@@ -648,54 +675,99 @@ export function templateNameFor(shape: TileShape): string {
   return `shape-${key}.png`;
 }
 
-export async function runTemplateStage(projectId: string): Promise<{ started: boolean; reason?: string }> {
-  if (tileBusy(projectId)) return { started: false, reason: "已有任务在跑" };
-  const project = await readTileProject(projectId);
-  if (project === undefined) throw new Error(`项目不存在：${projectId}`);
+/**
+ * 保证 `template/` 里的模板与**当前形状 + 格子尺寸**一致。
+ *
+ * ★ 模板不再是一个要用户手动跑的阶段 —— 「生成地块」开始时会自己调这里。
+ *
+ * 为什么仍落到磁盘而不是每次现渲染：一次渲染 120~390ms、约 14MB。
+ * 十几次变体每次现渲染就是几十秒白等。所以按「形状集合 + 格子尺寸」算一个指纹，
+ * 指纹没变就直接复用；变了（改了形状或格子尺寸）才重渲染，
+ * 并删掉**上一版留下、这一版不再需要的**文件（否则界面会列出过期的模板）。
+ *
+ * 返回这次真渲染出来的文件名；什么都没变就是空数组。
+ */
+export async function ensureTemplates(project: TileProject): Promise<string[]> {
   assertSettings(project.settings);
-  /**
-   * 模板要为项目里**出现的每种形状**各出一张。
-   *
-   * 不这么做的话，非 2×2 的跨格地块（3×1、L 形…）拿不到参考图，
-   * 模型只按提示词自由发挥，底面形状就没人管了。
-   *
-   * 文件名由 `templateNameFor` 保证**一种形状一个名字**（非矩形带形状哈希），
-   * 所以同名的必然是同一个形状，用 `Map` 去重既省一次渲染也不会串图。
-   */
-  const shapes = new Map<string, TileShape>();
+  const want = collectBuildingShapes(project);
+  const wantAll = ["cell.png", ...[...want.keys()].filter((n) => n !== "cell.png")].sort();
+  const stamp = templateStamp(project, wantAll);
+  const dir = join(tileProjectDir(project.id), "template");
+  const stampFile = join(dir, ".stamp.json");
+  const previous = (() => {
+    try {
+      return JSON.parse(readFileSync(stampFile, "utf8")) as { stamp?: string };
+    } catch {
+      return undefined;
+    }
+  })();
+  const present = (() => {
+    try {
+      return readdirSync(dir).filter((n) => n.endsWith(".png")).sort();
+    } catch {
+      return [];
+    }
+  })();
+  // 指纹一致、文件一个不少 → 直接复用
+  if (previous?.stamp === stamp && wantAll.every((n) => present.includes(n))) return [];
+
+  await mkdir(dir, { recursive: true });
+  const single = renderTemplate({ size: 2048, cols: 1, rows: 1 });
+  await writeFile(join(dir, "cell.png"), encodeBitmap(single.bitmap));
+  const rendered: string[] = ["cell.png"];
+  // 每种建筑形状一张：洋红**逐格轮廓**画底面 + 蓝色线框画「能长多高」。
+  // 不能用实心洋红菱形 —— 模型会把它当「把这块地填满」，
+  // 实测生成出来是一张平铺的菱形石板地面（没有墙和屋顶）。
+  for (const [name, shape] of want) {
+    if (name === "cell.png") continue;
+    const grid = renderBuildingTemplate({ settings: project.settings, shape, size: 2048 });
+    await writeFile(join(dir, name), encodeBitmap(grid.bitmap));
+    rendered.push(name);
+  }
+  for (const name of present) {
+    if (wantAll.includes(name)) continue;
+    try {
+      await rm(join(dir, name), { force: true });
+    } catch {
+      // 删不掉就留着，不影响正确性
+    }
+  }
+  await writeFile(stampFile, JSON.stringify({ stamp, files: wantAll }, null, 2));
+  return rendered;
+}
+
+/** 模板指纹：形状集合 + 格子尺寸。任一变化都要重渲染。 */
+export function templateStamp(project: TileProject, names: string[]): string {
+  const s = [
+    `cell:${project.settings.cellWidth}x${project.settings.cellHeight}`,
+    ...[...names].sort()
+  ].join("|");
+  // FNV-1a，够用（不需要密码学强度）
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return `${h.toString(16)}-${s.length}`;
+}
+
+/** 项目里所有**建筑**地块的形状 → 模板名。同名（同形状）只留一个。 */
+function collectBuildingShapes(project: TileProject): Map<string, TileShape> {
+  const out = new Map<string, TileShape>();
   for (const item of project.items) {
     if (item.kind !== "building") continue;
     const shape = shapeOf(item);
     const name = templateNameFor(shape);
-    if (!shapes.has(name)) shapes.set(name, shape);
+    if (!out.has(name)) out.set(name, shape);
   }
-  const targets = [...shapes.keys()];
-  void background(projectId, "template", targets.length > 0 ? targets : ["cell"], async (job, report) => {
-    const dir = tileProjectDir(projectId);
-    await mkdir(join(dir, "template"), { recursive: true });
-    // 单格模板（地形用）—— 永远出，与项目里有没有建筑无关
-    const single = renderTemplate({ size: 2048, cols: 1, rows: 1 });
-    await writeFile(join(dir, "template", "cell.png"), encodeBitmap(single.bitmap));
-    job.done.push("cell");
-    await report();
-    // 每种建筑形状一张：洋红**逐格轮廓**画底面 + 蓝色线框画「能长多高」。
-    // 不能用实心洋红菱形 —— 模型会把它当「把这块地填满」，
-    // 实测生成出来是一张平铺的菱形石板地面（没有墙和屋顶）。
-    for (const [name, shape] of shapes) {
-      if (name === "cell.png") continue;
-      const grid = renderBuildingTemplate({ settings: project.settings, shape, size: 2048 });
-      await writeFile(join(dir, "template", name), encodeBitmap(grid.bitmap));
-      job.done.push(name);
-      await report();
-    }
-  }, async () => {
-    await patchTileProject(projectId, (fresh) => {
-      // 模板几何变了，下游全部作废；② 要重新花钱
-      invalidateFrom(fresh, "generate");
-      appendJobLog(fresh.logs, "info", "已生成模板（本地计算，免费）。几何变化会让下游作废。");
-    });
-  });
-  return { started: true };
+  return out;
+}
+
+/** 这个项目**应该**有哪些模板文件（纯函数；界面预览与自检都用它）。 */
+export function expectedTemplateNames(project: TileProject): string[] {
+  const names = [...collectBuildingShapes(project).keys()];
+  if (!names.includes("cell.png")) names.unshift("cell.png");
+  return names.sort();
 }
 
 // ── ② 生成（★计费）────────────────────────────────────────────────────────
@@ -738,6 +810,12 @@ export async function runGenerateStage(projectId: string, options: GenerateOptio
     await mkdir(join(dir, "raw"), { recursive: true });
     await mkdir(join(dir, "cell"), { recursive: true });
     await mkdir(join(dir, "decor"), { recursive: true });
+    // ★ 参考图在这里自动准备好（原来的「① 模板」那一步）。
+    // 形状或格子尺寸变了才重渲染，否则直接用上次那份（省十几秒）。
+    const rendered = await ensureTemplates(project);
+    if (rendered.length > 0) {
+      (job.logs ?? (job.logs = [])).push(`已按当前形状准备模板：${rendered.join("、")}（本地计算，免费）`);
+    }
     const templateCell = join(dir, "template", "cell.png");
     /** 建筑模板按**这个地块自己的形状**取（`grid{C}x{R}.png`）。 */
     const templateForItem = (entry: TileItem) =>
@@ -1382,13 +1460,23 @@ export async function runExportStage(projectId: string): Promise<{ started: bool
  * 注意 `generate` 一旦作废，重新跑要**真实计费** —— 所以「改画风」「改内容描述」
  * 「重新生成模板」都会走到这里，界面上必须二次确认。
  */
-export function invalidateFrom(project: TileProject, from: TileStage): void {
-  const order = TILE_STAGES;
+export function invalidateFrom(project: TileProject, from: TileInternalStage): void {
+  const order = TILE_INVALIDATION_ORDER;
   const start = order.indexOf(from);
   if (start < 0) return;
   for (let i = start; i < order.length; i++) {
     const stage = order[i];
-    project.stages[stage] = { status: "idle" };
+    // `template` 是内部锚点：它没有自己的阶段状态，在它那里只清模板文件指纹，
+    // 真正的下游作废由紧接着的 `generate` 那一步完成。
+    if (stage !== "template") project.stages[stage] = { status: "idle" };
+    if (stage === "template") {
+      // 几何规格变了 → 把模板指纹作废，下次「生成地块」会自动重渲染。
+      try {
+        rmSync(join(tileProjectDir(project.id), "template", ".stamp.json"), { force: true });
+      } catch {
+        // 删不掉也不影响：`ensureTemplates` 还会核对文件是否齐全
+      }
+    }
     if (stage === "generate") {
       // ⚠️ 这一步是**全量销毁**：清空所有地块的变体（那是花了钱的）。
       // 所以调用方必须只在「提示词真的变了」时才走到这里 —— 见 `invalidateItems`。
@@ -1530,35 +1618,17 @@ export function tileView(project: TileProject): TileProjectView {
     job: jobs.get(project.id),
     assetBase: `/dsh-game-material-master/tile-assets/${project.id}/`,
     progress: tileProgress(project),
-    // ① 模板阶段**实际产出的文件**（界面上要一张张列出来）。
+    // 参考图预览（原「① 模板」阶段，现在是 ② 里的只读面板）。
     //
-    // ⚠️ 别在界面里写死文件名。模板是「项目里出现哪种形状就出哪种」，
-    // 写死 `cell.png` + `grid2x2.png` 的话，3×1 / L 形的模板**根本显示不出来** ——
-    // 用户看到的是「只有 1×1 和 2×2」，而磁盘上其实还有别的。
-    templates: listTemplateFiles(project.id),
+    // 用**期望清单**而不是目录列表：形状刚改过、参考图还没重渲染时，
+    // 也应该显示「将会用哪几张」——否则用户改完形状看不到变化，以为没生效。
+    // 文件还没落盘时图片会 404，界面只做「标灰」，不隐藏。
+    templates: expectedTemplateNames(project),
     // 界面「手动编辑布局」要用的即时预览素材：每个地块有哪些变体贴图。
     // 不给的话界面只能画出空的菱形格子 —— 用户看不见自己涂的是什么，
     // 得先「保存布局 → 铺成地图」才能看到效果，那就谈不上预览了。
     preview: tilePreview(project)
   };
-}
-
-/**
- * 列出 `template/` 里已有的模板文件（按名字排序）。
- *
- * 目录不存在（还没跑过 ①）就返回空数组 —— 界面据此决定渲不渲染缩略图。
- * 这里是**同步**读：`tileView` 是每次读项目都会走的同步路径，
- * 为了列个目录把它改成 async 会牵动所有调用点。目录很小，代价可忽略。
- */
-function listTemplateFiles(projectId: string): string[] {
-  try {
-    const dir = join(tileProjectDir(projectId), "template");
-    return readdirSync(dir)
-      .filter((name) => name.endsWith(".png"))
-      .sort();
-  } catch {
-    return [];
-  }
 }
 
 /**
@@ -1818,6 +1888,7 @@ export function tileDiamondHeight(project: TileProject): number {
 }
 
 export { ArkError };
+
 
 
 

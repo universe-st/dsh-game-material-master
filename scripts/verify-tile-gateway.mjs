@@ -106,16 +106,21 @@ check("lang=en 时默认清单是英文", en.items.some((i) => i.label === "Gras
 await studio.deleteTileProject({ projectId: en.id });
 
 // ═══════════════════════════════════════════════════════════════════════════
-section("① 模板阶段（走网关，免费）");
+section("参考图随「生成地块」自动准备（走网关）");
 // ═══════════════════════════════════════════════════════════════════════════
-const started = await studio.runTileTemplate({ projectId: id });
-check("runTileTemplate 返回 started", started.started === true, JSON.stringify(started));
-await waitIdle(id);
 const afterTemplate = await studio.getTileProject({ projectId: id });
-check("模板阶段落成 done", afterTemplate.stages.template.status === "done", afterTemplate.stages.template.status);
-check("模板产物在磁盘上",
-  existsSync(join(tilegen.tileProjectDir(id), "template", "cell.png")) &&
-  existsSync(join(tilegen.tileProjectDir(id), "template", "grid2x2.png")));
+{
+  // ★ `runTileTemplate` 这个远程方法**已经删掉了** —— 参考图不再是单独一步。
+  // 用「调它应该不存在」把这件事钉住，否则以后有人加回来界面又会多一个按钮。
+  check("★ 网关上没有 runTileTemplate 了（参考图已自动化）",
+    typeof studio.runTileTemplate !== "function", typeof studio.runTileTemplate);
+  check("stage 列表里没有 template 了",
+    !Object.keys(afterTemplate.stages).includes("template"), Object.keys(afterTemplate.stages).join(", "));
+  // 参考图清单由宿主算给界面（还没生成，但清单应该已经给出「将会有哪些」）
+  check("view.templates 给出了期望的参考图清单",
+    Array.isArray(afterTemplate.templates) && afterTemplate.templates.includes("cell.png"),
+    JSON.stringify(afterTemplate.templates));
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 section("③ 验收（走网关）");
@@ -610,3 +615,5 @@ if (failures.length > 0) {
   process.exit(1);
 }
 console.log(`共 ${checks} 项检查，全部通过。`);
+
+

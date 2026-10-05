@@ -440,7 +440,6 @@ const CALL_DESCRIPTION = [
   "  ★ 自动摆位不准时用 setRigLayoutHints：先 read_image 看 getRigJob 返回的 partsMontagePath（部件按 partsOrder 顺序排列）",
   "地图地块生成（模块五）：listTileProjects() / createTileProject({name,style?,lang?,settings?}) / getTileProject({projectId,lang?}) /",
   "  deleteTileProject({projectId}) / saveTileProject({projectId,lang?,name?,style?,items?,settings?,resetItemsToDefault?})【改 style / items / settings 会让已生成的地块作废，重跑要花钱】/",
-  "  runTileTemplate({projectId})【① 本地渲染 2:1 等距菱形模板，免费】/",
   "  runTileItems({projectId,keys?})【★花钱：按清单逐类生成，每个变体一次 Seedream 调用】/ runTileItem({projectId,key,variant?})【★花钱：只重跑某一张】/",
   "  setTileApproved({projectId,key?,variant?,approved})【③ 验收，只打勾不作废任何东西】/",
   "  runTileMap({projectId,rows?,cols?,seed?,fill?,decorDensity?})【④ 本地铺图，免费，同种子 + 同布局 = 逐像素一致】/",
@@ -569,7 +568,7 @@ export function registerStudioTools(host: StudioToolHost, gateway: GameStudioGat
               rig: buildOpenLink({ module: "rig" }),
               tile: buildOpenLink({ module: "tile" })
             },
-            hint: "用 game_material_status({module,id}) 看某个目标的细节；八方向图的四步是 images → videos → frames → sheet，地图地块是 template → generate → review → map。"
+            hint: "用 game_material_status({module,id}) 看某个目标的细节；八方向图的四步是 images → videos → frames → sheet，地图地块是 generate → review → map → export。"
           };
         }
         // ⚠️ 这里**不能**再按 module 短路：`status({module:'tile', id})` 也走到这里，
@@ -794,7 +793,7 @@ export function registerStudioTools(host: StudioToolHost, gateway: GameStudioGat
           packet.steps = steps;
           packet.nextActions = sequenceNextActions(snapshot);
         } else if (module === "tile") {
-          // ⚠️ 地图地块的 `stages` 是**对象**（{template, generate, review, map, export}），
+          // ⚠️ 地图地块的 `stages` 是**对象**（{generate, review, map, export}），
           // 不是数组。之前它掉进了 `else`（骨骼动画）分支，那边无条件当成数组用
           // `.filter()` —— 于是 game_material_review 对 tile 直接抛
           // `snapshot.stages.filter is not a function`。真机验证才发现。
@@ -1106,13 +1105,13 @@ function intakeFor(module: ModuleKey, id: string, told: Set<string>, config: any
     if (config?.arkApiKeySet !== true) {
       blockers.push("还没配置火山方舟 API Key（生图必需）：设置 → 游戏素材大师 → 火山方舟 API Key，配好点「测试连接」。");
     }
-    known.五个阶段 = "① 模板（本地免费）→ ② 生成地块（★计费）→ ③ 验收 → ④ 拼成地图（本地免费，可反复）→ ⑤ 导出";
-    known.几何由代码保证 = "菱形模板由本地代码渲染（严格 2:1 等距），AI 只负责填内容。实测这样菱形比例达标率 100%";
+    known.四个阶段 = "① 生成地块（★计费；参考图会按占格形状自动渲染，不用手动准备）→ ② 验收 → ③ 拼成地图（本地免费，可反复）→ ④ 导出";
+    known.几何由代码保证 = "等距参考图由本地代码按「占格形状」渲染（严格 2:1 等距），AI 只负责填内容。实测这样菱形比例达标率 100%";
     known.默认地块清单 = "9 类地形（草/土/石/灌木，各 1~2 变体）+ 4 个独立装饰（树/松树/巨石）+ 1 栋跨 2×2 格建筑";
     known.默认单元格 = `${config?.cellWidth ?? 64} 宽，高为 96（菱形占中部，上方留白给高出地面的装饰）`;
     // ⚠️ 属性名只能用标识符允许的字符：带圈数字 ② 之类不是合法标识符字符，
     // 写成 `known.只有第②步花钱` 会直接编译不过（Invalid character）。
-    known.只有第2步花钱 = "生成一个变体 = 一次 Seedream 调用；模板、规整、拼图、导出全在本地，免费且可反复";
+    known.只有第1步花钱 = "生成一个变体 = 一次 Seedream 调用；参考图、规整、拼图、导出全在本地，免费且可反复";
     known.装饰与地面分开生成 = "树/巨石走「白底单图 + 锚点摆放」，不与地面画在同一张图上（同图会被画两遍）";
     if (target?.reviewMode) known.审核模式 = target.reviewMode;
     ask("style", "整套地块的画风描述是什么？（例如「像素画风，色彩明快饱和，干净色块，无噪点」；可留空走默认）", "它会追加到每个地块的提示词末尾，改一次整套画风都变。", "用 game_material_call 的 saveTileProject({projectId, style}) 保存。");

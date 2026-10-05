@@ -906,15 +906,18 @@
       // ── 地图地块生成（模块五）──
       "地图地块生成": "Map tile generation",
       "等距地块 → 拼成地图：几何交给代码，内容交给 AI": "Isometric tiles → a whole map: geometry by code, content by AI",
-      "① 模板": "① Template",
-      "本地代码渲染严格 2:1 的等距菱形模板——几何的唯一真源，免费": "Locally rendered strict 2:1 isometric diamond template — the single source of truth for geometry, free",
-      "② 生成地块": "② Generate tiles",
-      "把模板交给 Seedream 填内容。这一步真实计费，每个变体一次调用": "Hand the template to Seedream to fill in. This step is billed: one call per variant",
-      "③ 验收": "③ Review",
+      "参考图（自动生成，免费）": "Reference image (auto-generated, free)",
+      "按②里每个地块的占格形状渲染；改了形状或格子尺寸，下次生成时自动重做": "Rendered from each tile footprint shape; re-done automatically on the next generate if a shape or the cell size changed",
+      "正在准备参考图…": "Preparing the reference images…",
+      "还没有参考图 —— 点「生成全部地块」时会自动渲染（免费）。": "No reference images yet — they are rendered automatically (free) when you click Generate all tiles.",
+      "生成一个变体 = 一次 Seedream 调用。参考图按每个地块的占格形状自动渲染，不用手动准备。": "One variant = one Seedream call. The reference image is rendered automatically from each tile footprint shape; there is nothing to prepare by hand.",
+      "① 生成地块": "① Generate tiles",
+      "按占格形状自动渲染等距参考图交给 Seedream 填内容。这一步真实计费，每个变体一次调用": "An isometric reference image is rendered automatically from each footprint shape and handed to Seedream to fill in. This step is billed: one call per variant",
+      "② 验收": "② Review",
       "逐项看几何报告与成品，不满意的单张重跑": "Check the geometry report and the result per item; re-run any single one you dislike",
-      "④ 拼成地图": "④ Assemble map",
+      "③ 拼成地图": "③ Assemble map",
       "本地按等距网格铺图，按类别随机抽变体。免费，可反复换种子": "Lay tiles on the isometric grid locally, picking variants at random per family. Free, re-seed as often as you like",
-      "⑤ 导出": "⑤ Export",
+      "④ 导出": "④ Export",
       "导出地块包与地图 PNG / JSON": "Export the tile pack plus map PNG / JSON",
       "未命名地图": "Untitled map",
       "项目": "Project",
@@ -922,17 +925,11 @@
       "新项目名称": "New project name",
       "已生成 {n0} / {n1}，已验收 {n2}": "Generated {n0} / {n1}, approved {n2}",
       "还没有地图地块项目——取个名字点「新建项目」开始。": "No map tile project yet — name one and click 'New project' to start.",
-      "模板由本地代码渲染，几何严格 2:1 等距，是所有产物的几何真源。它不对说明是代码问题，不是模型问题。": "The template is rendered locally with strict 2:1 isometric geometry and is the source of truth for every tile. If it is wrong, that is a code problem, not a model problem.",
-      "生成模板": "Generate template",
-      "生成模板（免费）": "Generate template (free)",
       "停止": "Stop",
-      "本地计算，不花钱": "Computed locally, no cost",
       "单格模板（1×1 地形用）": "Single-cell template (for 1x1 terrain)",
       "{n0}×{n1} 建筑模板": "{n0}x{n1} building template",
       "异形模板 · {n0} 格 {n1}": "Custom-shape template · {n0} cells {n1}",
-      "模板按「② 里用到哪些形状」自动出：单格一张，每种建筑占格各一张。改了形状或格子尺寸后重新点一次即可。": "Templates are generated automatically from the shapes used in step 2: one single-cell template, plus one per building footprint. Re-run after changing a shape or the cell size.",
       "模板几何": "Template geometry",
-      "生成一个变体 = 一次 Seedream 调用。地形走「模板填充」，装饰走「白底单图 + 锚点摆放」，建筑走「2×2 地基网格」。": "One variant = one Seedream call. Terrain uses template filling, decor uses a white-background single image placed on an anchor, buildings use the 2×2 foundation grid.",
       "统一画风": "Shared style",
       "保存画风": "Save style",
       "改画风会让已生成的地块全部作废（重跑要花钱）": "Changing the style invalidates every generated tile (re-running costs money)",
@@ -1002,8 +999,6 @@
       "生成提示词（只描述「菱形里面是什么」）": "Prompt (describe only what is inside the diamond)",
       "留空即用标识": "Leave empty to reuse the id",
       "下面的预览就是当前草稿：涂一格立刻变，不用先保存。": "The preview below shows the current draft: paint a cell and it updates instantly, no need to save first.",
-      "正在渲染模板…": "Rendering templates…",
-      "还没有模板 —— 点「生成模板（免费）」立刻看到结果。": "No templates yet — click 'Generate templates (free)' to see them right away.",
       "重跑中…": "Re-running…",
       "已撤销。": "Undone.",
       "已重做。": "Redone.",
@@ -1315,7 +1310,6 @@
       ["getTileProject", true],
       ["deleteTileProject", true],
       ["saveTileProject", true],
-      ["runTileTemplate", true],
       ["runTileItems", true],
       ["runTileItem", true],
       ["setTileApproved", true],
@@ -1442,14 +1436,13 @@
     }
     let MODULES = make_MODULES();
 
-    /** 地图地块的五个阶段（对齐宿主 src/links.ts 的 TILE_STAGES）。 */
+    /** 地图地块的四个阶段（对齐宿主 src/links.ts 的 TILE_STAGES）。 */
     function make_TILE_STAGES() {
       return [
-      { key: "template", title: T("① 模板"), hint: T("本地代码渲染严格 2:1 的等距菱形模板——几何的唯一真源，免费") },
-      { key: "generate", title: T("② 生成地块"), hint: T("把模板交给 Seedream 填内容。这一步真实计费，每个变体一次调用") },
-      { key: "review", title: T("③ 验收"), hint: T("逐项看几何报告与成品，不满意的单张重跑") },
-      { key: "map", title: T("④ 拼成地图"), hint: T("本地按等距网格铺图，按类别随机抽变体。免费，可反复换种子") },
-      { key: "export", title: T("⑤ 导出"), hint: T("导出地块包与地图 PNG / JSON") }
+      { key: "generate", title: T("① 生成地块"), hint: T("按占格形状自动渲染等距参考图交给 Seedream 填内容。这一步真实计费，每个变体一次调用") },
+      { key: "review", title: T("② 验收"), hint: T("逐项看几何报告与成品，不满意的单张重跑") },
+      { key: "map", title: T("③ 拼成地图"), hint: T("本地按等距网格铺图，按类别随机抽变体。免费，可反复换种子") },
+      { key: "export", title: T("④ 导出"), hint: T("导出地块包与地图 PNG / JSON") }
     ];
     }
     let TILE_STAGES = make_TILE_STAGES();
@@ -5104,7 +5097,7 @@
       const [projectId, setProjectId] = React.useState(null);
       const [project, setProject] = React.useState(null);
       const [notice, setNotice] = React.useState(null);
-      const [stage, setStage] = React.useState("template");
+      const [stage, setStage] = React.useState("generate");
       const [styleDraft, setStyleDraft] = React.useState("");
       const [nameDraft, setNameDraft] = React.useState("");
       const [mapRows, setMapRows] = React.useState(14);
@@ -5172,8 +5165,6 @@
       }, [intent]);
 
       const busy = project !== null && project.job !== null && project.job !== undefined && project.job.running !== null;
-      /** 模板已经生成过了吗 —— 决定模板预览渲不渲染（见 templateStage 的注释）。 */
-      const templateReady = project !== null && project.stages?.template?.status === "done";
       /**
        * 「这一张」是不是本次作业的目标。
        *
@@ -5346,7 +5337,7 @@
         try {
           const created = await api.createTileProject({ name: nameDraft.trim() === "" ? T("未命名地图") : nameDraft.trim() });
           setProjectId(created.id);
-          setStage("template");
+          setStage("generate");
           await refreshProjects();
         } catch (error) {
           setNotice({ kind: "error", text: msg(error) });
@@ -5412,32 +5403,28 @@
         })
       );
 
-      // ── ① 模板 ────────────────────────────────────────────────────────
-      const templateStage = h("div", { className: "SPR_tileStage" },
-        h("p", { className: "SPR_hint" }, T("模板由本地代码渲染，几何严格 2:1 等距，是所有产物的几何真源。它不对说明是代码问题，不是模型问题。")),
-        h("p", { className: "SPR_muted" }, T("模板按「② 里用到哪些形状」自动出：单格一张，每种建筑占格各一张。改了形状或格子尺寸后重新点一次即可。")),
+      // ── 参考图（原「① 模板」）──────────────────────────────────────────
+      //
+      // ★ 这一步**已经不是独立阶段了** —— 点「生成全部地块」时宿主会按当前
+      // 占格形状自动渲染参考图，形状/格子尺寸没变就直接复用上次那份
+      // （一次渲染 120~390ms、约 14MB，十几个变体每次现渲染就是几十秒白等）。
+      //
+      // 这里只做**只读预览**：让你在花钱之前看一眼「模型会照着什么画」。
+      // 几何错了看这张图最快 —— 这个模块的错好几次都是这么发现的。
+      const templatePanel = h("div", { className: "SPR_templatePanel" },
         h("div", { className: "SPR_row" },
-          h(BusyBtn, {
-            busy: busy,
-            className: "SPR_btn SPR_btn-primary",
-            onClick: () => void run(T("生成模板"), () => api.runTileTemplate({ projectId: project.id }))
-          }, T("生成模板（免费）")),
-          busy ? h(BusyBtn, {
-            busy: false,
-            className: "SPR_btn",
-            onClick: () => void run(T("停止"), () => api.cancelTileJob({ projectId: project.id }))
-          }, T("停止")) : null,
-          h("span", { className: "SPR_muted" }, T("本地计算，不花钱"))
+          h("span", { className: "SPR_fieldLabel" }, T("参考图（自动生成，免费）")),
+          h("span", { className: "SPR_muted" }, T("按②里每个地块的占格形状渲染；改了形状或格子尺寸，下次生成时自动重做"))
         ),
         // ⚠️ 这里**不能**用 `onError` 把图 `display:none` 掉。
-        // 进面板时模板还没生成，图片必然先 404 一次；一旦被隐藏，
+        // 图还没生成时必然先 404 一次；一旦被隐藏，
         // 之后即使生成好了也不会再显示（浏览器不会重跑 onError）——
-        // 表现就是「点了生成模板、loading 结束，模板还是不出现」。
-        // 正确做法：按阶段状态决定渲不渲染，并用 onError 只做「标灰」提示。
+        // 表现就是「生成完了、模板还是不出现」。
+        // 正确做法：按宿主给的清单决定渲不渲染，`onError` 只做「标灰」提示。
         //
         // ★ 文件名一律读**宿主列出来的那份**（`project.templates`），界面不写死。
-        // 模板是「项目里出现哪种形状就出哪种」：写死 `cell.png` + `grid2x2.png`
-        // 会把 3×1 / L 形的模板藏起来，用户以为「只支持 1×1 和 2×2」。
+        // 写死 `cell.png` + `grid2x2.png` 会把 3×1 / L 形的参考图藏起来，
+        // 用户以为「只支持 1×1 和 2×2」。
         (project.templates ?? []).length > 0
           ? h("div", { className: "SPR_row SPR_templateRow" },
               ...(project.templates ?? []).map((name) => h("div", {
@@ -5453,7 +5440,9 @@
                 }),
                 h("span", { className: "SPR_muted" }, templateLabel(name))
               )))
-          : h("p", { className: "SPR_muted" }, busy ? T("正在渲染模板…") : T("还没有模板 —— 点「生成模板（免费）」立刻看到结果。"))
+          : h("p", { className: "SPR_muted" }, busy
+              ? T("正在准备参考图…")
+              : T("还没有参考图 —— 点「生成全部地块」时会自动渲染（免费）。"))
       );
 
       // ── 地块清单的增 / 删 / 改 ────────────────────────────────────────
@@ -5734,7 +5723,8 @@
       };
 
       const generateStage = h("div", { className: "SPR_tileStage" },
-        h("p", { className: "SPR_hint" }, T("生成一个变体 = 一次 Seedream 调用。地形走「模板填充」，装饰走「白底单图 + 锚点摆放」，建筑走「2×2 地基网格」。")),
+        h("p", { className: "SPR_hint" }, T("生成一个变体 = 一次 Seedream 调用。参考图按每个地块的占格形状自动渲染，不用手动准备。")),
+        templatePanel,
         h("div", { className: "SPR_row" },
           h("span", { className: "SPR_fieldLabel" }, T("统一画风")),
           h("input", {
@@ -6965,8 +6955,7 @@
         )
       );
 
-      const stageBody = stage === "template" ? templateStage
-        : stage === "generate" ? generateStage
+      const stageBody = stage === "generate" ? generateStage
         : stage === "review" ? reviewStage
         : stage === "map" ? mapStage
         : exportStage;
@@ -11988,7 +11977,6 @@
         getTileProject: (projectId) => call("getTileProject", { projectId, lang: activeLang() }),
         deleteTileProject: (payload) => call("deleteTileProject", payload),
         saveTileProject: (payload) => call("saveTileProject", { lang: activeLang(), ...payload }),
-        runTileTemplate: (payload) => call("runTileTemplate", payload),
         runTileItems: (payload) => call("runTileItems", payload),
         runTileItem: (payload) => call("runTileItem", payload),
         setTileApproved: (payload) => call("setTileApproved", payload),

@@ -270,7 +270,7 @@ function makeTasks(activeKeys = []) {
 }
 
 const SETTINGS = { cellWidth: 64, cellHeight: 96 };
-const TILE_KEYS = ["template", "generate", "review", "map", "export"];
+const TILE_KEYS = ["generate", "review", "map", "export"];
 
 function makeItem(overrides = {}) {
   return {
@@ -520,7 +520,7 @@ section("没选项目时的空态");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-section("五个阶段都能渲染（每个都不能白屏）");
+section("四个阶段都能渲染（每个都不能白屏）");
 // ═══════════════════════════════════════════════════════════════════════════
 {
   for (const stage of TILE_KEYS) {
@@ -534,45 +534,51 @@ section("五个阶段都能渲染（每个都不能白屏）");
     check(`阶段 ${stage} 渲染不抛异常`, error === undefined, error === undefined ? "" : String(error?.message ?? error));
     if (tree === undefined) continue;
     check(`阶段 ${stage} 产出了内容`, allText(tree).length > 20, `${allText(tree).length} 字符`);
-    check(`阶段 ${stage} 渲染了 5 个步骤按钮`, byClassPart(tree, "SPR_step").length === 5, `${byClassPart(tree, "SPR_step").length} 个`);
+    check(`阶段 ${stage} 渲染了 4 个步骤按钮`, byClassPart(tree, "SPR_step").length === 4, `${byClassPart(tree, "SPR_step").length} 个`);
   }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-section("① 模板阶段");
+section("参考图面板（原「① 模板」，现已并入生成阶段）");
 // ═══════════════════════════════════════════════════════════════════════════
 {
+  // ★ 这一步**已经不是独立阶段了** —— 参考图在「生成地块」开始时由宿主自动渲染，
+  // 所以面板必须长在 generate 阶段里。
   // ⚠️ 模板图必须**按宿主列出来的文件名**渲染（`project.templates`），界面不写死。
-  // 写死 `cell.png` + `grid2x2.png` 会把 3×1 / L 形的模板藏起来 ——
+  // 写死 `cell.png` + `grid2x2.png` 会把 3×1 / L 形的参考图藏起来 ——
   // 用户看到的就是「只支持 1×1 和 2×2」。
   const withTemplates = makeProject({
     templates: ["cell.png", "grid2x2.png", "grid3x1.png", "shape-0-0_1-0_1-1.png"]
   });
-  const { tree } = renderTile(withTemplates, { stage: "template" });
-  check("有「生成模板（免费）」按钮", allText(tree).includes("生成模板（免费）"));
-  check("明确标注不花钱", allText(tree).includes("本地计算，不花钱"));
+  const { tree } = renderTile(withTemplates, { stage: "generate" });
+  check("★ 参考图面板长在生成阶段里（不再有独立阶段）",
+    allText(tree).includes("参考图（自动生成，免费）"), allText(tree).slice(0, 160));
+  check("★ 不再有「生成模板」按钮（已自动化）",
+    !allText(tree).includes("生成模板"), allText(tree).slice(0, 200));
   const tiles = byClassPart(tree, "SPR_tileAsset").filter((n) => n.props["data-template"] !== undefined);
-  check("★ 按宿主给的清单渲染模板图（几个文件就几张）", tiles.length === 4, `${tiles.length} 张`);
-  check("★ 3×1 的模板也在列表里（不是只显示 1×1 和 2×2）",
+  check("★ 按宿主给的清单渲染参考图（几个文件就几张）", tiles.length === 4, `${tiles.length} 张`);
+  check("★ 3×1 的参考图也在列表里（不是只显示 1×1 和 2×2）",
     tiles.some((n) => n.props["data-template"] === "grid3x1.png"),
     tiles.map((n) => n.props["data-template"]).join(", "));
-  check("★ 异形模板也在列表里（L 形带形状哈希名）",
+  check("★ 异形参考图也在列表里（L 形带形状哈希名）",
     tiles.some((n) => n.props["data-template"] === "shape-0-0_1-0_1-1.png"),
     tiles.map((n) => n.props["data-template"]).join(", "));
   const images = byType(tree, "img");
-  check("模板图走 assetBase 相对路径",
+  check("参考图走 assetBase 相对路径",
     images.some((node) => String(node.props.src).startsWith("/dsh-game-material-master/tile-assets/tabc123/template/")),
     images.map((n) => n.props.src).join(", "));
-  check("单格模板有中文说明", allText(tree).includes("单格模板（1×1 地形用）"));
-  check("3×1 模板的说明按文件名反推", allText(tree).includes("3×1 建筑模板"));
-  check("异形模板的说明列出格子坐标", allText(tree).includes("异形模板"), allText(tree).slice(-200));
-  check("空闲时没有遮罩", overlays(tree).length === 0, `${overlays(tree).length} 个`);
-  // 还没跑过 ① 时给空态提示，且不能崩
-  const empty = renderTile(makeProject({ templates: [] }), { stage: "template" }).tree;
-  check("没有模板时给空态提示（不是白屏）",
-    allText(empty).includes("还没有模板") &&
+  check("单格参考图有中文说明", allText(tree).includes("单格模板（1×1 地形用）"));
+  check("3×1 参考图的说明按文件名反推", allText(tree).includes("3×1 建筑模板"));
+  check("异形参考图的说明列出格子坐标", allText(tree).includes("异形模板"), allText(tree).slice(-200));
+  // 还没生成过时给空态提示，且不能崩
+  const empty = renderTile(makeProject({ templates: [] }), { stage: "generate" }).tree;
+  check("还没有参考图时给空态提示（不是白屏）",
+    allText(empty).includes("还没有参考图") &&
     byClassPart(empty, "SPR_tileAsset").filter((n) => n.props["data-template"] !== undefined).length === 0,
-    allText(empty).slice(-120));
+    allText(empty).slice(-140));
+  // ⚠️ 仍然不能有「把图永久隐藏」的 onError
+  check("参考图的 onError 只标灰、不隐藏",
+    !readFileSync(target, "utf8").includes('event.target.style.display = "none"'));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1269,39 +1275,6 @@ section("④ 拼图阶段：手动编辑布局");
   check("格子的类名带 SPR_mapCellLabel 子节点",
     cellNodes.every((node) => collect(node, (n) => n.props?.className === "SPR_mapCellLabel").length === 1));
 
-  // ★ 回归：模板生成完之后必须**立刻能看见**。
-  // 这里踩过两次：
-  //   · 模板图一律渲染，`onError` 时把图 `display:none` 掉 —— 进面板时模板还没生成、
-  //     必然先 404 一次，于是**永远不再显示**（浏览器不会重跑 onError）；
-  //   · 不按宿主给的清单渲染（写死两个文件名），3×1 / L 形的模板被藏起来。
-  // 现在改成「按 `project.templates` 渲不渲染、渲染几张」，所以两条都要断言。
-  {
-    const notReady = renderTile(makeProject({ templates: [] }), { stage: "template" }).tree;
-    const notReadyText = allText(notReady);
-    check("模板没生成时不渲染模板图（避免一次 404 之后永久隐藏）",
-      byClassPart(notReady, "SPR_tileAsset").filter((n) => n.props["data-template"] !== undefined).length === 0);
-    check("模板没生成时给一句可操作的提示",
-      notReadyText.includes("还没有模板") && notReadyText.includes("生成模板"),
-      notReadyText.slice(0, 200));
-
-    const ready = renderTile(makeProject({
-      templates: ["cell.png", "grid2x2.png", "grid3x1.png"]
-    }), { stage: "template" }).tree;
-    const tiles = byClassPart(ready, "SPR_tileAsset").filter((n) => n.props["data-template"] !== undefined);
-    check("模板生成后按清单渲染（3 个文件 → 3 张）", tiles.length === 3, `${tiles.length} 张`);
-    const imgs = collect(ready, (n) => n.type === "img");
-    check("模板图的 src 指向 template/",
-      imgs.length > 0 && imgs.every((n) => String(n.props.src).includes("/template/")),
-      imgs.map((n) => n.props.src).join(" | "));
-    check("建筑模板那格的说明由文件名反推（2×2 → 「2×2 建筑模板」）",
-      allText(ready).includes("2×2 建筑模板"), allText(ready).slice(0, 200));
-    // ⚠️ 不能再有「把图永久隐藏」的 onError
-    const source = readFileSync(target, "utf8");
-    check("模板图的 onError 不再把图 display:none 掉",
-      !/template\/\$\{[^}]*\}[\s\S]{0,300}?style\.display\s*=\s*"none"/.test(source) &&
-      !source.includes('event.target.style.display = "none"'));
-  }
-
   // ★ 即时预览：草稿里的每一格都要**立刻**贴出对应地块的图，不必先保存再铺。
   // 没有它用户只能看见空的菱形格子，「拼的时候就能预览」就无从谈起。
   {
@@ -1533,15 +1506,18 @@ section("点击真的调用对应远程方法");
   };
 
   CALLS.length = 0;
-  const t = renderTile(makeProject(), { stage: "template" }).tree;
-  const clicked = click(t, "生成模板");
-  check("点到「生成模板」按钮", clicked);
+  const g0 = renderTile(makeProject(), { stage: "generate" }).tree;
+  click(g0, "生成全部地块");
   await new Promise((r) => setTimeout(r, 20));
-  check("点击后调用了 runTileTemplate",
-    CALLS.some((c) => c.name === "runTileTemplate" && c.payload?.projectId === "tabc123"),
+  check("点击「生成全部地块」调用了 runTileItems",
+    CALLS.some((c) => c.name === "runTileItems" && c.payload?.projectId === "tabc123"),
     CALLS.map((c) => c.name).join(", "));
-  check("runTileTemplate 带上了正确的 projectId",
-    CALLS.find((c) => c.name === "runTileTemplate")?.payload?.projectId === "tabc123");
+  // ★ 参考图没有单独的远程方法了 —— 它在 runTileItems 里自动准备。
+  // 界面上不该再有任何「生成模板」入口。
+  check("★ 界面上没有 runTileTemplate 这个调用面了",
+    !CALLS.some((c) => c.name === "runTileTemplate") &&
+    !readFileSync(target, "utf8").includes("runTileTemplate"),
+    CALLS.map((c) => c.name).join(", "));
 
   CALLS.length = 0;
   const g = renderTile(makeProject(), { stage: "map" }).tree;

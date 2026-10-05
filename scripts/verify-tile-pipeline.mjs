@@ -7,7 +7,7 @@
  * 「伪造 raw 产物」是刻意的：真实生成要花钱，而这里要验的是它之后的所有环节。
  * 伪造用的样本是**研究期真实生成的 2K 图**（probe/），所以规整走的是真数据。
  */
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -95,14 +95,28 @@ let project;
   check("T11 cellHeight ≤ 菱形高时拒绝建项目", threw2);
 }
 
-section("① 模板阶段（本地，免费）");
+section("参考图自动准备（原来的「① 模板阶段」，现在是内部步骤）");
 {
-  const started = await G.runTemplateStage(project.id);
-  check("T12 模板阶段启动", started.started === true, started.reason ?? "");
-  await waitIdle(project.id);
+  // ★ 模板不再是用户跑的阶段 —— 宿主在「生成地块」开始时自己调 `ensureTemplates`。
+  // 这里直接调那个内部函数，验的是**产物**。
+  const rendered = await G.ensureTemplates(project);
+  check("T12 首次准备会真的渲染（返回渲染清单）", rendered.length > 0, JSON.stringify(rendered));
   const dir = G.tileProjectDir(project.id);
   check("T13 产出 template/cell.png", existsSync(join(dir, "template", "cell.png")));
   check("T14 产出 template/grid2x2.png", existsSync(join(dir, "template", "grid2x2.png")));
+  // ★ 指纹命中就不该重复渲染（十几张变体每次现渲染要白等几十秒）
+  const again = await G.ensureTemplates(project);
+  check("T14b 指纹没变时直接复用、不重渲染", again.length === 0, JSON.stringify(again));
+  // ★ 改了形状 → 指纹变 → 必须重渲染，并给出新形状的模板
+  const changed = { ...project, items: project.items.map((i) => i.kind === "building" ? { ...i, shape: [[0, 0], [1, 0], [1, 1]], footprint: [2, 2] } : i) };
+  const afterShape = await G.ensureTemplates(changed);
+  check("T14c 改形状后模板名变了（L 形单独一张）",
+    afterShape.includes("shape-0-0_1-0_1-1.png"), JSON.stringify(afterShape));
+  check("T14d 旧的矩形模板被清掉（不留过期项）",
+    !existsSync(join(dir, "template", "grid2x2.png")),
+    (await readdirSync(join(dir, "template"))).join(", "));
+  // 还原，后面的用例还要用 2×2
+  await G.ensureTemplates(project);
 
   const cell = await MEDIA.decodeFile(join(dir, "template", "cell.png"));
   check("T15 模板尺寸 2048×2048", cell.width === 2048 && cell.height === 2048, `${cell.width}×${cell.height}`);

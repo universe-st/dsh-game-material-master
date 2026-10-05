@@ -633,11 +633,11 @@ async function main() {
     try {
       check("tile 项目 id 被判为 tile 模块", moduleForId(tileId) === "tile", moduleForId(tileId));
 
-      // ② intake：必须能渲染出来，且把「五个阶段」与「只有第②步花钱」讲清楚
+      // ② intake：必须能渲染出来，且把「四个阶段」与「只有第①步花钱」讲清楚
       const intake = await intakeTool.execute({ module: "tile", id: tileId }, {});
       const intakeText = typeof intake === "string" ? intake : JSON.stringify(intake);
       check("intake 对 tile 不抛异常且返回了内容", intakeText.length > 50, `${intakeText.length} 字符`);
-      check("intake 讲清了五个阶段", /模板.*生成.*验收.*拼.*导出/s.test(intakeText.replace(/\\n/g, " ")) || /五个阶段/.test(intakeText));
+      check("intake 讲清了四个阶段", /生成.*验收.*拼.*导出/s.test(intakeText.replace(/\\n/g, " ")) || /四个阶段/.test(intakeText));
       check("intake 点明了只有第②步花钱", /只有一个?钱|计费|花钱/.test(intakeText));
       check("intake 问了画风与地块清单", /画风/.test(intakeText) && /地块/.test(intakeText));
       check("intake 带上了 openUrl 深链接", /openUrl/.test(intakeText) && /module=tile/.test(intakeText));
@@ -660,7 +660,7 @@ async function main() {
 
       // ⑤ call：tile 的远程方法要通过 call 通道可达（枚举里有它）
       const callDescription = JSON.stringify(callTool?.description ?? "");
-      const tileMethods = ["listTileProjects", "createTileProject", "getTileProject", "runTileTemplate",
+      const tileMethods = ["listTileProjects", "createTileProject", "getTileProject",
         "runTileItems", "setTileApproved", "runTileMap", "runTileExport"];
       const missingTile = tileMethods.filter((m) => !callDescription.includes(m));
       check("地图地块的远程方法都写进了 game_material_call 的描述", missingTile.length === 0, missingTile.join("、"));

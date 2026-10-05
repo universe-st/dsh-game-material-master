@@ -688,7 +688,6 @@ export const METHODS: MethodSpec[] = [  { method: "getConfig", result: configVie
   { method: "getTileProject", payload: tileGetSchema, result: projectViewSchema },
   { method: "deleteTileProject", payload: tileIdSchema, result: okSchema },
   { method: "saveTileProject", payload: saveTileProjectSchema, result: jsonObject },
-  { method: "runTileTemplate", payload: tileIdSchema, result: startedSchema },
   { method: "runTileItems", payload: runTileItemsSchema, result: startedSchema },
   { method: "runTileItem", payload: runTileItemSchema, result: startedSchema },
   { method: "setTileApproved", payload: tileApprovedSchema, result: okSchema },
