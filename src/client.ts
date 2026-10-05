@@ -5019,6 +5019,21 @@
        * 整个面板白屏。实测踩过。
        */
       const historyRef = React.useRef({ stack: [], index: -1 });
+      /**
+       * 建筑贴图的**实测尺寸标定**：`{ 'r,c': { top: px, left: px } }`（1× 未裁坐标）。
+       *
+       * 为什么需要：界面算包围盒要知道贴图的自然高宽比，而那是异步才知道的；
+       * 它只能拿 `preview.buildings[].ratio` 估。估出来的高度与真贴图差一截时
+       * （尤其**刚放下、还没保存**的那栋 —— 它不在 preview 里，只能按比例 1 估），
+       * `trimTop` 就跟着变，表现是**整张预览在保存前后跳一下**
+       * （真机反馈的「保存后中世纪房屋上移一格」）。
+       *
+       * 所以贴图加载完就量一次真实尺寸，把包围盒修正成跟宿主一致的精确值，
+       * 并按项目缓存，避免每帧重测。
+       */
+      const spriteCalibRef = React.useRef({ project: null, map: {} });
+      /** 标定完成后 +1，逼一次重渲染让包围盒用上真尺寸。 */
+      const [calibTick, setCalibTick] = React.useState(0);
       const tasks = usePendingTasks();
       const intent = useStudioIntent();
 
@@ -5148,6 +5163,39 @@
         window.addEventListener("keydown", onKey);
         return () => window.removeEventListener("keydown", onKey);
       }, [mapDraft]);
+
+      /**
+       * 贴图加载完就把**真尺寸**记下来（给包围盒用）。
+       *
+       * ⚠️ 必须在 effect 里做，不能在 `ref` 回调里 `setState` ——
+       * `ref` 回调发生在渲染阶段，在渲染期改状态会触发 React 警告甚至死循环。
+       * 这里读 DOM 上那几张建筑贴图的自然尺寸，变了才记，并在渲染后同步一次。
+       *
+       * ⚠️ 这个 Hook 也必须在 `if (project === null)` **之前**
+       * （Hook 顺序契约，见 `verify-client.mjs`）；所以它读的是渲染闭包里的
+       * `mapDraft` / `project`，而不是下面那些派生常量。
+       */
+      React.useLayoutEffect(() => {
+        if (typeof document === "undefined") return;
+        const store = spriteCalibRef.current;
+        if (store.project !== project?.id) {
+          store.project = project?.id ?? null;
+          store.map = {};
+        }
+        let dirty = false;
+        for (const bd of mapDraft?.buildings ?? []) {
+          const el = document.querySelector(`img[data-sprite="${bd.r},${bd.c}"]`) as HTMLImageElement | null;
+          const nw = el?.naturalWidth ?? 0;
+          const nh = el?.naturalHeight ?? 0;
+          if (nw <= 0 || nh <= 0) continue;
+          const key = `${bd.r},${bd.c}`;
+          const prev = store.map[key];
+          if (prev !== undefined && prev.naturalW === nw && prev.naturalH === nh) continue;
+          store.map[key] = { naturalW: nw, naturalH: nh };
+          dirty = true;
+        }
+        if (dirty) setCalibTick((n) => n + 1);
+      }, [project, mapDraft]);
 
       const run = React.useCallback(async (label, fn) => {
         setNotice(null);
@@ -5850,9 +5898,13 @@
         }
         // 从 `cells` 里升格出来的装饰（老项目手涂的树）优先于记录里的
         for (const [pos, key] of Object.entries(decorFromCells)) decor[pos] = key;
-        const buildings = (project.preview?.buildings ?? []).map((b) => ({
-          r: b.r, c: b.c, fw: b.fw, fh: b.fh, key: keyOfVariant(b.cell), under: defaultUnder()
-        }));
+        const buildings = (project.preview?.buildings ?? []).map((b) => {
+          const meta = buildingMetaOf(b);
+          return {
+            r: b.r, c: b.c, fw: b.fw, fh: b.fh, key: keyOfVariant(b.cell), under: defaultUnder(),
+            ratio: meta.ratio, baseFraction: meta.baseFraction
+          };
+        });
         // ★ 老数据的建筑占格是**空串**（旧版 `place()` 会把它清空）。
         // 这里补上默认地面 —— 不补的话界面会一直给它们叠那块纯色垫底
         // （真机上就是「建筑拖着塑料板」），而且用户得先手动保存一次才会好。
@@ -5899,8 +5951,39 @@
       };
       /** 建筑底面垫底用哪种地面**地块键**（不是贴图路径）。 */
       const defaultUnder = () => firstTerrainKey() ?? "";
+
+      /**
+       * 建筑贴图的「自然高 / 宽」与底面比例。
+       *
+       * ⚠️ **优先读草稿里那份，其次才是 `preview.buildings`**。
+       * `preview` 反映的是**已保存**的布局；用户刚用笔刷放下一栋楼时，
+       * 它还不在这份列表里 —— 于是包围盒只能拿默认值（ratio=1、bf=0.5）估，
+       * 估出来的高度和真贴图差一截，`trimTop` 就跟着变，
+       * 表现就是**整张预览在保存前后位移**（真机反馈的「房子上移一格」）。
+       * 所以放下楼时要把这两个值记进草稿，量包围盒时先用它。
+       */
+      const buildingMetaOf = (bd) => {
+        if (typeof bd?.ratio === "number" && typeof bd?.baseFraction === "number") {
+          return { ratio: bd.ratio, baseFraction: bd.baseFraction };
+        }
+        const found = (project.preview?.buildings ?? []).find((e) => e.r === bd?.r && e.c === bd?.c);
+        return {
+          ratio: typeof found?.ratio === "number" ? found.ratio : 1,
+          baseFraction: typeof found?.baseFraction === "number" ? found.baseFraction : 0.5
+        };
+      };
       /** 拆楼时把占格补回它原来的垫底地面；没有就退回默认地面。 */
       const underKeyOf = (building) => building.under ?? defaultUnder();
+
+      /** 取某栋建筑贴图的实测尺寸（没量过就返回 undefined）。 */
+      const calibFor = (bd) => {
+        const store = spriteCalibRef.current;
+        if (store.project !== project.id) {
+          store.project = project.id;
+          store.map = {};
+        }
+        return store.map[`${bd.r},${bd.c}`];
+      };
 
       /** 换一份草稿并记一笔历史。**所有改动草稿的地方都该走它**，否则撤销会跳步。 */
       function commitDraft(draft) {
@@ -6045,7 +6128,13 @@
             (b) => r + fh <= b.r || b.r + b.fh <= r || c + fw <= b.c || b.c + b.fw <= c
           );
           const under = defaultUnder();
-          buildings = [...buildings, { r, c, fw, fh, key, under }];
+          // ★ 把**贴图的自然高宽比与底面比例**一起记进草稿。
+          //
+          // 量包围盒要用它们。只在 `preview.buildings` 里查是不够的 ——
+          // 那份反映的是**已保存**的布局，刚放下的这栋还没进去，
+          // 于是包围盒拿默认值估，`trimTop` 与保存后不一致，整张预览就位移。
+          const meta = buildingMetaOf({ r, c });
+          buildings = [...buildings, { r, c, fw, fh, key, under, ratio: meta.ratio, baseFraction: meta.baseFraction }];
           // 占格铺**真实地面**（不是清空）。
           //
           // 清空的话这一格什么都不铺，建筑底面菱形的四个角是透明的，露出来的
@@ -6189,12 +6278,15 @@
           const oy = originY + (bd.c + bd.r) * stepY;
           const baseX = ox + (cw * scale) / 2 + ((bd.fw - 1) * stepX) / 2;
           const baseY = oy + (ch * scale) / 2 + ((bd.fh - 1) * stepY) / 2;
-          // 贴图自然尺寸要等加载完才知道，这里按宿主给的比例估：
-          // 宽度 = 占格横向总宽，高度按图片自身比例（宿主 `regularizeBuilding` 的产物）。
-          const info = (project.preview?.buildings ?? []).find((e) => e.r === bd.r && e.c === bd.c);
+          const info = buildingMetaOf(bd);
           const w = cw * ((bd.fw + bd.fh) / 2) * scale;
-          const hgt = Math.max(1, Math.round(w * (info?.ratio ?? 1)));
-          const bf = typeof info?.baseFraction === "number" ? info.baseFraction : 0.5;
+          // ★ 优先用**实测**尺寸（贴图加载过就有了），没有才用比例估。
+          // 这是「保存前后不跳」的关键：宿主量的是真贴图，界面必须也对齐真贴图。
+          const calib = calibFor(bd);
+          const naturalW = calib?.naturalW ?? 0;
+          const naturalH = calib?.naturalH ?? 0;
+          const hgt = Math.max(1, Math.round(naturalH > 0 ? (w * naturalH) / naturalW : w * info.ratio));
+          const bf = info.baseFraction;
           putBox(Math.round(baseX - w / 2), Math.round(baseY - bf * hgt), w, hgt);
           const halfW = ((bd.fw + bd.fh) / 2) * (cw / 2) * scale;
           const halfH = halfW / 2;
@@ -6341,10 +6433,17 @@
             }
             // 装饰：与地面**独立**的一层，所以树下面照样有草地。
             //
-            // ⚠️ 摆放口径必须与宿主 `regularizeDecorSprite` 一致：
-            // 贴图底边（站地点）对齐单元格的**地面线** `decorAnchorY`，不是格子底边。
-            // 写成「格子底边」会让装饰整体浮到地图上方（实测树全飘在图外面）。
-            // 贴图高度只有加载后才知道，所以用 `translateY(-100%)` 让底边贴住锚点。
+            // ⚠️ 摆放口径必须与宿主 `regularizeDecorSprite` **逐字**一致，
+            // 它做的是**居中**：`x + (cellW·scale − decorW·scale)/2`，
+            // 摆位 `y + decorAnchorY·scale`，把贴图**底边**压在这个锚点上。
+            //
+            // 踩过两次，两次都表现为「树飘在草地外面」：
+            //   · 锚点写成「格子底边」而不是地面线 → 整排树往上飘；
+            //   · 只对齐左边、忘了水平居中 → 整排树**右移半格**，
+            //     顶边那排树直接飘出草地（真机反馈的「上边缘的树木悬空」）。
+            //
+            // 贴图高度/宽度只有加载后才知道，所以用 `translate(-50%, -100%)`
+            // 把**底边中点**贴到锚点 —— `-50%` 就是那个居中量，不必手算。
             const decKey = mapDraft.decor[`${r},${c}`];
             if (typeof decKey === "string" && decKey !== "" && !occupied) {
               const decArt = variantArt(decKey, r, c);
@@ -6355,11 +6454,10 @@
                   src: artUrl(decArt),
                   alt: `decor ${r},${c}`,
                   style: {
-                    left: `${x}px`,
+                    // 以自身尺寸渲染（不拉伸），锚在「格子底边中点」
+                    left: `${x + (cw * scale) / 2}px`,
                     top: `${y + decorAnchor * scale}px`,
-                    width: `${cw * scale}px`,
-                    height: `${ch * scale}px`,
-                    transform: "translateY(-100%)"
+                    transform: "translate(-50%, -100%)"
                   }
                 }));
               }
@@ -6439,6 +6537,8 @@
             className: "SPR_mapBuildImg",
             src: artUrl(art),
             alt: `building ${b.r},${b.c}`,
+            // 让标定用的 effect 能按位置找回这张图（量它的真实尺寸）
+            "data-sprite": `${b.r},${b.c}`,
             "data-w": String(buildWidth(b.fw, b.fh)),
             "data-bx": String(anchorX),
             "data-by": String(anchorY2),

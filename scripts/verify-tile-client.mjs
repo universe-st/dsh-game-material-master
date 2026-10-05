@@ -330,7 +330,7 @@ function makeProject(overrides = {}) {
 // 23 = useLocaleTick(1) + 组件自身 18 个 useState + usePendingTasks(useState + 2×useRef)
 //      + useStudioIntent(useState)。effect / callback 不占状态槽。
 // **新增状态时这个数字必须跟着改** —— 它是「槽位没串位」的唯一护栏。
-const EXPECTED_HOOKS = 25;
+const EXPECTED_HOOKS = 27;
 /**
  * 把测试里写的「扁平 cells 网格」补成三层草稿。
  * 断言里仍然可以只关心地面，所以旧写法继续可用。
@@ -970,9 +970,21 @@ section("④ 拼图阶段：三层编辑（地面 / 装饰 / 建筑）");
       check("★ 装饰底边对齐宿主 decorAnchorY（不是格子底边）",
         Number.parseFloat(String(style.top)) === y + anchorPx,
         `界面 top=${style.top} 期望 ${y + anchorPx}（格 (${r},${c}) 的 y=${y} + 锚点 ${anchorPx}）`);
+      // ★ 水平方向必须**居中**：宿主是 `x + (cellW − decorW)/2`。
+      // 只对齐左边会让整排树右移半格 —— 真机上顶边那排树直接飘出草地。
+      const stepX = (SETTINGS.cellWidth / 2) * scale;
+      const originX = (rows - 1) * stepX;
+      const trimLeft = boundsOf({ ground, decor: { "1,2": "tree" }, buildings: [] }, 3, 3).left;
+      const x = Math.round(originX + (c - r) * stepX) - trimLeft;
+      check("★ 装饰锚在格子**水平中点**（与宿主居中的口径一致）",
+        Number.parseFloat(String(style.left)) === x + (SETTINGS.cellWidth * scale) / 2,
+        `界面 left=${style.left} 期望 ${x + (SETTINGS.cellWidth * scale) / 2}（格 x=${x} + 半格）`);
       void rows;
-      check("装饰用 translateY(-100%) 让底边贴住锚点",
-        String(style.transform) === "translateY(-100%)", String(style.transform));
+      check("装饰用 translate(-50%, -100%) 让底边中点贴住锚点",
+        String(style.transform) === "translate(-50%, -100%)", String(style.transform));
+      check("装饰以自身尺寸渲染（不拉伸到一格）",
+        style.width === undefined && style.height === undefined,
+        `width=${style.width} height=${style.height}`);
       check("宿主 decorAnchorY 确实是 54（64×96 的基准值）", host.decorAnchorY(SETTINGS) === 54,
         String(host.decorAnchorY(SETTINGS)));
     }
@@ -1322,3 +1334,5 @@ section("点击真的调用对应远程方法");
 
 console.log("\n" + "═".repeat(60));
 report();
+
+
