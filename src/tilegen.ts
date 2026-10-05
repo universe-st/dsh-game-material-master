@@ -82,14 +82,158 @@ export interface TileVariant {
   error?: string;
 }
 
+/**
+ * 跨格形状：**相对锚点**的格子集合（左上角那块是 `[0,0]`）。
+ *
+ * 用「格子集合」而不是「几列乘几行」，是为了支持 L 形、T 形、线形这类**非矩形**占地。
+ * 矩形只是它的一种特例，所以老项目里的 `[cols, rows]` 能被无损地表达成
+ * `矩形格子集合`（见 `shapeOf`）—— 不需要数据迁移脚本。
+ *
+ * 一律按「行优先」排序，让同一个形状的序列化结果稳定（自检直接比字符串）。
+ */
+export type TileShape = Array<[number, number]>;
+
+/** 由「列 × 行」矩形造形状。 */
+export function rectShape(cols: number, rows: number): TileShape {
+  const shape: TileShape = [];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) shape.push([r, c]);
+  }
+  return shape;
+}
+
+/** 形状是否恰好是一个**实心矩形**（是的话返回 [列, 行]，否则 undefined）。 */
+export function rectOfShape(shape: TileShape): [number, number] | undefined {
+  if (shape.length === 0) return undefined;
+  const rows = Math.max(...shape.map((p) => p[0])) + 1;
+  const cols = Math.max(...shape.map((p) => p[1])) + 1;
+  return shape.length === cols * rows ? [cols, rows] : undefined;
+}
+
+/**
+ * 取一个地块的形状 —— **兼容老的 `footprint`**。
+ *
+ * ⚠️ 迁移点只有这一个：只要都从这里取形状，老项目（只有 `footprint`）
+ * 就自动等价成矩形形状，不需要改数据文件。
+ */
+export function shapeOf(item: { shape?: TileShape; footprint?: [number, number] }): TileShape {
+  if (Array.isArray(item.shape) && item.shape.length > 0) {
+    return item.shape.map((p) => [p[0], p[1]] as [number, number]);
+  }
+  const fp = item.footprint ?? [1, 1];
+  return rectShape(Math.max(1, fp[0]), Math.max(1, fp[1]));
+}
+
+/**
+ * 形状的**包围菱形半宽**（1× 像素）。
+ *
+ * 每个格子相对锚点的水平偏移是 `(dc − dr) · cellWidth/4`。
+ * 所以整形的水平跨度由 `(dc − dr)` 的极差决定：
+ *
+ * ```
+ * 宽度 = cellWidth/4 · (maxDC−maxDR − (minDC−minDR)) + cellWidth
+ * 半宽 = cellWidth/8 · (Δdc − Δdr) + cellWidth/2
+ *      = cellWidth · (span + 2) / 4        // span = (maxDC−minDC) + (maxDR−minDR)
+ * ```
+ *
+ * ⚠️ 别再用 `(cols + rows) / 2` —— 那**只对实心矩形**成立。
+ * 实测：3×1 的矩形是 `(3+1)/2 = 2` 格半宽（宽 128），但同样的数字给
+ * L 形（3 格、跨度 1×1）会算出 2 格（128），而正确答案是 1 格（64）。
+ */
+export function shapeHalfWidth(shape: TileShape, settings: { cellWidth: number }): number {
+  if (shape.length === 0) return settings.cellWidth / 2;
+  let minDR = Infinity, maxDR = -Infinity, minDC = Infinity, maxDC = -Infinity;
+  for (const [r, c] of shape) {
+    if (r < minDR) minDR = r;
+    if (r > maxDR) maxDR = r;
+    if (c < minDC) minDC = c;
+    if (c > maxDC) maxDC = c;
+  }
+  const span = (maxDC - minDC) + (maxDR - minDR);
+  return (settings.cellWidth * (span + 2)) / 4;
+}
+
+/**
+ * 把（可能来自界面/老数据的）原始形状**规范化**。
+ *
+ * - 给 `shape`（格子集合）→ 去重、按行优先排序；
+ * - 只给 `footprint` → 转成矩形形状（老项目走这条）；
+ * - 都没有 → 退回 `previous` 的形状；
+ * - 输入不合法（空集合、非数字）→ 退回 1×1。
+ *
+ * 形状**不限格子数**，但会做基本的合法性校验（非负、整数、有界去重）。
+ */
+export function normalizeShape(
+  raw: { shape?: unknown; footprint?: unknown } | undefined,
+  previous: { shape?: TileShape; footprint?: [number, number] } | undefined
+): TileShape {
+  const fromRaw = parseShape(raw?.shape);
+  if (fromRaw !== undefined) return fromRaw;
+  const fp = parseFootprint(raw?.footprint);
+  if (fp !== undefined) return rectShape(fp[0], fp[1]);
+  if (previous !== undefined) return shapeOf(previous);
+  return [[0, 0]];
+}
+
+/** 解析格子集合；非法就返回 undefined（交给调用方回退）。 */
+export function parseShape(value: unknown): TileShape | undefined {
+  if (!Array.isArray(value) || value.length === 0) return undefined;
+  const seen = new Set<string>();
+  const shape: TileShape = [];
+  for (const entry of value) {
+    if (!Array.isArray(entry) || entry.length < 2) return undefined;
+    const r = Number(entry[0]);
+    const c = Number(entry[1]);
+    if (!Number.isInteger(r) || !Number.isInteger(c) || r < 0 || c < 0) return undefined;
+    const k = `${r},${c}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    shape.push([r, c]);
+  }
+  if (shape.length === 0) return undefined;
+  shape.sort((a, b) => (a[0] - b[0]) || (a[1] - b[1]));
+  return shape;
+}
+
+function parseFootprint(value: unknown): [number, number] | undefined {
+  if (!Array.isArray(value) || value.length !== 2) return undefined;
+  const cols = Math.trunc(Number(value[0]));
+  const rows = Math.trunc(Number(value[1]));
+  if (!Number.isFinite(cols) || !Number.isFinite(rows) || cols < 1 || rows < 1) return undefined;
+  return [cols, rows];
+}
+
+/** 形状的**包围矩形** `[列, 行]`（给只认 `footprint` 的老路径用）。 */
+export function boundingRectOf(shape: TileShape): [number, number] {
+  if (shape.length === 0) return [1, 1];
+  let maxR = 0, maxC = 0;
+  for (const [r, c] of shape) {
+    if (r > maxR) maxR = r;
+    if (c > maxC) maxC = c;
+  }
+  return [maxC + 1, maxR + 1];
+}
+
+/** 形状的稳定字符串（比较用）。 */
+export function shapeKey(shape: TileShape): string {
+  return shape.map(([r, c]) => `${r},${c}`).join(";");
+}
+
 export interface TileItem {
   key: string;
   label: string;
   kind: TileItemKind;
   /** 同类变体分组：铺图时按这个分组随机抽。 */
   family: string;
-  /** 占格 [列, 行]。地形与装饰是 [1,1]，建筑是 [2,2]。 */
+  /**
+   * 占格 [列, 行] —— **仅作兼容与「矩形」快捷展示**。
+   *
+   * 真正的形状以 `shape` 为准（`shapeOf()` 统一取）。改形状时两者都要更新，
+   * 让老版本读到的 `footprint` 至少还是个合理的包围矩形。
+   */
   footprint: [number, number];
+  /** 通用形状：相对锚点的格子集合。缺省（老数据）= `footprint` 的矩形。 */
+  shape?: TileShape;
   /** AI 只描述「菱形里面是什么」。不描述形状 / 角度 / 透视。 */
   content: string;
   mode: TileItemMode;

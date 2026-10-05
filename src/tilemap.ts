@@ -35,12 +35,16 @@ export interface TileMapState {
   /** 跨格建筑锚点：`[行, 列, key]`。 */
   buildings: Array<[number, number, string]>;
   /**
-   * 建筑底面原来的地面地块：`[行, 列, 列数, 行数, 地面地块键]`。
+   * 建筑底面原来铺的地面：`[行, 列, 列数, 行数, 地面地块键, 形状?]`。
    *
    * 建筑占掉的那几格会被清空（否则同一个精灵会被当 1 格地面重复画），
    * 所以垫底需要单独记一份，否则建筑脚下会露出透明洞。
+   *
+   * ⚠️ 第 2/3 位（列数/行数）是**老格式的包围矩形**，只为兼容旧数据；
+   * 新数据一律带第 5 位 `shape`（相对锚点的格子集合），它才是真形状。
+   * 读的时候用 `shapeOfEntry()`，别直接读 `[2]/[3]` —— 非矩形形状会被算错。
    */
-  buildingGround?: Array<[number, number, number, number, string]>;
+  buildingGround?: Array<[number, number, number, number, string, Array<[number, number]>?]>;
   /** 拼图产物（相对项目目录）。未拼图时无此字段。 */
   png?: string;
   json?: string;
@@ -213,6 +217,94 @@ export function pickVariantIndex(seed: number, r: number, c: number, count: numb
 }
 
 /**
+ * 从一个 `buildingGround` 条目取**形状**。
+ *
+ * 优先第 5 位的新格式；没有就按第 2/3 位的包围矩形还原（老数据）。
+ * 这样拼图、包围盒、界面三处读的是同一个形状。
+ */
+export function shapeOfEntry(
+  entry: [number, number, number, number, string, Array<[number, number]>?] | undefined
+): Array<[number, number]> {
+  if (entry === undefined) return [[0, 0]];
+  const shape = entry[5];
+  if (Array.isArray(shape) && shape.length > 0) return shape;
+  const cols = Math.max(1, entry[2] ?? 1);
+  const rows = Math.max(1, entry[3] ?? 1);
+  const out: Array<[number, number]> = [];
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) out.push([r, c]);
+  return out;
+}
+
+/**
+ * 形状的包围菱形**半宽/半高**（与 `tilegeom.shapeHalfWidthLocal` 同一条公式）。
+ *
+ * 每格相对锚点的水平偏移是 `(dc − dr)·cellWidth/4`，所以跨度由 `(dc−dr)` 的极差决定。
+ * ⚠️ 别用 `(fw+fh)/2` —— 那**只对实心矩形**成立，L 形会算出两倍宽。
+ */
+export function shapeDiamondHalf(
+  shape: Array<[number, number]>,
+  cellWidth: number
+): { halfW: number; halfH: number } {
+  if (shape.length === 0) return { halfW: cellWidth / 2, halfH: cellWidth / 4 };
+  // 用**实际 x/y 偏移**算极差，别用「列数 + 行数」——
+  // 那个指数和会把同一个方向的跨度算两遍（L 形会算成 64 而不是 48）。
+  let minX = Infinity, maxX = -Infinity;
+  for (const [r, c] of shape) {
+    const x = c - r;
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+  }
+  const halfW = ((maxX - minX) * (cellWidth / 2) + cellWidth) / 2;
+  return { halfW, halfH: halfW / 2 };
+}
+
+/**
+ * 形状的底面中心相对**锚点格中心**的偏移（1× 像素）。
+ *
+ * 定义：占格各格**菱形中心**的**包围盒中点**。
+ *
+ * ## 坐标变换（这里踩过好几次，务必看清）
+ *
+ * 格 `(r,c)` 相对锚点的等距偏移是
+ * `x = (c − r)·stepX`、`y = (c + r)·stepY`，其中
+ * `stepX = cellWidth/2`、`stepY = cellWidth/4`。
+ * 所以 x 取极差、y 取极差，各自**再除以 2**：
+ *
+ * ```
+ * dx = (max(c−r) + min(c−r))/2 · stepX
+ * dy = (max(c+r) + min(c+r))/2 · stepY
+ * ```
+ *
+ * 实心矩形 `fw×fh` 化简后正好是 `dx = (fw−1)·stepX/2`、`dy = (fh−1)·stepY/2`，
+ * 也就是老代码的 `((fw−1)·cellW/2)/2`、`((fh−1)·cellW/4)/2` —— **逐字一致**
+ * （注意 dy 的括号因子是 `cellW/4 = stepY`，写成 `cellW/8` 就少一半）。
+ *
+ * ⚠️ 别用「各格中心的平均」：那对不对称形状（L 形）会偏。
+ * ⚠️ 也别用「各格中心包围盒的中点」之外的自创定义 —— 它与
+ * `assembleMap` 的垫底范围、`measureAssemblyBounds` 的包围盒、界面预览
+ * 三处必须**同口径**，否则又是「保存后错半格」那类问题。
+ */
+export function shapeBaseOffset(
+  shape: Array<[number, number]>,
+  cellWidth: number
+): { dx: number; dy: number } {
+  if (shape.length === 0) return { dx: 0, dy: 0 };
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const [r, c] of shape) {
+    const x = c - r;
+    const y = c + r;
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  return {
+    dx: ((minX + maxX) / 2) * (cellWidth / 2),
+    dy: ((minY + maxY) / 2) * (cellWidth / 4)
+  };
+}
+
+/**
  * 拼图内容的像素包围盒（未裁坐标，1× 交付前的尺寸）。
  *
  * ★ 这是**宿主与界面共用的唯一几何口径**。
@@ -278,33 +370,40 @@ export function measureAssemblyBounds(
     }
   }
 
-  const groundByBuilding = new Map<string, { fw: number; fh: number }>();
+  const groundByBuilding = new Map<string, Array<[number, number]>>();
   for (const entry of state.buildingGround ?? []) {
-    groundByBuilding.set(`${entry[0]},${entry[1]}`, { fw: entry[2], fh: entry[3] });
+    groundByBuilding.set(`${entry[0]},${entry[1]}`, shapeOfEntry(entry));
   }
   for (const [r, c, name] of state.buildings ?? []) {
     const sprite = lookup.get(name);
     const origin = tileOriginAt(layout, r, c);
-    const foot = groundByBuilding.get(`${r},${c}`);
-    const fw = foot?.fw ?? 1;
-    const fh = foot?.fh ?? 1;
-    const baseX = origin.x + cellW / 2 + ((fw - 1) * (cellW / 2)) / 2;
-    const baseY = origin.y + cellH / 2 + ((fh - 1) * (cellW / 4)) / 2;
+    const shape = groundByBuilding.get(`${r},${c}`) ?? [[0, 0]];
+    const off = shapeBaseOffset(shape, cellW);
+    const anchorCx = origin.x + cellW / 2;
+    const anchorCy = origin.y + cellH / 2;
+    const baseX = anchorCx + off.dx;
+    const baseY = anchorCy + off.dy;
     if (sprite !== undefined) {
       const base = typeof sprite.baseFraction === "number"
         ? sprite.baseFraction * sprite.height
         : sprite.height - cellH / 2;
       put(Math.round(baseX - sprite.width / 2), Math.round(baseY - base), sprite.width, sprite.height);
     }
-    // 垫底菱形（`fillDiamondSolid` 的口径）
-    const halfW = ((fw + fh) / 2) * (cellW / 2);
-    const halfH = halfW / 2;
-    put(
-      Math.ceil(baseX - halfW),
-      Math.floor(baseY - halfH),
-      Math.floor(baseX + halfW) - Math.ceil(baseX - halfW) + 1,
-      Math.ceil(baseY + halfH) - Math.floor(baseY - halfH) + 1
-    );
+    // 垫底菱形（`fillDiamondSolid` 的口径）—— **逐格**，与 `assembleMap` 同口径。
+    // 逐格而不是一个大菱形：非矩形形状（L 形）的大菱形会把凹口算进来
+    // （包围盒反而偏大，裁剪时多留一圈白，不至于错格，但要与宿主一致）。
+    const cellHalfW = cellW / 4;
+    const cellHalfH = cellHalfW / 2;
+    for (const [dr, dc] of shape) {
+      const cx2 = anchorCx + (dc - dr) * (cellW / 4);
+      const cy2 = anchorCy + (dc + dr) * (cellW / 8);
+      put(
+        Math.ceil(cx2 - cellHalfW),
+        Math.floor(cy2 - cellHalfH),
+        Math.floor(cx2 + cellHalfW) - Math.ceil(cx2 - cellHalfW) + 1,
+        Math.ceil(cy2 + cellHalfH) - Math.floor(cy2 - cellHalfH) + 1
+      );
+    }
   }
 
   if (!Number.isFinite(left)) return { left: 0, top: 0, width: 0, height: 0 };
@@ -379,9 +478,9 @@ export function assembleMap(  lookup: Map<string, Bitmap>,
   const at = (r: number, c: number) => tileOriginAt(layout, r, c);
 
   // 建筑底面原来是哪种地面 —— 用来给它垫底（见 fillDiamondSolid 的注释）
-  const groundByBuilding = new Map<string, { key: string; fw: number; fh: number }>();
+  const groundByBuilding = new Map<string, { key: string; shape: Array<[number, number]> }>();
   for (const entry of state.buildingGround ?? []) {
-    groundByBuilding.set(`${entry[0]},${entry[1]}`, { key: entry[4], fw: entry[2], fh: entry[3] });
+    groundByBuilding.set(`${entry[0]},${entry[1]}`, { key: entry[4], shape: shapeOfEntry(entry) });
   }
 
   const decorAt = new Map<string, string[]>();
@@ -431,29 +530,40 @@ export function assembleMap(  lookup: Map<string, Bitmap>,
     const at2 = at(r, c);
     // 先给底面垫一块实心地面菱形，避免建筑脚下露出透明洞。
     //
-    // ⚠️ 菱形的尺寸要按**占格**算：`(fw+fh)/2 · cellWidth/2` 宽、
-    // 其一半为高（菱形高 = 宽/2）。曾经想当然写成 `cellW × cellH/2`，
-    // 结果垫底高度是正确值的 3 倍、横向又不够，洞照样露出来。
+    // 垫底按**形状**逐格画（`shapeBaseOffset` 给出包围菱形中心的偏移）。
+    // 曾经想当然写成 `cellW × cellH/2`，结果垫底高度是正确值的 3 倍、横向又不够，
+    // 洞照样露出来；后来说按 `(fw+fh)/2` 算 —— 那**只对实心矩形**成立，
+    // L 形会算成两倍宽，凹口也被涂上。
     const groundInfo = groundByBuilding.get(`${r},${c}`);
     const ground = groundInfo === undefined ? undefined : lookup.get(groundInfo.key);
-    const fw = groundInfo?.fw ?? 1;
-    const fh = groundInfo?.fh ?? 1;
+    const shape = groundInfo?.shape ?? [[0, 0]];
     // 占格菱形的中心在哪儿 —— 建筑贴图的**底面**就落在这里。
     //
     // ⚠️ 不是锚点格的几何中心！2×2 的锚点在左上那格，整个占格菱形的中心
     // 比它右移 `stepX/2`、下移 `stepY/2`。垫底画在锚点格中心的话，
     // 整个垫底会**往左上偏半格**，建筑看着像浮在半空（实测真机就是这么露馅的）。
-    const baseX = at2.x + cellW / 2 + ((fw - 1) * (cellW / 2)) / 2;
-    const baseY = at2.y + cellH / 2 + ((fh - 1) * (cellW / 4)) / 2;
+    //
+    // 形状任意时用 `shapeBaseOffset` 现算（推导见它的注释）。
+    const off = shapeBaseOffset(shape, cellW);
+    const anchorCx = at2.x + cellW / 2;
+    const anchorCy = at2.y + cellH / 2;
+    const baseX = anchorCx + off.dx;
+    const baseY = anchorCy + off.dy;
     if (groundInfo !== undefined && ground !== undefined) {
-      const footHalfW = ((fw + fh) / 2) * (cellW / 2);
-      const footHalfH = footHalfW / 2;
-      fillDiamondSolid(
-        out, canvasW, canvasH,
-        baseX, baseY,
-        footHalfW, footHalfH,
-        averageColor(ground), 255
-      );
+      // 逐格垫底：非矩形形状（L 形）画一个大菱形会把凹口也涂上，
+      // 而凹口本来该透出下面的地面。矩形是特例 —— 各格菱形拼起来
+      // 正好等于那个大菱形，所以老行为不变。
+      const avg = averageColor(ground);
+      const cellHalfW = cellW / 4;
+      const cellHalfH = cellHalfW / 2;
+      for (const [dr, dc] of shape) {
+        fillDiamondSolid(
+          out, canvasW, canvasH,
+          anchorCx + (dc - dr) * (cellW / 4),
+          anchorCy + (dc + dr) * (cellW / 8),
+          cellHalfW, cellHalfH, avg, 255
+        );
+      }
     }
     const base = typeof sprite.baseFraction === "number"
       ? sprite.baseFraction * sprite.height

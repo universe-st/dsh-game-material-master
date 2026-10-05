@@ -40,6 +40,9 @@ import {
   countInteriorHoles,
   emptyMapState,
   mulberry32,
+  shapeBaseOffset,
+  shapeDiamondHalf,
+  shapeOfEntry,
   tileLayout,
   tileOriginAt,
   trimTransparent
@@ -626,15 +629,178 @@ section("S4 跨格建筑锚点");
   }
   const layout = tileLayout(S, 4, 4);
   const o = tileOriginAt(layout, 1, 1);
-  const wantX = o.x + S.cellWidth / 2 + layout.stepX / 2;
-  const wantY = o.y + S.cellHeight / 2 + layout.stepY / 2;
+  // ⚠️ 期望值按**形状**现算（`shapeBaseOffset`），不要手写 `stepX/2`。
+  // 手写那版与老代码的 `((fw−1)·cellW/2)/2` 是同一个错 —— 实测真值底心是
+  // (o + 半格 + (0,16))，而老式子给 (o + 半格 + (16,8))，**两个方向各差半格**。
+  // 夹具是 2×2，所以形状取矩形 2×2。
+  const shape2x2 = [[0, 0], [0, 1], [1, 0], [1, 1]];
+  const off = shapeBaseOffset(shape2x2, S.cellWidth);
+  const wantX = o.x + S.cellWidth / 2 + off.dx;
+  const wantY = o.y + S.cellHeight / 2 + off.dy;
   near("S4c 建筑底面中心 x = 占格菱形中心 x", mx / mn, wantX, 2, "px");
   near("S4d 建筑底面中心 y = 占格菱形中心 y", my / mn, wantY, 2, "px");
   // 反面：不能等于锚点格中心（那正是真机那个 bug）。
-  // 2×2 时两者差 `stepY/2 = 8`，所以拿锚点格中心去比会差整整 8px。
-  const wrongY = o.y + S.cellHeight / 2;
   near("S4e 底面中心 ≠ 锚点格中心（差半格，真机 bug 的判据）",
-    my / mn - wrongY, layout.stepY / 2, 2, "px");
+    my / mn - (o.y + S.cellHeight / 2), off.dy, 2, "px");
+  // ★ 再加一条独立的真值：底心必须等于**四个占格菱形中心的包围盒中点**。
+  // 这是几何上唯一自然的定义，与公式无关 —— 公式错了它也会红。
+  {
+    const centers = [[1, 1], [1, 2], [2, 1], [2, 2]].map(([r, c]) => {
+      const p = tileOriginAt(layout, r, c);
+      return { x: p.x + S.cellWidth / 2, y: p.y + S.cellHeight / 2 };
+    });
+    const truthX = (Math.min(...centers.map((p) => p.x)) + Math.max(...centers.map((p) => p.x))) / 2;
+    const truthY = (Math.min(...centers.map((p) => p.y)) + Math.max(...centers.map((p) => p.y))) / 2;
+    near("S4f 底面中心 = 四个占格菱形中心的包围盒中点（独立真值）", mx / mn, truthX, 2, "px");
+    near("S4g 同上（y）", my / mn, truthY, 2, "px");
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("S4h 任意形状（L 形 / T 形 / 线形）");
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// 占了多格的图块不只有矩形。形状用「相对锚点的格子集合」表达，
+// 几何上要满足三条：
+//   1. 底面中心 = 各占格菱形中心的**包围盒中点**（几何定义，不看公式）；
+//   2. 包围菱形半宽 = x 方向极差 + 一格（**不是** `(cols+rows)/2`）；
+//   3. 矩形退化成老公式，逐字一致。
+{
+  const rect = (cols, rows) => {
+    const s = [];
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) s.push([r, c]);
+    return s;
+  };
+  /** 逐格菱形中心相对锚点格中心的偏移（世界坐标，1×）。 */
+  const centersOf = (shape) => shape.map(([r, c]) => ({
+    x: (c - r) * (S.cellWidth / 2),
+    y: (c + r) * (S.cellWidth / 4)
+  }));
+
+  // ① 矩形：底面偏移必须等于「各格菱形中心包围盒的中点」。
+  //
+  // ⚠️ dy 与**老代码**有意不一致：老代码 dy 用的是 `((fh−1)·cellW/4)/2`，
+  // 括号里少了一半（应为 `cellW/2`），实测每格差半格（2×2 偏 8px）。
+  // 这是这次顺手修掉的老 bug，所以这里断言的是**几何真值**而非老式子。
+  let rectOk = true;
+  const rectDetail = [];
+  for (const [cols, rows] of [[1, 1], [2, 2], [3, 1], [1, 3], [4, 2], [3, 3], [5, 5]]) {
+    const off = shapeBaseOffset(rect(cols, rows), S.cellWidth);
+    const cs = centersOf(rect(cols, rows));
+    const wantDx = (Math.min(...cs.map((p) => p.x)) + Math.max(...cs.map((p) => p.x))) / 2;
+    const wantDy = (Math.min(...cs.map((p) => p.y)) + Math.max(...cs.map((p) => p.y))) / 2;
+    if (Math.abs(off.dx - wantDx) > 1e-9 || Math.abs(off.dy - wantDy) > 1e-9) {
+      rectOk = false;
+      rectDetail.push(`${cols}x${rows}: 新(${off.dx},${off.dy}) 真值(${wantDx},${wantDy})`);
+    }
+  }
+  check("S4h-1 矩形形状的底面偏移 = 各格菱形中心包围盒中点", rectOk, rectDetail.join(" | "));
+  // 老代码的 dx/dy 都按 `(f−1)` **各自**算，但真实底心是
+  // 「各格菱形中心包围盒的中点」，两者只在 `fw == fh` 时对得上（平方约掉系数）。
+  // 这一节把「哪一半是回归、哪一半是修复」钉清楚，并留一条**独立真值**断言。
+  //
+  // ⚠️ 老代码原样照抄：`oldDx = ((fw−1)·cellW/2)/2`、`oldDy = ((fh−1)·cellW/4)/2`。
+  const oldCodeOffset = (cols, rws) => ({
+    dx: ((cols - 1) * (S.cellWidth / 2)) / 2,
+    dy: ((rws - 1) * (S.cellWidth / 4)) / 2
+  });
+  // 真实底心（与公式无关的独立定义）：各格菱形中心包围盒的中点
+  const truthOffset = (shape) => {
+    const cs = centersOf(shape);
+    return {
+      dx: (Math.min(...cs.map((p) => p.x)) + Math.max(...cs.map((p) => p.x))) / 2,
+      dy: (Math.min(...cs.map((p) => p.y)) + Math.max(...cs.map((p) => p.y))) / 2
+    };
+  };
+  check("S4h-1b 矩形底面偏移 = 各格菱形中心包围盒中点（独立真值，含非正方形）",
+    [[2, 2], [3, 2], [2, 3], [4, 2], [5, 5], [3, 1]].every(([cols, rws]) => {
+      const off = shapeBaseOffset(rect(cols, rws), S.cellWidth);
+      const t = truthOffset(rect(cols, rws));
+      return Math.abs(off.dx - t.dx) < 1e-9 && Math.abs(off.dy - t.dy) < 1e-9;
+    }),
+    JSON.stringify([[3, 2], [2, 3]].map(([c, r]) => ({
+      格子: `${c}x${r}`,
+      新: shapeBaseOffset(rect(c, r), S.cellWidth),
+      真值: truthOffset(rect(c, r)),
+      老代码: oldCodeOffset(c, r)
+    }))));
+
+  // ② 非矩形：底心必须等于「各格菱形中心的包围盒中点」
+  const cases = [
+    ["L 形", [[0, 0], [1, 0], [1, 1]]],
+    ["T 形", [[0, 0], [0, 1], [0, 2], [1, 1]]],
+    ["线形 1×3", [[0, 0], [0, 1], [0, 2]]],
+    ["线形 3×1", [[0, 0], [1, 0], [2, 0]]],
+    ["十字", [[0, 1], [1, 0], [1, 1], [1, 2], [2, 1]]]
+  ];
+  const detail = [];
+  let allOk = true;
+  for (const [name, shape] of cases) {
+    const off = shapeBaseOffset(shape, S.cellWidth);
+    const cs = centersOf(shape);
+    const truthX = (Math.min(...cs.map((p) => p.x)) + Math.max(...cs.map((p) => p.x))) / 2;
+    const truthY = (Math.min(...cs.map((p) => p.y)) + Math.max(...cs.map((p) => p.y))) / 2;
+    if (Math.abs(off.dx - truthX) > 1e-9 || Math.abs(off.dy - truthY) > 1e-9) {
+      allOk = false;
+      detail.push(`${name}: 公式(${off.dx},${off.dy}) 真值(${truthX},${truthY})`);
+    }
+  }
+  check("S4h-2 非矩形形状的底面中心 = 各格菱形中心包围盒的中点", allOk, detail.join(" | "));
+
+  // ③ 包围菱形半宽 = 两轴极差之和 /4 格 + 半格（= x 与 y 方向极差各贡献一半）
+  //
+  // 推导：x 跨度 = (maxX−minX)·stepX，两边各再留半格 → 总宽 = 跨度 + cellWidth。
+  const widths = cases.map(([name, shape]) => {
+    const { halfW } = shapeDiamondHalf(shape, S.cellWidth);
+    const cs = centersOf(shape);
+    const spanX = Math.max(...cs.map((p) => p.x)) - Math.min(...cs.map((p) => p.x));
+    const want = (spanX + S.cellWidth) / 2;
+    return { name, halfW, want };
+  });
+  check("S4h-3 包围菱形半宽 = x 极差/2 + 半格（不是 (cols+rows)/2）",
+    widths.every((w) => Math.abs(w.halfW - w.want) < 1e-9),
+    widths.map((w) => `${w.name}:${w.halfW}/${w.want}`).join(" | "));
+  // 反例：L 形（3 格、2×2 跨度）按包围矩形 `(2+2)/2 = 2` 格会算成 64，真值 48
+  const lShape = [[0, 0], [1, 0], [1, 1]];
+  check("S4h-4 L 形不能按包围矩形算宽（真值 48，不是 64）",
+    shapeDiamondHalf(lShape, S.cellWidth).halfW === S.cellWidth * 0.75,
+    `halfW=${shapeDiamondHalf(lShape, S.cellWidth).halfW}（期望 ${S.cellWidth * 0.75}）`);
+
+  // ④ `shapeOfEntry` 兼容老的 `[r,c,fw,fh,ground]` 五元组
+  check("S4h-5 shapeOfEntry 老五元组 → 矩形形状",
+    JSON.stringify(shapeOfEntry([1, 1, 2, 2, "grass#0"])) === JSON.stringify([[0, 0], [0, 1], [1, 0], [1, 1]]),
+    JSON.stringify(shapeOfEntry([1, 1, 2, 2, "grass#0"])));
+  check("S4h-6 shapeOfEntry 新六元组 → 用形状本身",
+    JSON.stringify(shapeOfEntry([1, 1, 2, 2, "grass#0", [[0, 0], [1, 1]]])) === JSON.stringify([[0, 0], [1, 1]]),
+    JSON.stringify(shapeOfEntry([1, 1, 2, 2, "grass#0", [[0, 0], [1, 1]]])));
+}
+
+// ★ S4i L 形建筑的**垫底**不能糊住凹口。
+//
+// 逐格垫底 vs 画一个包围大菱形：后者会把凹口也涂成地面色，
+// 而凹口本来该透出下面的地面（L 形的意义就在于此）。
+{
+  const grass = solidCell(S, [124, 176, 66, 255]);
+  const building = solidCell(S, [200, 60, 60, 255]);
+  building.baseFraction = 0.5;
+  const lookup = new Map([["grass#0", grass], ["bld#0", building]]);
+  const st = emptyMapState(6, 6, "grass");
+  st.cells = Array.from({ length: 6 }, () => Array.from({ length: 6 }, () => "grass"));
+  st.buildings = [[2, 2, "bld#0"]];
+  // 只填 (0,0)(1,0)(1,1) 三个格 —— 凹口是 (0,1)
+  st.buildingGround = [[2, 2, 2, 2, "grass#0", [[0, 0], [1, 0], [1, 1]]]];
+  const map = assembleMap(lookup, st, { settings: S, families: { grass: ["grass"] } });
+  const layout = tileLayout(S, 6, 6);
+
+  // 建筑贴图是纯色块，会把占格全盖住；所以要看的是**垫底的范围**：
+  // 凹口那一格不该有建筑色。这里直接量「建筑色像素」在凹口格中心处是否存在。
+  const hole = tileOriginAt(layout, 2, 3);
+  const hx = Math.round(hole.x + S.cellWidth / 2);
+  const hy = Math.round(hole.y + S.cellHeight / 2);
+  const i = (hy * map.width + hx) * 4;
+  const isBuilding = map.rgba[i] > 150 && map.rgba[i + 1] < 110 && map.rgba[i + 2] < 110;
+  check("S4i L 形凹口不被当成占格（建筑没盖住凹口）", !isBuilding,
+    `凹口中心 rgb=${map.rgba[i]},${map.rgba[i + 1]},${map.rgba[i + 2]}`);
 }
 
 // ★ S7 `families` 必须按**地块键**索引，不能按**类别**索引。
