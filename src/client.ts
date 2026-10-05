@@ -907,6 +907,8 @@
       "地图地块生成": "Map tile generation",
       "等距地块 → 拼成地图：几何交给代码，内容交给 AI": "Isometric tiles → a whole map: geometry by code, content by AI",
       "参考图（自动生成，免费）": "Reference image (auto-generated, free)",
+      "待生成": "Pending",
+      "还没生成 —— 点「生成全部地块」时会自动渲染": "Not generated yet — it will be rendered automatically when you click Generate all tiles",
       "按②里每个地块的占格形状渲染；改了形状或格子尺寸，下次生成时自动重做": "Rendered from each tile footprint shape; re-done automatically on the next generate if a shape or the cell size changed",
       "正在准备参考图…": "Preparing the reference images…",
       "还没有参考图 —— 点「生成全部地块」时会自动渲染（免费）。": "No reference images yet — they are rendered automatically (free) when you click Generate all tiles.",
@@ -939,7 +941,6 @@
       "所有地块都已经生成过了": "Every tile has already been generated",
       "只补没生成的": "Only fill missing ones",
       "排队中": "Queued",
-      "待生成": "Pending",
       "重跑": "Re-run",
       "逐项看成品与几何报告。几何正常的地块拼起来不会有缝；标「模板几何」说明这张没量准，建议重跑。": "Check each result and its geometry report. Tiles with correct geometry will not show seams; a 'template geometry' badge means the measurement failed, so re-running is recommended.",
       "验收": "Review",
@@ -1675,6 +1676,9 @@
 .SPR_mapCell-ghostBad{background:rgba(240,80,80,0.24)}
 .SPR_mapBrushGroup{display:inline-flex;align-items:center;gap:6px;padding:2px 6px;border-radius:8px;border:1px dashed var(--dsw-alias-border-l2)}
 .SPR_mapBrushLabel{font-size:11px;color:var(--dsw-alias-label-tertiary);white-space:nowrap}
+/* 还没生成的参考图：占位块，**不挂 <img>**（挂了就是 404 裂图） */
+.SPR_tileAsset-pending{opacity:.62}
+.SPR_thumb-pending{display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--dsw-alias-label-tertiary);background:var(--dsw-alias-bg-layer-2);border:1px dashed var(--dsw-alias-border-l2);border-radius:8px;min-width:96px;min-height:96px;box-sizing:border-box}
 /* 形状编辑器：小网格点选占格。左上角是锚点（恒亮、不可取消）。 */
 .SPR_shapeEditor{display:flex;flex-direction:column;gap:4px}
 .SPR_shapeGrid{display:inline-block;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:3px;background:var(--dsw-alias-bg-layer-2)}
@@ -5417,29 +5421,52 @@
           h("span", { className: "SPR_muted" }, T("按②里每个地块的占格形状渲染；改了形状或格子尺寸，下次生成时自动重做"))
         ),
         // ⚠️ 这里**不能**用 `onError` 把图 `display:none` 掉。
-        // 图还没生成时必然先 404 一次；一旦被隐藏，
-        // 之后即使生成好了也不会再显示（浏览器不会重跑 onError）——
-        // 表现就是「生成完了、模板还是不出现」。
-        // 正确做法：按宿主给的清单决定渲不渲染，`onError` 只做「标灰」提示。
+        // 一旦被隐藏，之后即使生成好了也不会再显示（浏览器不会重跑 onError）。
+        // 正确做法：按文件**在不在**决定渲不渲染，`onError` 只做「标灰」提示。
         //
         // ★ 文件名一律读**宿主列出来的那份**（`project.templates`），界面不写死。
         // 写死 `cell.png` + `grid2x2.png` 会把 3×1 / L 形的参考图藏起来，
         // 用户以为「只支持 1×1 和 2×2」。
+        //
+        // ★★ 但**只有磁盘上真有的**才能挂 `<img>`（`templatesPresent`）。
+        // 期望清单里的文件可能还没落盘 —— 给它挂 `<img>` 就是一次 404，
+        // 面板上全是裂图（实测：用户报的「参考图是裂的」就是这个）。
+        // 没落盘的显示成「待生成」占位块。
+        //
+        // 版本参数用宿主的 `templateRev` 而不是 `project.updatedAt`：
+        // 图片 404 之后浏览器会把**那次失败也缓存住**，而「只是图片 404」时
+        // `updatedAt` 不会变 —— 于是生成完了图还是裂的。
+        // `templateRev` 每次作业结束换一个值，强制浏览器重新取一次。
         (project.templates ?? []).length > 0
           ? h("div", { className: "SPR_row SPR_templateRow" },
-              ...(project.templates ?? []).map((name) => h("div", {
-                key: name,
-                className: "SPR_tileAsset",
-                "data-template": name
-              },
-                h("img", {
-                  className: "SPR_thumb",
-                  src: `${project.assetBase}template/${name}?v=${encodeURIComponent(project.updatedAt ?? "")}`,
-                  alt: name,
-                  onError: (event) => { event.target.setAttribute("data-broken", "1"); }
-                }),
-                h("span", { className: "SPR_muted" }, templateLabel(name))
-              )))
+              ...(project.templates ?? []).map((name) => {
+                const label = templateLabel(name);
+                if (!(project.templatesPresent ?? []).includes(name)) {
+                  return h("div", {
+                    key: name,
+                    className: "SPR_tileAsset SPR_tileAsset-pending",
+                    "data-template": name,
+                    "data-pending": "1",
+                    title: T("还没生成 —— 点「生成全部地块」时会自动渲染")
+                  },
+                    h("div", { className: "SPR_thumb SPR_thumb-pending" }, T("待生成")),
+                    h("span", { className: "SPR_muted" }, label)
+                  );
+                }
+                return h("div", {
+                  key: name,
+                  className: "SPR_tileAsset",
+                  "data-template": name
+                },
+                  h("img", {
+                    className: "SPR_thumb",
+                    src: `${project.assetBase}template/${name}?v=${encodeURIComponent(project.templateRev ?? "")}`,
+                    alt: name,
+                    onError: (event) => { event.target.setAttribute("data-broken", "1"); }
+                  }),
+                  h("span", { className: "SPR_muted" }, label)
+                );
+              }))
           : h("p", { className: "SPR_muted" }, busy
               ? T("正在准备参考图…")
               : T("还没有参考图 —— 点「生成全部地块」时会自动渲染（免费）。"))

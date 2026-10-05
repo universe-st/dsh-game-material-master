@@ -116,10 +116,25 @@ const afterTemplate = await studio.getTileProject({ projectId: id });
     typeof studio.runTileTemplate !== "function", typeof studio.runTileTemplate);
   check("stage 列表里没有 template 了",
     !Object.keys(afterTemplate.stages).includes("template"), Object.keys(afterTemplate.stages).join(", "));
-  // 参考图清单由宿主算给界面（还没生成，但清单应该已经给出「将会有哪些」）
+  // 参考图清单由宿主算给界面。★ **两个清单都要给**：
+  //   · `templates`        = 期望（形状的函数）→ 告诉用户「将会有哪些」；
+  //   · `templatesPresent` = 磁盘上真有的 → **只有这些才能挂 `<img>`**。
+  // 只给期望清单，界面就会给不存在的文件挂 `<img>`，面板上全是裂图
+  // （用户报的「参考图是裂的」）。而且 404 会被浏览器连失败一起缓存，
+  // `updatedAt` 又不会因为图片 404 而变 —— 生成完了图还是裂的。
+  // 所以还要一个**每次落盘都变**的 `templateRev` 来当 URL 版本号。
   check("view.templates 给出了期望的参考图清单",
     Array.isArray(afterTemplate.templates) && afterTemplate.templates.includes("cell.png"),
     JSON.stringify(afterTemplate.templates));
+  check("★ view.templatesPresent 与期望清单**分开给**（不能只给期望的）",
+    Array.isArray(afterTemplate.templatesPresent),
+    typeof afterTemplate.templatesPresent);
+  check("★ 还没生成过时 templatesPresent 为空、但期望清单不为空",
+    afterTemplate.templatesPresent.length === 0 && afterTemplate.templates.length > 0,
+    `present=${JSON.stringify(afterTemplate.templatesPresent)} want=${JSON.stringify(afterTemplate.templates)}`);
+  check("★ view.templateRev 存在（图片 URL 版本号，不能靠 updatedAt）",
+    typeof afterTemplate.templateRev === "string" && afterTemplate.templateRev !== "",
+    typeof afterTemplate.templateRev);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

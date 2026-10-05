@@ -316,6 +316,13 @@ function makeProject(overrides = {}) {
     job: null,
     progress: { generated: 2, expected: 2, approved: 1 },
     logs: [],
+    // 参考图预览：宿主真实会发**两个**清单 —— 期望的（`templates`）与
+    // 磁盘上真有的（`templatesPresent`）。默认取「已经生成过」这个常见状态。
+    // ⚠️ 两个都给，别只给期望清单：只给期望的会让界面给不存在的文件挂 <img>，
+    // 那就是一次 404、一张裂图（用户报过）。
+    templates: ["cell.png", "grid2x2.png"],
+    templatesPresent: ["cell.png", "grid2x2.png"],
+    templateRev: "1000-2",
     ...overrides
   };
 }
@@ -548,7 +555,9 @@ section("参考图面板（原「① 模板」，现已并入生成阶段）");
   // 写死 `cell.png` + `grid2x2.png` 会把 3×1 / L 形的参考图藏起来 ——
   // 用户看到的就是「只支持 1×1 和 2×2」。
   const withTemplates = makeProject({
-    templates: ["cell.png", "grid2x2.png", "grid3x1.png", "shape-0-0_1-0_1-1.png"]
+    templates: ["cell.png", "grid2x2.png", "grid3x1.png", "shape-0-0_1-0_1-1.png"],
+    templatesPresent: ["cell.png", "grid2x2.png", "grid3x1.png", "shape-0-0_1-0_1-1.png"],
+    templateRev: "123"
   });
   const { tree } = renderTile(withTemplates, { stage: "generate" });
   check("★ 参考图面板长在生成阶段里（不再有独立阶段）",
@@ -567,6 +576,39 @@ section("参考图面板（原「① 模板」，现已并入生成阶段）");
   check("参考图走 assetBase 相对路径",
     images.some((node) => String(node.props.src).startsWith("/dsh-game-material-master/tile-assets/tabc123/template/")),
     images.map((n) => n.props.src).join(", "));
+  // ★★ 回归：**只有磁盘上真有的才挂 `<img>`**。
+  // 曾经给「期望清单」里的每一项都挂 `<img>`，文件还没落盘时浏览器请求 404，
+  // 面板上全是裂图 —— 用户报的「参考图是裂的」就是这个。
+  // 而且 404 会被浏览器**连失败一起缓存**，`updatedAt` 又不会因为图片 404 而变，
+  // 所以生成完了图还是裂的。修法：没落盘的渲染成占位块（`data-pending`）。
+  {
+    const onlyCell = renderTile(makeProject({
+      templates: ["cell.png", "grid2x2.png", "grid3x1.png"],
+      templatesPresent: ["cell.png"],
+      templateRev: "9"
+    }), { stage: "generate" }).tree;
+    const imgs = byType(onlyCell, "img").filter((n) => String(n.props.src).includes("/template/"));
+    check("★★ 只给存在的文件挂 <img>（1 个存在 → 只 1 张图）",
+      imgs.length === 1, `${imgs.length} 张：${imgs.map((n) => n.props.src).join(", ")}`);
+    const pending = byClassPart(onlyCell, "SPR_tileAsset").filter((n) => n.props["data-pending"] === "1");
+    check("★★ 没落盘的显示成「待生成」占位块（不是裂图）",
+      pending.length === 2 && pending.every((n) => collect(n, (x) => x.type === "img").length === 0),
+      `${pending.length} 个占位`);
+    check("★★ 占位块仍然列出文件名与说明（不漏掉「将会有哪些」）",
+      pending.some((n) => n.props["data-template"] === "grid3x1.png") &&
+      allText(onlyCell).includes("3×1 建筑模板"),
+      pending.map((n) => n.props["data-template"]).join(", "));
+    // 完全没生成过：每一张都是占位，一张 <img> 都不该有
+    const noneYet = renderTile(makeProject({
+      templates: ["cell.png", "grid2x2.png"], templatesPresent: [], templateRev: "0"
+    }), { stage: "generate" }).tree;
+    check("★★ 一张都没生成时不渲染任何参考图 <img>（杜绝满屏裂图）",
+      byType(noneYet, "img").filter((n) => String(n.props.src).includes("/template/")).length === 0,
+      byType(noneYet, "img").map((n) => n.props.src).join(", "));
+    check("★★ 图片 URL 用 templateRev 而不是 updatedAt（404 不会被永久缓存）",
+      String(imgs[0]?.props.src).includes("v=9") && !String(imgs[0]?.props.src).includes("v=2026"),
+      String(imgs[0]?.props.src));
+  }
   check("单格参考图有中文说明", allText(tree).includes("单格模板（1×1 地形用）"));
   check("3×1 参考图的说明按文件名反推", allText(tree).includes("3×1 建筑模板"));
   check("异形参考图的说明列出格子坐标", allText(tree).includes("异形模板"), allText(tree).slice(-200));

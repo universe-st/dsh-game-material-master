@@ -28,7 +28,7 @@
  * 不必重新花钱生成。这是本模块最实用的一条降本设计。
  */
 
-import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { basename, join } from "node:path";
@@ -1600,13 +1600,22 @@ export interface TileProjectView extends TileProject {
    */
   preview: TilePreview;
   /**
-   * 参考图预览用的文件名清单（**期望值**，不是目录列表）（不含目录，按名字排序）。
+   * 参考图预览用的文件名清单 —— **期望值**（形状的纯函数）。
    *
-   * 界面照这份列表逐一渲染缩略图 —— 别写死文件名：
-   * 模板是「项目里出现哪种形状就出哪种」，写死的话
-   * 3×1 / L 形的模板会被藏起来，用户以为只支持 1×1 和 2×2。
+   * 用来告诉用户「将会生成哪几张」。**不能拿它直接挂 `<img>`**：
+   * 文件可能还没落盘，那样浏览器请求 404、面板上全是裂图。
+   * 要挂图请用 `templatesPresent`。
    */
   templates: string[];
+  /** 磁盘上**真实存在**的参考图文件名 —— 只有这些才能挂 `<img>`。 */
+  templatesPresent: string[];
+  /**
+   * 参考图的缓存指纹（界面拼成 `?v=`）。
+   *
+   * ⚠️ 不能用 `updatedAt`：图片 404 之后浏览器把**失败也缓存**，
+   * 而「只是图片 404」不改 `updatedAt` —— 生成完了图还是裂的。
+   */
+  templateRev: string;
 }
 
 export function tileView(project: TileProject): TileProjectView {
@@ -1623,15 +1632,49 @@ export function tileView(project: TileProject): TileProjectView {
     progress: tileProgress(project),
     // 参考图预览（原「① 模板」阶段，现在是 ② 里的只读面板）。
     //
-    // 用**期望清单**而不是目录列表：形状刚改过、参考图还没重渲染时，
-    // 也应该显示「将会用哪几张」——否则用户改完形状看不到变化，以为没生效。
-    // 文件还没落盘时图片会 404，界面只做「标灰」，不隐藏。
+    // ⚠️ **两个清单都要给**，界面才能既不裂图、又不漏掉「将会有哪些」：
+    //   · `templates`        = **期望**清单（形状的纯函数）——告诉用户将要生成什么；
+    //   · `templatesPresent` = 磁盘上**真实存在**的 —— 只有这些才能挂 `<img>`。
+    // 只给期望清单会怎样：界面给不存在的文件也挂 `<img>`，浏览器请求 404，
+    // 面板上全是裂图（实测：任何还没跑过生成的干净项目都是这样）。
     templates: expectedTemplateNames(project),
+    templatesPresent: listTemplateFiles(project.id),
+    templateRev: templateRev(project.id),
     // 界面「手动编辑布局」要用的即时预览素材：每个地块有哪些变体贴图。
     // 不给的话界面只能画出空的菱形格子 —— 用户看不见自己涂的是什么，
     // 得先「保存布局 → 铺成地图」才能看到效果，那就谈不上预览了。
     preview: tilePreview(project)
   };
+}
+
+/** 磁盘上真实存在的参考图文件名（目录不存在就空数组）。 */
+function listTemplateFiles(projectId: string): string[] {
+  try {
+    return readdirSync(join(tileProjectDir(projectId), "template"))
+      .filter((name) => name.endsWith(".png"))
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 参考图的缓存指纹（界面拼在图片 URL 的 `?v=` 后面）。
+ *
+ * ⚠️ **不能用 `updatedAt`。** 图片 404 之后浏览器会把**那次失败一起缓存**，
+ * 而「只是图片 404」并不会改 `updatedAt` —— 于是生成完了、图还是裂的。
+ * 这里用「模板目录的 mtime + 文件清单」，每次 `ensureTemplates` 落盘后都会变，
+ * 强制浏览器重新取一次。
+ */
+function templateRev(projectId: string): string {
+  const dir = join(tileProjectDir(projectId), "template");
+  try {
+    const files = readdirSync(dir).filter((n) => n.endsWith(".png")).sort();
+    const mtime = statSync(dir).mtimeMs;
+    return `${Math.round(mtime)}-${files.join(".").length}-${files.length}`;
+  } catch {
+    return "0";
+  }
 }
 
 /**
