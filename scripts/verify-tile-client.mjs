@@ -703,7 +703,8 @@ section("② 生成阶段：地块清单的增 / 删 / 改");
     editingText.includes("模板填充（地形）") && editingText.includes("2×2 地基网格（建筑）"));
   check("编辑态有变体数", editingText.includes("变体数（每个变体一次计费调用）"));
   check("编辑态有类别（family）", editingText.includes("类别（铺图时按它随机抽变体）"));
-  check("编辑态有占格", editingText.includes("占格 列 × 行"));
+  check("编辑态有占格形状编辑器（点格子增删，支持 L 形）",
+    editingText.includes("占格形状") && editingText.includes("左上角是锚点"));
   check("编辑态有提示词 textarea", byType(editing, "textarea").length >= 1);
   check("提示词 textarea 里是草稿内容",
     byType(editing, "textarea").some((node) => node.props.value === "改过的内容描述"));
@@ -732,14 +733,47 @@ section("② 生成阶段：地块清单的增 / 删 / 改");
     !allText(samePrompt).includes("保存后这个地块的已生成产物会作废") &&
     allText(samePrompt).includes("只改名称 / 类别 / 变体数不会作废产物"));
 
+  // ★ 形状编辑器：能配任意形状（这是「支持 L 形」的入口）。
+  //
+  // ⚠️ `editingKey` 必须等于 `makeProject()` 里**真实存在**的地块键，
+  // 否则编辑表单根本不渲染、断言会误报成「编辑器坏了」（实测踩过）。
+  {
+    const editDraft = (shape) => ({
+      key: "grass", label: "草地", kind: "terrain", family: "grass",
+      footprint: [2, 2], shape, content: "", mode: "template", variantCount: 1
+    });
+    const render = (shape) => renderTile(makeProject(), {
+      stage: "generate", editingKey: "grass", itemDraft: editDraft(shape)
+    }).tree;
+    const lShape = [[0, 0], [1, 0], [1, 1]];
+    const cells = byClassPart(render(lShape), "SPR_shapeCell");
+    const lit = cells.filter((n) => n.props["data-on"] === "1");
+    check("★ 形状编辑器按形状渲染（L 形 3 格亮）", lit.length === 3, `${lit.length} 格亮`);
+    check("★ 形状编辑器标出锚点且不可取消",
+      cells.some((n) => n.props["data-shape-cell"] === "0,0" && n.props.disabled === true),
+      cells.filter((n) => n.props.disabled === true).map((n) => n.props["data-shape-cell"]).join(","));
+    check("★ 形状编辑器网格比形状大一圈（能往外扩）",
+      cells.some((n) => String(n.props["data-shape-cell"]).startsWith("2,")) &&
+      cells.some((n) => String(n.props["data-shape-cell"]).endsWith(",2")),
+      `共 ${cells.length} 格`);
+    check("★ 形状编辑器的格子可点（有 onClick）",
+      cells.length > 0 && cells.every((n) => typeof n.props.onClick === "function"),
+      `${cells.length} 格`);
+    check("★ 形状编辑器也能显示矩形（2×2 → 4 格亮）",
+      byClassPart(render([[0, 0], [0, 1], [1, 0], [1, 1]]), "SPR_shapeCell")
+        .filter((n) => n.props["data-on"] === "1").length === 4,
+      `${byClassPart(render([[0, 0], [0, 1], [1, 0], [1, 1]]), "SPR_shapeCell").filter((n) => n.props["data-on"] === "1").length} 格亮`);
+  }
+
   // ★ 回归：数字输入框必须把新值**真的**交给上层。
   //
   // 曾经的 bug：5 处 `NumField` 传的是 `onCommit`，而组件解构的是 `onChange`
   // —— 失焦时抛 `onChange is not a function`，`itemDraft` 永远拿到旧值。
   // 界面看着一切正常、点保存也提示成功，实际提交的是旧数字
   // （真机表现就是「改了草地变体数、保存后还是 2」）。
+  // 占格改成形状编辑器后，编辑态的数字输入框只剩「变体数」一个。
   check("★ 编辑态的数字输入框带 data-num-field 标记（可被断言找到）",
-    byClassPart(editing, "SPR_field").filter((n) => n.props["data-num-field"] === "1").length >= 3,
+    byClassPart(editing, "SPR_field").filter((n) => n.props["data-num-field"] === "1").length >= 1,
     `${byClassPart(editing, "SPR_field").filter((n) => n.props["data-num-field"] === "1").length} 个`);
   // 组件层：拿到 `onCommit` 而不是 `onChange` 时必须**当场报错**，不许静默。
   {
