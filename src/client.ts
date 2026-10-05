@@ -1001,6 +1001,12 @@
       "正在渲染模板…": "Rendering templates…",
       "还没有模板 —— 点「生成模板（免费）」立刻看到结果。": "No templates yet — click 'Generate templates (free)' to see them right away.",
       "重跑中…": "Re-running…",
+      "地面": "Ground",
+      "装饰": "Decor",
+      "建筑": "Building",
+      "{n0} · 占 {n1}×{n2} 格": "{n0} · takes {n1}x{n2} cells",
+      "这里放不下这栋建筑（占 {n0}×{n1} 格，且不能压在别的建筑上）":
+        "The building does not fit here (it needs {n0}x{n1} cells and cannot overlap another building)",
       "{n0}（{n1}/{n2}）": "{n0} ({n1}/{n2})",
       "新增地块": "Add tile",
       "新增": "Add",
@@ -1655,6 +1661,9 @@
 .SPR_tileCard-editing{grid-column:1/-1}
 /* 地图布局编辑器：等距叠层，每个格子裁成菱形，只有菱形那部分能点 */
 .SPR_mapBrush{display:flex;gap:6px;flex-wrap:wrap}
+/* 笔刷按用途分组：地面 / 装饰 / 建筑，避免「刷树把草顶掉」这种误会 */
+.SPR_mapBrushGroup{display:inline-flex;align-items:center;gap:6px;padding:2px 6px;border-radius:8px;border:1px dashed var(--dsw-alias-border-l2)}
+.SPR_mapBrushLabel{font-size:11px;color:var(--dsw-alias-label-tertiary);white-space:nowrap}
 .SPR_mapEditorWrap{overflow:auto;max-height:460px;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;background:var(--dsw-alias-bg-layer-3);padding:8px}
 /* 缩放容器：外层占的是**缩放后**的尺寸，内层用 transform 缩放整张叠层 */
 .SPR_mapEditorFit{position:relative;margin:0 auto;overflow:hidden}
@@ -1662,6 +1671,12 @@
 .SPR_mapEditorCanvas{position:relative}
 /* 即时预览层：贴在格子下面，不接事件（点击交给上面的可点格子） */
 .SPR_mapArt{position:absolute;pointer-events:none;image-rendering:pixelated}
+/* 装饰与建筑层同理，都必须是绝对定位 —— 少了 position 它们会退回文档流，
+   top/left 完全不生效，表现是「所有装饰挤在画布左上角」（实测踩过）。 */
+.SPR_mapDecor{position:absolute;pointer-events:none;image-rendering:pixelated}
+.SPR_mapBuild{position:absolute;pointer-events:none}
+.SPR_mapBuildImg{position:absolute;image-rendering:pixelated}
+.SPR_mapUnder{opacity:1}
 .SPR_mapCell{position:absolute;padding:0;margin:0;border:none;background:rgba(90,150,60,.34);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:10px;line-height:1;color:transparent;transition:background .08s}
 .SPR_mapCell:hover{background:rgba(255,196,0,.55)}
 .SPR_mapCell-active{background:rgba(255,120,0,.6);outline:1px solid rgba(255,120,0,.9)}
@@ -5702,47 +5717,157 @@
         );
 
       /**
-       * 地图布局草稿：`cells[r][c]` 是地块 key。
+       * 地图布局草稿 —— **三层分开存**：
+       *   · `ground[r][c]`：地面地块键（空格 = 空地）
+       *   · `decor["r,c"]`：装饰键（与地面**独立**，所以树下面照样有草地）
+       *   · `buildings`：跨格建筑（锚点 + 占格 + 垫底地面）
        *
        * 为什么要有草稿：宿主每次 `saveTileMapCells` 都会作废下游（拼出来的图）。
        * 用户连续涂十几格如果每次都提交，就变成十几次往返 + 十几次作废。
        * 所以涂改只改草稿，点「保存布局」才提交一次。
+       *
+       * ⚠️ 以前是**单层**的：一格只存一个键。于是「刷一棵树」等于把草地换成树
+       * （树下面没有草地），而 2×2 的建筑也只能占一格。
        */
       const ensureMapDraft = () => {
         if (mapDraft !== null) return mapDraft;
         const rows = Math.max(1, mapRows);
         const cols = Math.max(1, mapCols);
-        const draft = [];
+        const ground = [];
         for (let r = 0; r < rows; r++) {
           const row = [];
-          for (let c = 0; c < cols; c++) row.push(project.map?.cells?.[r]?.[c] ?? "");
-          draft.push(row);
+          for (let c = 0; c < cols; c++) {
+            const key = project.map?.cells?.[r]?.[c] ?? "";
+            // 老项目里可能有人手涂过装饰/建筑键进 cells —— 那些不算地面
+            row.push(kindOf(key) === "terrain" ? key : "");
+          }
+          ground.push(row);
         }
+        const decor = {};
+        for (const [pos, entry] of Object.entries(project.preview?.decor ?? {})) {
+          const at = pos.split(",");
+          const r = Number.parseInt(at[0], 10);
+          const c = Number.parseInt(at[1], 10);
+          if (!Number.isFinite(r) || !Number.isFinite(c)) continue;
+          if (r >= rows || c >= cols) continue;
+          // ⚠️ 草稿里存的是**地块键**（`tree`），不是贴图路径。
+          // 存路径的话后面按键查变体会查不到，装饰**一个都画不出来**，
+          // 而且不报错（实测：预览里树全丢了）。
+          const key = keyOfVariant(String(entry[1]));
+          if (key !== "") decor[pos] = key;
+        }
+        const buildings = (project.preview?.buildings ?? []).map((b) => ({
+          r: b.r, c: b.c, fw: b.fw, fh: b.fh, key: keyOfVariant(b.cell), under: defaultUnder()
+        }));
+        const draft = { ground, decor, buildings };
         setMapDraft(draft);
         return draft;
       };
 
-      const draftRows = mapDraft?.length ?? 0;
-      const draftCols = mapDraft?.[0]?.length ?? 0;
+      /** 贴图相对路径 → 地块键（反查 `preview.cells`）。 */
+      const keyOfVariant = (rel) => {
+        for (const [key, list] of previewEntries()) {
+          if (list.includes(rel)) return key;
+        }
+        return "";
+      };
+      /** 把 `preview.cells` 规整成 `[键, 贴图数组][]`（宿主给的是 `unknown`）。 */
+      const previewEntries = () => {
+        const raw = project.preview?.cells ?? {};
+        const out = [];
+        for (const key of Object.keys(raw)) {
+          const list = raw[key];
+          if (Array.isArray(list)) out.push([key, list.filter((x) => typeof x === "string")]);
+        }
+        return out;
+      };
+      const kindOf = (key) => project.preview?.kinds?.[key] ?? "";
+      const footprintOf = (key) => project.preview?.footprints?.[key] ?? [1, 1];
+      /** 建筑底面垫底用哪种地面**地块键**（不是贴图路径）。 */
+      const defaultUnder = () => {
+        for (const [key, list] of previewEntries()) {
+          if ((project.preview?.kinds?.[key] ?? "") === "terrain" && list.length > 0) return key;
+        }
+        return "";
+      };
 
+      const draftRows = mapDraft?.ground?.length ?? 0;
+      const draftCols = mapDraft?.ground?.[0]?.length ?? 0;
+
+      /**
+       * 涂一格。按笔刷的**用途**决定写哪一层 —— 这是「树下面有草地」和
+       * 「2×2 建筑占 2×2 格」的关键。
+       */
       const paint = (r, c, key) => {
-        const draft = ensureMapDraft().map((row) => [...row]);
-        if (draft[r] === undefined || draft[r][c] === undefined) return;
-        draft[r][c] = key;
-        setMapDraft(draft);
+        const draft = ensureMapDraft();
+        const ground = draft.ground.map((row) => [...row]);
+        const decor = { ...draft.decor };
+        let buildings = draft.buildings.map((b) => ({ ...b }));
+        if (ground[r] === undefined || ground[r][c] === undefined) return;
+
+        // 橡皮擦：三层一起擦（用户想「这一格清干净」）
+        if (key === "") {
+          ground[r][c] = "";
+          delete decor[`${r},${c}`];
+          buildings = buildings.filter((b) => !(r >= b.r && r < b.r + b.fh && c >= b.c && c < b.c + b.fw));
+          setMapDraft({ ground, decor, buildings });
+          setCellKey(`${r},${c}`);
+          return;
+        }
+
+        const kind = kindOf(key);
+        if (kind === "decor") {
+          // 装饰只动装饰层：草地原样留着。
+          // ⚠️ 存的是**地块键**（`tree`），不是贴图路径 —— 宿主按 key#index 查变体，
+          // 存路径的话两份数据对不上，重载后装饰会静默消失。
+          decor[`${r},${c}`] = key;
+        } else if (kind === "building") {
+          const [fw, fh] = footprintOf(key);
+          // 占格要完整落在图内，且不能压在别的建筑上（否则拼图会把它跳过，
+          // 用户看到的预览与出图又会不一致）
+          const inside = r + fh <= ground.length && c + fw <= (ground[0]?.length ?? 0);
+          const clash = buildings.some((b) => !(r + fh <= b.r || b.r + b.fh <= r || c + fw <= b.c || b.c + b.fw <= c));
+          if (!inside || clash) {
+            setNotice({ kind: "error", text: T("这里放不下这栋建筑（占 {n0}×{n1} 格，且不能压在别的建筑上）", { n0: fw, n1: fh }) });
+            return;
+          }
+          buildings = buildings.filter((b) => !(r >= b.r && r < b.r + b.fh && c >= b.c && c < b.c + b.fw));
+          buildings.push({ r, c, fw, fh, key, under: defaultUnder() });
+          // 占格的地面清空：拼图会把这块单独画成建筑，这里留着会重复画一遍
+          for (let dr = 0; dr < fh; dr++) {
+            for (let dc = 0; dc < fw; dc++) {
+              ground[r + dr][c + dc] = "";
+              delete decor[`${r + dr},${c + dc}`];
+            }
+          }
+        } else {
+          // 地面（含未知键）：只动地面层
+          ground[r][c] = key;
+          delete decor[`${r},${c}`];
+        }
+        setMapDraft({ ground, decor, buildings });
         setCellKey(`${r},${c}`);
       };
 
-      /** 按草稿尺寸重建空布局（改行列时用）。 */
+      /** 按草稿尺寸重建布局（改行 / 列时用）。**保留已有内容**，只裁 / 扩。 */
       const resizeDraft = (rows, cols) => {
-        const previous = mapDraft ?? project.map?.cells ?? [];
-        const draft = [];
+        const current = mapDraft ?? ensureMapDraft();
+        const ground = [];
         for (let r = 0; r < rows; r++) {
           const row = [];
-          for (let c = 0; c < cols; c++) row.push(previous[r]?.[c] ?? "");
-          draft.push(row);
+          for (let c = 0; c < cols; c++) row.push(current.ground?.[r]?.[c] ?? "");
+          ground.push(row);
         }
-        setMapDraft(draft);
+        const decor = {};
+        for (const [pos, rel] of Object.entries(current.decor ?? {})) {
+          const at = pos.split(",");
+          const r = Number.parseInt(at[0], 10);
+          const c = Number.parseInt(at[1], 10);
+          if (r < rows && c < cols) decor[pos] = rel;
+        }
+        // 超出新边界的建筑丢掉（留着会让拼图跳过它，预览与出图就不一致了）
+        const buildings = (current.buildings ?? []).filter((b) => b.r + b.fh <= rows && b.c + b.fw <= cols);
+        setMapDraft({ ground, decor, buildings });
       };
 
       const saveMapDraft = async () => {
@@ -5750,24 +5875,37 @@
         if (draft === null) return;
         await api.saveTileMapCells({
           projectId: project.id,
-          cells: draft,
+          cells: draft.ground,
           seed: mapSeed,
-          decor: project.map?.decor ?? {}
+          decor: draft.decor,
+          layouts: draft.buildings.map((b) => ({
+            r: b.r, c: b.c, width: b.fw, height: b.fh, key: b.key, under: b.under
+          }))
         });
         setNotice({ kind: "info", text: T("布局已保存。点「铺成地图」重新出图。") });
       };
 
-      /** 把草稿里所有非空格子换成指定类别（「刷满」）。 */
+      /**
+       * 把**地面层**整片刷成指定类别（「全刷成当前笔刷」/「全部清空」）。
+       *
+       * 只动地面：刷满草地不该顺手把装饰和建筑抹掉（那是用户另外摆的东西）。
+       * 只有「全部清空」才三层一起清。
+       */
       const fillDraft = (key) => {
         const rows = Math.max(1, mapRows);
         const cols = Math.max(1, mapCols);
-        const draft = [];
+        const current = mapDraft ?? ensureMapDraft();
+        const ground = [];
         for (let r = 0; r < rows; r++) {
           const row = [];
           for (let c = 0; c < cols; c++) row.push(key);
-          draft.push(row);
+          ground.push(row);
         }
-        setMapDraft(draft);
+        setMapDraft({
+          ground,
+          decor: key === "" ? {} : { ...current.decor },
+          buildings: key === "" ? [] : current.buildings
+        });
       };
 
       /** 预览里叠一层可点的格子。用 CSS 等距定位，跟拼图用的是同一套步长。 */
@@ -5775,8 +5913,8 @@
         if (mapDraft === null) return null;
         const cw = project.settings?.cellWidth ?? 64;
         const ch = project.settings?.cellHeight ?? 96;
-        const rows = mapDraft.length;
-        const cols = mapDraft[0]?.length ?? 0;
+        const rows = mapDraft.ground.length;
+        const cols = mapDraft.ground[0]?.length ?? 0;
         // 拼图放大 2 倍交付（见宿主 runMapStage 的 upscale），预览图也是放大后的，
         // 所以叠层也要 ×2。这里的公式与宿主 `tileLayout` / `tileOriginAt`
         // （src/tilemap.ts）**逐字对应** —— 浏览器半区不能 import 宿主代码，
@@ -5802,34 +5940,116 @@
         const fit = Math.max(0.1, Math.min(1, 900 / canvasW));
         const fitW = Math.round(canvasW * fit);
         const fitH = Math.round(canvasH * fit);
-        /** 这一格要贴哪张图。用行列定索引，保证同一格每次渲染都是同一张（不闪）。 */        const preview = project.preview?.cells ?? {};
-        const artAt = (key, r, c) => {
-          const list = preview[key];
-          if (list === undefined || list.length === 0) return null;
-          return list[(r * 7 + c * 13) % list.length];
+        /**
+         * 即时预览：把「地面 → 装饰 → 建筑」三层按等距位置摆上去，
+         * 顺序与宿主 `assembleMap` 一致（远的先画、近的盖住远的）。
+         *
+         * 三层都读**草稿**（不是成品），所以涂一格立刻变；
+         * 而草稿本身是从成品加载来的，所以刚点开看到的就是刚才那张图。
+         * 变体下标用与宿主**同一个** `pickVariantIndex`（位置 + 种子），
+         * 所以预览挑到的变体和出图完全一样。
+         */
+        const pv = project.preview ?? {};
+        const pvCells = pv.cells ?? {};
+        const seed = typeof mapSeed === "number" ? mapSeed : (project.map?.seed ?? 0);
+        const artUrl = (rel) => `${project.assetBase}${rel}?v=${encodeURIComponent(project.updatedAt ?? "")}`;
+        /** 与宿主 `tilemap.pickVariantIndex` 逐字同构（浏览器半区不能 import 宿主代码）。 */
+        const pickVariantIndex = (s, r, c, count) => {
+          if (count <= 1) return 0;
+          let h = (s ^ 0x9e3779b9) >>> 0;
+          h = Math.imul(h ^ (r + 0x85ebca6b), 0xc2b2ae35) >>> 0;
+          h = Math.imul(h ^ (c + 0x27d4eb2f), 0x165667b1) >>> 0;
+          h = (h ^ (h >>> 15)) >>> 0;
+          return h % count;
         };
+        /**
+         * 装饰的地面线（1× 像素）—— 与宿主 `tilegeom.decorAnchorY` **同一公式**：
+         * `round(cellHeight/2 + diamondHeight/2 − diamondHeight/4 − 2)`，
+         * 其中 `diamondHeight = cellWidth/2`。64×96 → 54。
+         */
+        const decorAnchor = Math.round(ch / 2 + cw / 4 - cw / 8 - 2);
+        const variantArt = (key, r, c) => {
+          const list = pvCells[key];
+          if (list === undefined || list.length === 0) return null;
+          return list[pickVariantIndex(seed, r, c, list.length)];
+        };
+        const under = [];
         const layers = [];
+        const decor = [];
+        const builds = [];
         const cells = [];
+        // 建筑底面的垫底：建筑贴图只覆盖它自己那块形状，底面菱形的四角是透明的，
+        // 不垫一层就会露出洞（与宿主 `fillDiamondSolid` 同一个目的）。
+        // 用 `<img>` 再 `clip-path` 裁成菱形摆进去 —— 天然带地面配色。
+        for (const b of mapDraft.buildings) {
+          const x = Math.round(originX + (b.c - b.r) * stepX) - trimLeft;
+          const y = Math.round(originY + (b.c + b.r) * stepY) - trimTop;
+          const w = cw * ((b.fw + b.fh) / 2) * scale;
+          const hh = w / 2;
+          if (b.under !== "") {
+            // 垫底的草贴图：先按地块键查第一张（草通常只有一个变体）
+            const underArt = (project.preview?.cells?.[b.under] ?? [])[0] ?? b.under;
+            under.push(h("img", {
+              key: `u${b.r},${b.c}`,
+              className: "SPR_mapArt SPR_mapUnder",
+              src: artUrl(underArt),
+              alt: `under ${b.r},${b.c}`,
+              style: {
+                left: `${x + (cw * scale) / 2 - w / 2}px`,
+                top: `${y + (ch * scale) / 2 - hh / 2}px`,
+                width: `${w}px`, height: `${hh}px`,
+                clipPath: "polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)"
+              }
+            }));
+          }
+        }
+        // 被建筑占掉的格子不画地面（与宿主口径一致：建筑单独 blit）
+        const occupiedByBuilding = new Set();
+        for (const b of mapDraft.buildings) {
+          for (let dr = 0; dr < b.fh; dr++) {
+            for (let dc = 0; dc < b.fw; dc++) occupiedByBuilding.add(`${b.r + dr},${b.c + dc}`);
+          }
+        }
         for (let r = 0; r < rows; r++) {
           for (let c = 0; c < cols; c++) {
-            const key = mapDraft[r][c];
+            const key = mapDraft.ground[r][c];
             const x = Math.round(originX + (c - r) * stepX) - trimLeft;
             const y = Math.round(originY + (c + r) * stepY) - trimTop;
-            // ★ 即时预览：把这一格的地块贴图按等距位置直接摆上去。
-            // 与「铺成地图」的差别只有变体随机与跨格建筑的遮挡 ——
-            // 布局本身所见即所得，涂一格立刻变，不必先保存再铺。
-            const art = key === "" ? null : artAt(key, r, c);
+            const occupied = occupiedByBuilding.has(`${r},${c}`);
+            const art = key === "" || occupied ? null : variantArt(key, r, c);
             if (art !== null) {
               layers.push(h("img", {
                 key: `a${r},${c}`,
                 className: "SPR_mapArt",
-                src: `${project.assetBase}${art}?v=${encodeURIComponent(project.updatedAt ?? "")}`,
+                src: artUrl(art),
                 alt: `${r},${c} ${key}`,
-                style: {
-                  left: `${x}px`, top: `${y}px`,
-                  width: `${cw * scale}px`, height: `${ch * scale}px`
-                }
+                style: { left: `${x}px`, top: `${y}px`, width: `${cw * scale}px`, height: `${ch * scale}px` }
               }));
+            }
+            // 装饰：与地面**独立**的一层，所以树下面照样有草地。
+            //
+            // ⚠️ 摆放口径必须与宿主 `regularizeDecorSprite` 一致：
+            // 贴图底边（站地点）对齐单元格的**地面线** `decorAnchorY`，不是格子底边。
+            // 写成「格子底边」会让装饰整体浮到地图上方（实测树全飘在图外面）。
+            // 贴图高度只有加载后才知道，所以用 `translateY(-100%)` 让底边贴住锚点。
+            const decKey = mapDraft.decor[`${r},${c}`];
+            if (typeof decKey === "string" && decKey !== "" && !occupied) {
+              const decArt = variantArt(decKey, r, c);
+              if (decArt !== null) {
+                decor.push(h("img", {
+                  key: `d${r},${c}`,
+                  className: "SPR_mapDecor",
+                  src: artUrl(decArt),
+                  alt: `decor ${r},${c}`,
+                  style: {
+                    left: `${x}px`,
+                    top: `${y + decorAnchor * scale}px`,
+                    width: `${cw * scale}px`,
+                    height: `${ch * scale}px`,
+                    transform: "translateY(-100%)"
+                  }
+                }));
+              }
             }
             cells.push(h("button", {
               key: `${r},${c}`,
@@ -5846,6 +6066,56 @@
             }, h("span", { className: "SPR_mapCellLabel" }, key === "" ? "" : key.slice(0, 4))));
           }
         }
+
+        // ★ 跨格建筑：按**占格**摆，不是按一格。
+        // 以前预览把建筑当 1×1 地块画，所以「本应该 2×2 的房屋只占一格」。
+        //
+        // 尺寸要靠图片的**自然宽高**才知道（宿主没传，传了也要靠 JS 算），
+        // 这里交给浏览器：图片按目标底面宽 / 自然宽 做 `scale`，
+        // 再按 `baseFraction` 把底面中心对到锚点格中心 —— 这正是宿主
+        // `regularizeBuilding` + `assembleMap` 那两步的 CSS 等价写法。
+        const buildWidth = (fw, fh) => cw * ((fw + fh) / 2) * scale;
+        for (const b of mapDraft.buildings) {
+          const x = Math.round(originX + (b.c - b.r) * stepX) - trimLeft;
+          const y = Math.round(originY + (b.c + b.r) * stepY) - trimTop;
+          // 锚点：（锚点格的几何中心）在叠层坐标里的位置
+          const anchorX = x + (cw * scale) / 2;
+          const anchorY2 = y + (ch * scale) / 2;
+          const art = variantArt(b.key, b.r, b.c);
+          if (art === null) continue;
+          const bf = project.preview?.buildings?.find((e) => e.r === b.r && e.c === b.c)?.baseFraction;
+          builds.push(h("div", {
+            key: `b${b.r},${b.c}`,
+            className: "SPR_mapBuild",
+            style: { left: "0px", top: "0px", width: `${canvasW}px`, height: `${canvasH}px` }
+          }, h("img", {
+            className: "SPR_mapBuildImg",
+            src: artUrl(art),
+            alt: `building ${b.r},${b.c}`,
+            "data-w": String(buildWidth(b.fw, b.fh)),
+            "data-bx": String(anchorX),
+            "data-by": String(anchorY2),
+            "data-bf": String(typeof bf === "number" ? bf : 0.5),
+            "data-cw": String(cw * scale),
+            ref: (el) => {
+              if (el === null) return;
+              const fit = () => {
+                const nw = el.naturalWidth || 1;
+                const nh = el.naturalHeight || 1;
+                const bf = Number(el.dataset.bf) || 0.5;
+                const k = (Number(el.dataset.w) || nw) / nw;
+                // transform-origin 设在「底面中心」：缩放时底面中心不动，
+                // 于是只要把左上角摆到「底面中心 − 底面中心在贴图里的偏移」即可。
+                el.style.transformOrigin = `${nw / 2}px ${bf * nh}px`;
+                el.style.transform = `scale(${k})`;
+                el.style.left = `${(Number(el.dataset.bx) || 0) - nw / 2}px`;
+                el.style.top = `${(Number(el.dataset.by) || 0) - bf * nh}px`;
+              };
+              if (el.complete) fit();
+              else el.addEventListener("load", fit, { once: true });
+            }
+          })));
+        }
         return h("div", { className: "SPR_mapEditorWrap" },
           h("p", { className: "SPR_muted" }, T("下面的预览就是当前草稿：涂一格立刻变，不用先保存。")),
           // 等比缩放到容器宽度，让整张图一眼看得见。
@@ -5860,7 +6130,10 @@
               style: { width: `${canvasW}px`, height: `${canvasH}px`, transform: `scale(${fit})` }
             },
               h("div", { className: "SPR_mapEditorCanvas", style: { width: `${canvasW}px`, height: `${canvasH}px` } },
+                under,
                 layers,
+                decor,
+                builds,
                 cells
               )
             )
@@ -5901,13 +6174,23 @@
           h("div", { className: "SPR_tileEditorRow" },
             h("span", { className: "SPR_fieldLabel" }, T("笔刷（点格子刷上去）")),
             h("div", { className: "SPR_mapBrush" },
-              ...project.items.map((item) => h("button", {
-                key: item.key,
-                type: "button",
-                className: `SPR_btn SPR_btn-mini${brushKey === item.key ? " SPR_btn-on" : ""}`,
-                onClick: () => setBrushKey(item.key),
-                title: `${item.key} · ${item.family}`
-              }, item.label)),
+              // 按用途分组：点「地面」只换草皮、点「装饰」是**加**一棵树（草地还在）、
+              // 点「建筑」按它的占格整块放下。混在一起会让用户以为刷树会把草顶掉。
+              ...["terrain", "decor", "building"].map((kind) =>
+                h("span", { key: kind, className: "SPR_mapBrushGroup" },
+                  h("span", { className: "SPR_mapBrushLabel" },
+                    kind === "terrain" ? T("地面") : kind === "decor" ? T("装饰") : T("建筑")),
+                  ...project.items.filter((item) => item.kind === kind).map((item) => h("button", {
+                    key: item.key,
+                    type: "button",
+                    className: `SPR_btn SPR_btn-mini${brushKey === item.key ? " SPR_btn-on" : ""}`,
+                    onClick: () => setBrushKey(item.key),
+                    title: kind === "building"
+                      ? T("{n0} · 占 {n1}×{n2} 格", { n0: item.key, n1: item.footprint[0], n2: item.footprint[1] })
+                      : `${item.key} · ${item.family}`
+                  }, item.label))
+                )
+              ),
               h("button", {
                 type: "button",
                 className: `SPR_btn SPR_btn-mini${brushKey === "__erase__" ? " SPR_btn-on" : ""}`,

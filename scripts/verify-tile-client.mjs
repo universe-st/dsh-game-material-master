@@ -326,6 +326,20 @@ function makeProject(overrides = {}) {
 //      + useStudioIntent(useState)。effect / callback 不占状态槽。
 // **新增状态时这个数字必须跟着改** —— 它是「槽位没串位」的唯一护栏。
 const EXPECTED_HOOKS = 23;
+/**
+ * 把测试里写的「扁平 cells 网格」补成三层草稿。
+ * 断言里仍然可以只关心地面，所以旧写法继续可用。
+ */
+function normalizeDraft(draft) {
+  if (draft === null || draft === undefined) return null;
+  if (Array.isArray(draft)) return { ground: draft, decor: {}, buildings: [] };
+  return {
+    ground: draft.ground ?? [],
+    decor: draft.decor ?? {},
+    buildings: draft.buildings ?? []
+  };
+}
+
 function renderTile(project, options = {}) {
   const { projects = [], stage = "template", styleDraft, nameDraft, ...drafts } = options;
   HOOK.slots = [
@@ -348,7 +362,9 @@ function renderTile(project, options = {}) {
     drafts.newItem ?? null,
     drafts.brushKey ?? null,
     drafts.cellKey ?? null,
-    drafts.mapDraft ?? null,
+    // 草稿是**三层**的：地面 / 装饰 / 建筑（见 client.ts 里 ensureMapDraft 的注释）。
+    // 传数组会被当成旧形状而炸，所以这里统一补成对象。
+    normalizeDraft(drafts.mapDraft),
     // 19~22 是 usePendingTasks / useStudioIntent 内部的状态槽，测试没法从外面注入
     undefined, undefined, undefined, undefined
   ];
@@ -640,6 +656,136 @@ section("② 生成阶段：地块清单的增 / 删 / 改");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+section("④ 拼图阶段：三层编辑（地面 / 装饰 / 建筑）");
+// ═══════════════════════════════════════════════════════════════════════════
+{
+  // 一份「有地面、有装饰、有一栋 2×2 建筑」的宿主视角夹具
+  const preview = {
+    cells: {
+      grass: ["cell/grass.v1.png"],
+      dirt: ["cell/dirt.v1.png"],
+      rock: ["cell/rock.v1.png"],
+      tree: ["decor/tree.v1.png"],
+      building: ["cell/building.v1.png"]
+    },
+    kinds: { grass: "terrain", dirt: "terrain", rock: "terrain", tree: "decor", building: "building" },
+    footprints: { grass: [1, 1], dirt: [1, 1], rock: [1, 1], tree: [1, 1], building: [2, 2] },
+    cellWidth: 64,
+    cellHeight: 96,
+    seed: 5,
+    ground: [[0, 0, 0], [0, -1, 0], [0, 0, 0]],
+    decor: { "1,1": [0, "decor/tree.v1.png"] },
+    buildings: [{ r: 2, c: 1, fw: 2, fh: 2, index: 0, cell: "cell/building.v1.png", baseFraction: 0.5 }],
+    groundUnder: "cell/grass.v1.png"
+  };
+  const ground = [["grass", "grass", "grass"], ["grass", "grass", "dirt"], ["grass", "grass", "grass"]];
+  const draft = {
+    ground,
+    decor: { "1,1": "tree" },
+    buildings: [{ r: 2, c: 1, fw: 2, fh: 2, key: "building", under: "cell/grass.v1.png" }]
+  };
+  const items = [
+    makeItem({ key: "grass", label: "草地", kind: "terrain", family: "grass" }),
+    makeItem({ key: "dirt", label: "土地", kind: "terrain", family: "dirt" }),
+    makeItem({ key: "tree", label: "阔叶树", kind: "decor", family: "tree", mode: "plain" }),
+    makeItem({ key: "building", label: "中世纪石屋", kind: "building", family: "building", mode: "grid2x2", footprint: [2, 2] })
+  ];
+  const tree = renderTile(
+    makeProject({
+      items,
+      preview,
+      map: { rows: 3, cols: 3, seed: 5, cells: ground, decor: { "1,1": "tree" }, buildings: [], buildingGround: [], png: "map/map.png", json: "map/map.json", pixel: { width: 320, height: 288, left: 0, top: 100, scale: 2 } }
+    }),
+    { stage: "map", brushKey: "tree", mapDraft: draft, cellKey: "1,1" }
+  ).tree;
+
+  check("笔刷按用途分成地面 / 装饰 / 建筑三组",
+    allText(tree).includes("地面") && allText(tree).includes("装饰") && allText(tree).includes("建筑"),
+    allText(tree).slice(0, 160));
+  // ★ 树下面必须有草地：装饰是独立一层，地面贴图仍然在
+  const arts = byClassPart(tree, "SPR_mapArt");
+  const decors = byClassPart(tree, "SPR_mapDecor");
+  const builds = byClassPart(tree, "SPR_mapBuild");
+  check("装饰单独成层（SPR_mapDecor 存在）", decors.length === 1, `${decors.length} 个`);
+  check("★ 树那一格同时有草地（装饰不顶掉地面）",
+    arts.some((n) => String(n.props.alt).startsWith("1,1 ") && String(n.props.src).includes("grass")),
+    arts.map((n) => n.props.alt).join(" | "));
+  check("装饰贴在树那一格", String(decors[0]?.props.alt) === "decor 1,1", String(decors[0]?.props.alt));
+  // ★ 2×2 建筑：占格的地面被让开，建筑按占格宽摆
+  check("建筑单独成层", builds.length === 1, `${builds.length} 个`);
+  const bimg = collect(builds[0], (n) => n.type === "img")[0];
+  check("★ 建筑贴图按占格宽度摆（2×2 → 4 个半宽 = 256px）",
+    Number.parseFloat(String(bimg?.props["data-w"])) === 256,
+    String(bimg?.props["data-w"]));
+  // 期望值按宿主那套公式现算，别手写常量（手算容易把 originY/trim 弄错）
+  {
+    const cw = 64, ch = 96, scale = 2, rows = 3, cols = 3;
+    const stepX = (cw / 2) * scale, stepY = (cw / 4) * scale;
+    const originX = (rows - 1) * stepX, originY = ch * scale;
+    const trimLeft = 0, trimTop = 100;
+    const x = Math.round(originX + (1 - 2) * stepX) - trimLeft;
+    const y = Math.round(originY + (1 + 2) * stepY) - trimTop;
+    check("建筑底面中心对到锚点格的几何中心",
+      bimg !== undefined &&
+      Number.parseFloat(String(bimg.props["data-bx"])) === x + (cw * scale) / 2 &&
+      Number.parseFloat(String(bimg.props["data-by"])) === y + (ch * scale) / 2,
+      `bx=${bimg?.props["data-bx"]} by=${bimg?.props["data-by"]} 期望 ${x + (cw * scale) / 2},${y + (ch * scale) / 2}`);
+    void cols;
+  }
+  check("被建筑占掉的格子不再画地面",
+    !arts.some((n) => String(n.props.alt).startsWith("2,1 ") || String(n.props.alt).startsWith("2,2 ")),
+    arts.map((n) => n.props.alt).join(" | "));
+  check("建筑底面有垫底（SPR_mapUnder）", byClassPart(tree, "SPR_mapUnder").length === 1,
+    `${byClassPart(tree, "SPR_mapUnder").length} 个`);
+
+  // ★ 回归：草稿里装饰必须存**地块键**（`tree`），不能存贴图路径。
+  // 存路径的话后面按键查变体查不到，装饰会**静默全丢**（实测预览里树一个都不剩）。
+  // 这里用差分断言：同一份数据，草稿存键 vs 存路径，只有前者能画出装饰。
+  {
+    const mk = (decorValue) => renderTile(
+      makeProject({
+        items,
+        preview,
+        map: { rows: 3, cols: 3, seed: 5, cells: ground, decor: { "1,1": "tree" }, buildings: [], buildingGround: [], png: "map/map.png", json: "map/map.json", pixel: { width: 320, height: 288, left: 0, top: 100, scale: 2 } }
+      }),
+      { stage: "map", brushKey: "tree", mapDraft: { ground, decor: { "1,1": decorValue }, buildings: [] } }
+    ).tree;
+    const byKey = byClassPart(mk("tree"), "SPR_mapDecor");
+    const byPath = byClassPart(mk("decor/tree.v1.png"), "SPR_mapDecor");
+    check("★ 草稿存地块键时装饰画得出来", byKey.length === 1, `${byKey.length} 个`);
+    check("★ 草稿存贴图路径时装饰画不出来（证明键才是对的）", byPath.length === 0,
+      `${byPath.length} 个`);
+    check("装饰贴图指向 decor/ 目录",
+      String(byKey[0]?.props.src).includes("/decor/"), String(byKey[0]?.props.src));
+
+    // ★ 装饰的落地线必须与宿主 `decorAnchorY` 一致。
+    // 写成「格子底边」会让装饰整体浮到地图上方（实测树全飘在图外）。
+    // 期望值按该装饰**自己那一格**现算，别硬编码行列。
+    {
+      const host = await import("../lib/tilegeom.js");
+      const anchorPx = host.decorAnchorY(SETTINGS) * 2;   // 叠层是交付尺寸（2×）
+      const style = byKey[0]?.props.style ?? {};
+      const at = /^decor (\d+),(\d+)$/.exec(String(byKey[0]?.props.alt));
+      const [r, c] = at === null ? [1, 1] : [Number(at[1]), Number(at[2])];
+      const scale = 2;
+      const rows = 3;
+      const stepY = (SETTINGS.cellWidth / 4) * scale;
+      const originY = SETTINGS.cellHeight * scale;
+      const trimTop = 100;   // 夹具里的 map.pixel.top
+      const y = Math.round(originY + (c + r) * stepY) - trimTop;
+      check("★ 装饰底边对齐宿主 decorAnchorY（不是格子底边）",
+        Number.parseFloat(String(style.top)) === y + anchorPx,
+        `界面 top=${style.top} 期望 ${y + anchorPx}（格 (${r},${c}) 的 y=${y} + 锚点 ${anchorPx}）`);
+      void rows;
+      check("装饰用 translateY(-100%) 让底边贴住锚点",
+        String(style.transform) === "translateY(-100%)", String(style.transform));
+      check("宿主 decorAnchorY 确实是 54（64×96 的基准值）", host.decorAnchorY(SETTINGS) === 54,
+        String(host.decorAnchorY(SETTINGS)));
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 section("④ 拼图阶段：手动编辑布局");
 // ═══════════════════════════════════════════════════════════════════════════
 {
@@ -694,8 +840,7 @@ section("④ 拼图阶段：手动编辑布局");
       notReadyText.includes("还没有模板") && notReadyText.includes("生成模板"),
       notReadyText.slice(0, 200));
 
-    const ready = renderTile(makeProject({ stages: { ...makeProject().stages, template: { status: "done" } } }), { stage: "template" }).tree;
-    const imgs = collect(ready, (n) => n.type === "img");
+    const ready = renderTile(makeProject({ stages: { ...makeProject().stages, template: { status: "done" } } }), { stage: "template" }).tree;    const imgs = collect(ready, (n) => n.type === "img");
     check("模板生成后渲染两张模板图", imgs.length === 2, `${imgs.length} 张`);
     check("模板图的 src 指向 template/",
       imgs.every((n) => String(n.props.src).includes("/template/")),

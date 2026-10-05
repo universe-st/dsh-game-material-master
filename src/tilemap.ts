@@ -191,6 +191,27 @@ function averageColor(src: Bitmap): [number, number, number] {
   return [r / n, g / n, b / n];
 }
 
+/**
+ * 按「位置 + 种子」**确定性地**挑一个变体。
+ *
+ * 为什么必须确定性（而不是随机）：
+ *   · 界面要在**不花钱、不跑拼图**的前提下先预览出来，它得自己挑变体；
+ *   · 宿主若用 `Math.random()`，预览与成品就永远对不上 ——
+ *     用户看到「预览和出图不一样」，会以为编辑的不是刚才那张。
+ *
+ * 位置相关的整数哈希，两边各算一次必然相同。种子参与运算，
+ * 所以「换个种子重铺」仍然能换出一张不一样的图。
+ */
+export function pickVariantIndex(seed: number, r: number, c: number, count: number): number {
+  if (count <= 1) return 0;
+  const s = Number.isFinite(seed) ? Math.trunc(seed) : 0;
+  let h = (s ^ 0x9e3779b9) >>> 0;
+  h = Math.imul(h ^ (r + 0x85ebca6b), 0xc2b2ae35) >>> 0;
+  h = Math.imul(h ^ (c + 0x27d4eb2f), 0x165667b1) >>> 0;
+  h = (h ^ (h >>> 15)) >>> 0;
+  return h % count;
+}
+
 export function assembleMap(
   lookup: Map<string, Bitmap>,
   state: TileMapState,
@@ -226,7 +247,6 @@ export function assembleMap(
     groundByBuilding.set(`${entry[0]},${entry[1]}`, { key: entry[4], fw: entry[2], fh: entry[3] });
   }
 
-  const rng = mulberry32(state.seed);
   const decorAt = new Map<string, string[]>();
   for (const [key, name] of Object.entries(state.decor)) decorAt.set(key, [...(decorAt.get(key) ?? []), name]);
 
@@ -242,7 +262,10 @@ export function assembleMap(
     if (family !== "") {
       const candidates = (options.families[family] ?? [family]).filter((k) => lookup.has(k));
       if (candidates.length > 0) {
-        const pick = candidates[Math.floor(rng() * candidates.length)];
+        // ⚠️ 变体选择必须是**确定性**的（位置 + 种子），不能 `Math.random()`：
+        // 界面要在不跑拼图的前提下先预览出来，用随机就永远对不上，
+        // 用户会以为「预览的不是成品」。界面用同一个函数各算一次。
+        const pick = candidates[pickVariantIndex(state.seed, r, c, candidates.length)];
         const cell = lookup.get(pick)!;
         const { x, y } = at(r, c);
         blit(out, canvasW, canvasH, cell, x, y);

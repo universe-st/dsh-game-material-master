@@ -548,7 +548,14 @@ const runTileMapSchema = z.object({
   cols: z.number().optional(),
   seed: z.number().optional(),
   fill: z.string().optional(),
-  decorDensity: z.number().optional()
+  decorDensity: z.number().optional(),
+  /**
+   * 重撒装饰与建筑布局（「换个种子重铺」）。
+   *
+   * ⚠️ 必须声明：typert 会**静默丢掉** schema 之外的键。
+   * 漏了它的表现是「点了换个种子，图却一模一样」—— 不报任何错。
+   */
+  reroll: z.boolean().optional()
 });
 const saveTileMapCellsSchema = z.object({
   projectId: z.string(),
@@ -557,7 +564,15 @@ const saveTileMapCellsSchema = z.object({
   seed: z.number().optional(),
   cells: z.array(z.array(z.string())).optional(),
   decor: z.record(z.string(), z.string()).optional(),
-  buildings: z.array(z.array(z.unknown())).optional()
+  buildings: z.array(z.array(z.unknown())).optional(),
+  /**
+   * 跨格建筑（界面「手动编辑布局」回传）。
+   *
+   * ⚠️ 必须在 schema 里声明：typert 按声明校验 payload，**没声明的键会被静默丢掉**。
+   * 少了它界面就传不进建筑，拼图只能在「cells 里还有建筑键」时反推 ——
+   * 而占格一旦被清空（拼图自己就会清）就再也推不出来，建筑会凭空消失。
+   */
+  layouts: z.array(z.record(z.string(), z.unknown())).optional()
 });
 
 export const METHODS: MethodSpec[] = [  { method: "getConfig", result: configViewSchema },

@@ -398,6 +398,110 @@ section("④ 拼图 / ⑤ 导出（走网关，免费）");
         (b3.map.buildings ?? []).length === 0 && (b3.map.buildingGround ?? []).length === 0,
         JSON.stringify({ buildings: b3.map.buildings, ground: b3.map.buildingGround }));
     }
+
+    // ── 布局是唯一真源：重拼不得重新随机 ────────────────────────────────
+    // 不冻住的话，用户「开始编辑布局」拿到的和刚才看到的不是同一张 ——
+    // 这正是「编辑的不是刚才随机生成的那个」的来源。
+    {
+      // 撒装饰需要有装饰变体；借用地块贴图给 tree 造一个
+      const grassForDecor = (await studio.getTileProject({ projectId: id }))
+        .items.find((i) => i.variants.length > 0)?.variants[0]?.cell;
+      if (typeof grassForDecor === "string") {
+        const bytes = await readFile(tilegen.tileAssetPath(id, grassForDecor));
+        await mkdir(join(tilegen.tileProjectDir(id), "decor"), { recursive: true });
+        await writeFile(join(tilegen.tileProjectDir(id), "decor", "tree.v1.png"), bytes);
+        await tilegen.patchTileProject(id, (fresh) => {
+          const t = fresh.items.find((i) => i.key === "tree");
+          if (t !== undefined && t.variants[0]?.cell === undefined) {
+            t.variants[0] = { index: 0, cell: "decor/tree.v1.png", approved: true, report: { mode: "sprite", scale: [1, 1] } };
+          }
+        });
+      }
+      await studio.saveTileMapCells({
+        projectId: id,
+        cells: Array.from({ length: 6 }, () => Array.from({ length: 6 }, () => "grass")),
+        seed: 12345,
+        decor: {}
+      });
+      await studio.runTileMap({ projectId: id, rows: 6, cols: 6, seed: 12345, fill: "grass", decorDensity: 0.3 });
+      await waitIdle(id);
+      const m1 = await studio.getTileProject({ projectId: id });
+      const decor1 = JSON.stringify(m1.map.decor);
+
+      await studio.runTileMap({ projectId: id, rows: 6, cols: 6, seed: 12345, fill: "grass", decorDensity: 0.3 });
+      await waitIdle(id);
+      const m2 = await studio.getTileProject({ projectId: id });
+      check("★ 重拼不会重新随机装饰（布局是唯一真源）",
+        JSON.stringify(m2.map.decor) === decor1,
+        `第一次 ${Object.keys(JSON.parse(decor1)).length} 个 vs 第二次 ${Object.keys(m2.map.decor ?? {}).length} 个`);
+      check("重拼后地面布局也没变",
+        JSON.stringify(m2.map.cells) === JSON.stringify(m1.map.cells));
+
+      await studio.runTileMap({ projectId: id, rows: 6, cols: 6, seed: 999, fill: "grass", decorDensity: 0.3, reroll: true });
+      await waitIdle(id);
+      const m3 = await studio.getTileProject({ projectId: id });
+      check("显式 reroll 时才会重撒装饰", Object.keys(m3.map.decor ?? {}).length > 0,
+        `${Object.keys(m3.map.decor ?? {}).length} 个`);
+    }
+
+    // ── 界面回传 layouts：建筑要能原样往返 ──────────────────────────────
+    {
+      await tilegen.patchTileProject(id, (fresh) => {
+        const b = fresh.items.find((i) => i.key === "building");
+        if (b !== undefined && b.variants[0]?.cell === undefined) {
+          b.variants[0] = {
+            index: 0, cell: "cell/building.v1.png", approved: true,
+            report: { mode: "measured", scale: [1, 1], baseFraction: 0.5 }
+          };
+        }
+      });
+      await studio.saveTileMapCells({
+        projectId: id,
+        cells: Array.from({ length: 6 }, () => Array.from({ length: 6 }, () => "grass")),
+        seed: 7,
+        decor: {},
+        layouts: [{ r: 2, c: 2, width: 2, height: 2, key: "building", under: "grass#0" }]
+      });
+      const L = await studio.getTileProject({ projectId: id });
+      check("★ 界面回传的 layouts 落成了建筑记录",
+        (L.map.buildings ?? []).length === 1 && String(L.map.buildings[0][2]).startsWith("building#"),
+        JSON.stringify(L.map.buildings));
+      check("layouts 的占格与垫底地面一并落盘",
+        JSON.stringify(L.map.buildingGround?.[0]?.slice(0, 4)) === "[2,2,2,2]",
+        JSON.stringify(L.map.buildingGround));
+      check("回传 layouts 时占格被留空（不重复画地面）",
+        L.map.cells[2][2] === "" && L.map.cells[3][3] === "",
+        JSON.stringify(L.map.cells[2]));
+    }
+
+    // ── 装饰回传：**地块键**与**贴图路径**两种写法都要认 ──────────────
+    // 界面回传键，早期数据里可能是路径。只认一种另一种会静默消失。
+    {
+      await studio.saveTileMapCells({
+        projectId: id,
+        cells: Array.from({ length: 4 }, () => Array.from({ length: 4 }, () => "grass")),
+        seed: 7,
+        decor: { "0,1": "tree", "2,1": "decor/tree.v1.png" }
+      });
+      const D = await studio.getTileProject({ projectId: id });
+      check("★ 装饰回传地块键能被解析成 key#index",
+        String(D.map.decor?.["0,1"] ?? "").startsWith("tree#"),
+        String(D.map.decor?.["0,1"]));
+      check("★ 装饰回传贴图路径也能被解析成 key#index",
+        String(D.map.decor?.["2,1"] ?? "").startsWith("tree#"),
+        String(D.map.decor?.["2,1"]));
+      check("两种写法解析到的是同一个变体",
+        D.map.decor["0,1"] === D.map.decor["2,1"],
+        `${D.map.decor["0,1"]} vs ${D.map.decor["2,1"]}`);
+      // 再读一次 preview，确认装饰没有在往返中丢掉
+      const pv = D.preview;
+      check("★ 往返之后 preview.decor 仍有这两棵树",
+        Object.keys(pv.decor ?? {}).length === 2,
+        JSON.stringify(Object.keys(pv.decor ?? {})));
+      check("preview.decor 给的是贴图路径",
+        String(pv.decor?.["0,1"]?.[1] ?? "").includes("decor/"),
+        JSON.stringify(pv.decor?.["0,1"]));
+    }
   }
 }
 

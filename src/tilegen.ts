@@ -30,7 +30,7 @@ import { randomUUID } from "node:crypto";
 import { basename, join } from "node:path";
 import { generateImage, ArkError } from "./ark.js";
 import { loadConfig, tileJobsRoot } from "./config.js";
-import { messageOf, readJson, writeJsonAtomic, appendJobLog, type JobLogEntry } from "./jsonio.js";
+import { messageOf, readJson, writeJsonAtomic, appendJobLog, sweepTempFiles, type JobLogEntry } from "./jsonio.js";
 import {
   DEFAULT_SETTINGS,
   assertSettings,
@@ -48,7 +48,7 @@ import {
   type TileGeomReport,
   type TileSettings
 } from "./tilegeom.js";
-import { assembleMap, emptyMapState, trimTransparent, type TileMapState } from "./tilemap.js";
+import { assembleMap, emptyMapState, pickVariantIndex, trimTransparent, type TileMapState } from "./tilemap.js";
 import { decodeFile, encodeBitmap, sniffImageExt, type Bitmap } from "./tilemedia.js";
 
 export type TileStage = "template" | "generate" | "review" | "map" | "export";
@@ -276,6 +276,9 @@ export async function createTileProject(name: string, options: {
 export async function readTileProject(id: string, lang?: string): Promise<TileProject | undefined> {
   const raw = await readJson<TileProject>(tileProjectFile(id));
   if (raw === undefined || typeof raw !== "object") return undefined;
+  // 顺手清掉写失败留下的 `project.json.<uuid>.tmp`（进程被杀时来不及自己删）。
+  // 不 await：它是清理工作，不该拖慢读项目。
+  void sweepTempFiles(tileProjectDir(id));
   // 兼容性：老项目缺字段时补默认值，而不是让界面崩在 `undefined.x` 上
   const project: TileProject = {
     ...raw,
@@ -294,13 +297,36 @@ export async function writeTileProject(project: TileProject): Promise<void> {
   await writeJsonAtomic(tileProjectFile(project.id), project);
 }
 
-/** 读 → 改 → 写（与 store.ts 的 patchProject 同构）。 */
+/**
+ * 每个项目一条写队列。
+ *
+ * ⚠️ 少了它，「读 → 改 → 写」会互相踩：后台作业的 `report()` 每次写一次
+ * project.json，用户这时点「保存布局」也在写同一个文件，两个 rename 撞在一起
+ * 就报 `EPERM`（Windows），而且**用户那边表现为「保存总是失败」**。
+ * 更糟的是丢更新：A 读、B 读、A 写、B 写 —— A 的改动被 B 覆盖掉。
+ *
+ * 用 promise 链把同一个项目的写入串起来：后来的等前面的写完再读。
+ * 不同项目互不影响（各排各的队）。
+ */
+const projectWriteQueue = new Map<string, Promise<unknown>>();
+
+function enqueueProjectWrite<T>(id: string, task: () => Promise<T>): Promise<T> {
+  const previous = projectWriteQueue.get(id) ?? Promise.resolve();
+  // 前一个失败也要继续（用 catch 把错误吞在链上，真正结果由本次的 promise 给出）
+  const next = previous.catch(() => undefined).then(task);
+  projectWriteQueue.set(id, next.catch(() => undefined));
+  return next;
+}
+
+/** 读 → 改 → 写。同一个项目的多次调用会被串行化（见 enqueueProjectWrite）。 */
 export async function patchTileProject<T>(id: string, mutator: (project: TileProject) => T): Promise<T> {
-  const project = await readTileProject(id);
-  if (project === undefined) throw new Error(`项目不存在：${id}`);
-  const result = mutator(project);
-  await writeTileProject(project);
-  return result;
+  return enqueueProjectWrite(id, async () => {
+    const project = await readTileProject(id);
+    if (project === undefined) throw new Error(`项目不存在：${id}`);
+    const result = mutator(project);
+    await writeTileProject(project);
+    return result;
+  });
 }
 
 export async function deleteTileProject(id: string): Promise<void> {
@@ -716,6 +742,13 @@ export interface MapOptions {
   fill?: string;
   /** 装饰密度 0~1（按比例随机撒装饰）。 */
   decorDensity?: number;
+  /**
+   * 重撒装饰与建筑布局（「换个种子重铺」用它）。
+   *
+   * 默认 false：**存下来的布局就是唯一真源**。不重撒的话，
+   * 「开始编辑布局」看到的与刚才拼出来的必然是同一张。
+   */
+  reroll?: boolean;
   background?: [number, number, number, number];
 }
 
@@ -796,7 +829,7 @@ export async function runMapStage(projectId: string, options: MapOptions = {}): 
     ? fill
     : (Object.keys(byCellKey).find((k) => project.items.find((it) => it.key === k)?.kind === "terrain") ?? "");
   const groundKey = groundItemKey === "" ? "" : (byCellKey[groundItemKey] ?? [])[0] ?? "";
-  const decorated = decorateState(state, families, options.decorDensity ?? 0, project.items, groundKey);
+  const decorated = decorateState(state, families, options.decorDensity ?? 0, project.items, groundKey, options.reroll === true);
 
   // 预校验：地图里引用的**格子键**必须真的有已生成的变体。
   //
@@ -890,6 +923,11 @@ function resizeCells(cells: string[][], rows: number, cols: number, fill: string
 /**
  * 按装饰密度随机撒装饰、放置建筑 —— 用确定性 PRNG，保证同种子可复现。
  *
+ * ⚠️ **已经存下来的布局是唯一真源，不能每次拼图都重随一遍。**
+ * 以前这里无条件重撒装饰：同种子确实逐像素一致，但只要换个种子就整张变样，
+ * 而且用户「开始编辑布局」时拿到的又是另一套 —— 看起来像在编辑别的图。
+ * 现在只有「还没有装饰记录」或显式要求 `reroll` 时才撒。
+ *
  * **建筑**：布局里写了某个建筑地块的键（例如 `building`）时，就把它的
  * 占格（如 2×2）铺在那个位置，并登记进 `out.buildings` 让拼图把立体贴图画上去。
  * 以前这里只撒装饰、从不放建筑 —— `buildings` 永远是空的，所以**建筑根本不会出现在地图上**。
@@ -899,7 +937,9 @@ function decorateState(
   families: Record<string, string[]>,
   density: number,
   items: TileItem[] = [],
-  groundKey = ""
+  groundKey = "",
+  /** 重撒装饰（用户点了「换个种子重铺」）。默认沿用存下来的布局。 */
+  reroll = false
 ): TileMapState {
   const out: TileMapState = {
     ...state,
@@ -988,6 +1028,11 @@ function decorateState(
   if (density <= 0) return out;
   const decorKeys = Object.keys(families).filter((key) => key === "tree" || key === "boulder");
   if (decorKeys.length === 0) return out;
+  // ⚠️ 已经有装饰记录了就不再重撒 —— 那份记录是用户看到、也可能手工改过的布局。
+  // 无条件重撒会让「换个种子」把整张图连同建筑位置一起打乱，
+  // 也会让「开始编辑布局」拿到的和刚才看到的不是同一张。
+  if (reroll !== true && Object.keys(out.decor).length > 0) return out;
+  out.decor = {};
   // mulberry32 的种子：只用 state.seed，保证「同种子 + 同布局 = 逐像素一致」
   let a = (state.seed ^ 0x9e3779b9) >>> 0;
   const rand = () => {
@@ -1171,7 +1216,7 @@ export interface TileProjectView extends TileProject {
    * 不给的话界面只能画空的菱形格子，用户涂完要先「保存布局 → 铺成地图」
    * 才看得见效果 —— 那就谈不上预览了。
    */
-  preview: { cells: Record<string, string[]>; cellWidth: number; cellHeight: number };
+  preview: TilePreview;
 }
 
 export function tileView(project: TileProject): TileProjectView {
@@ -1196,23 +1241,133 @@ export function tileView(project: TileProject): TileProjectView {
 /**
  * 给界面做**即时预览**用的素材表。
  *
- * 只给「地块键 → 可用变体的相对路径」，界面自己拼 assetBase 就能贴图。
+ * 只给「键 → 变体贴图相对路径」+ 本次布局的位置，界面自己拼 assetBase 就能贴图。
  * 刻意不把贴图数据传过去（那是几十 KB/张），也不含任何像素计算 ——
  * 预览是纯前端的定位 + 贴图，零成本、随点随变。
+ *
+ * ⚠️ 必须给**三层**（地面 / 装饰 / 建筑）+ 每格实际抽到的变体下标。
+ * 只给一层地面时，预览里树没有草地、建筑只占一格 —— 和成品完全对不上，
+ * 用户会以为「编辑的不是刚才生成的那张」。
  */
-export function tilePreview(project: TileProject): {
+export interface TilePreview {
+  /** 地块键 → 可用变体贴图（相对路径）。 */
   cells: Record<string, string[]>;
+  /** 地块键 → 用途（`terrain` / `decor` / `building`）—— 编辑器按它分层。 */
+  kinds: Record<string, string>;
+  /** 地块键 → 占格 `[列, 行]`。 */
+  footprints: Record<string, [number, number]>;
   cellWidth: number;
   cellHeight: number;
-} {
+  seed: number;
+  /** 每格的地面变体下标（-1 = 空地）。与 `map.cells` 同形。 */
+  ground: number[][];
+  /** 装饰：`"行,列"` → `[变体下标, 贴图相对路径]`。 */
+  decor: Record<string, [number, string]>;
+  /** 跨格建筑：锚点行列 + 占格 + 变体下标 + 贴图相对路径 + 底面比例。 */
+  buildings: Array<{ r: number; c: number; fw: number; fh: number; index: number; cell: string; baseFraction: number }>;
+  /** 建筑底面垫底用的地面贴图相对路径（没有建筑时为 null）。 */
+  groundUnder: string | null;
+}
+
+export function tilePreview(project: TileProject): TilePreview {
   const cells: Record<string, string[]> = {};
+  const kinds: Record<string, string> = {};
+  const footprints: Record<string, [number, number]> = {};
+  /** 地块键 → `key#index` → 该变体的贴图路径与底面比例。 */
+  const byVariant = new Map<string, { cell: string; baseFraction: number }>();
   for (const item of project.items) {
-    const urls = item.variants
-      .filter((v) => v.cell !== undefined)
-      .map((v) => v.cell as string);
+    const urls: string[] = [];
+    for (const variant of item.variants) {
+      if (variant.cell === undefined) continue;
+      urls.push(variant.cell);
+      byVariant.set(`${item.key}#${variant.index}`, {
+        cell: variant.cell,
+        baseFraction: typeof variant.report?.baseFraction === "number" ? variant.report.baseFraction : 0.5
+      });
+    }
     if (urls.length > 0) cells[item.key] = urls;
+    kinds[item.key] = item.kind;
+    footprints[item.key] = [item.footprint[0], item.footprint[1]];
   }
-  return { cells, cellWidth: project.settings.cellWidth, cellHeight: project.settings.cellHeight };
+
+  const rows = project.map.rows;
+  const cols = project.map.cols;
+  const seed = project.map.seed;
+  // 地面：每格挑一个变体 —— **必须与宿主 `assembleMap` 用同一个函数**，
+  // 否则预览和成品会挑到不同的变体（用了不同公式，同种子也会错开）。
+  const ground: number[][] = [];
+  for (let r = 0; r < rows; r++) {
+    const row: number[] = [];
+    for (let c = 0; c < cols; c++) {
+      const key = project.map.cells?.[r]?.[c] ?? "";
+      const list = cells[key];
+      row.push(list === undefined || list.length === 0 ? -1 : pickVariantIndex(seed, r, c, list.length));
+    }
+    ground.push(row);
+  }
+
+  /**
+   * 把「地块键」或「贴图路径」都解析成 `{ cell, baseFraction, index }`。
+   *
+   * 两种写法都要认：界面回传的是**键**，而早期存下来的数据里可能是**路径**。
+   * 只认一种，另一种会被静默跳过 —— 装饰/建筑直接消失，且不报任何错。
+   */
+  const resolveArt = (value: string): { cell: string; baseFraction: number; index: number } | null => {
+    if (value === "") return null;
+    const direct = byVariant.get(value);
+    if (direct !== undefined) {
+      const hash = value.indexOf("#");
+      const index = hash < 0 ? 0 : Number.parseInt(value.slice(hash + 1), 10);
+      return { cell: direct.cell, baseFraction: direct.baseFraction, index: Number.isFinite(index) ? index : 0 };
+    }
+    if (cells[value] !== undefined && cells[value].length > 0) {
+      return { cell: cells[value][0], baseFraction: 0.5, index: 0 };
+    }
+    for (const list of Object.values(cells)) {
+      if (list.includes(value)) return { cell: value, baseFraction: 0.5, index: 0 };
+    }
+    return null;
+  };
+
+  // 装饰：成品里存的 `"r,c" -> key#index`（早期可能是贴图路径）
+  const decor: Record<string, [number, string]> = {};
+  for (const [pos, name] of Object.entries(project.map.decor ?? {})) {
+    const found = resolveArt(name);
+    if (found === null) continue;
+    decor[pos] = [found.index, found.cell];
+  }
+
+  // 建筑：锚点 + 占格 + 贴图（界面要按 2×2 摆，不能只画一格）
+  const buildings: TilePreview["buildings"] = [];
+  for (const [r, c, name] of project.map.buildings ?? []) {
+    const found = resolveArt(name);
+    if (found === null) continue;
+    const entry = (project.map.buildingGround ?? []).find((g) => g[0] === r && g[1] === c);
+    buildings.push({
+      r, c,
+      fw: entry?.[2] ?? 2,
+      fh: entry?.[3] ?? 2,
+      index: found.index,
+      cell: found.cell,
+      baseFraction: found.baseFraction
+    });
+  }
+
+  const groundName = (project.map.buildingGround ?? [])[0]?.[4];
+  const groundUnder = groundName === undefined ? null : (byVariant.get(groundName)?.cell ?? null);
+
+  return {
+    cells,
+    kinds,
+    footprints,
+    cellWidth: project.settings.cellWidth,
+    cellHeight: project.settings.cellHeight,
+    seed,
+    ground,
+    decor,
+    buildings,
+    groundUnder
+  };
 }
 
 /** 生成 / 期望 / 已验收三件套（界面与工具共用一份算法）。 */

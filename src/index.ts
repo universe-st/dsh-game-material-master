@@ -663,10 +663,11 @@ export class GameStudioGateway extends TypertRemoteService {
     // 地图地块（模块五）。**别重犯 rig 早期那个漏**：
     // 少了这个分支，「固定流程第 0 步必须问清审核模式」对 tile 就落不了地。
     if (module === "tile") {
-      const project = await tilegen.readTileProject(id);
-      if (project === undefined) throw new Error(`项目不存在：${id}`);
-      project.reviewMode = reviewMode;
-      await tilegen.writeTileProject(project);
+      // 走 `patchTileProject`（带写队列），别用裸的 `writeTileProject`：
+      // 裸写会绕过队列，与后台作业的 report() 撞同一个 project.json。
+      await tilegen.patchTileProject(id, (project) => {
+        project.reviewMode = reviewMode;
+      });
       return { ok: true, id, module, reviewMode };
     }
     throw new Error(`未知模块：${module}`);
@@ -705,38 +706,43 @@ export class GameStudioGateway extends TypertRemoteService {
     const input = asRecord(payload);
     const id = asString(input.projectId);
     const lang = typeof input.lang === "string" ? input.lang : undefined;
-    const project = await tilegen.readTileProject(id);
-    if (project === undefined) throw new Error(`项目不存在：${id}`);
-    if (typeof input.name === "string" && input.name.trim() !== "") project.name = input.name.trim();
-    if (typeof input.style === "string" && input.style !== project.style) {
-      project.style = input.style;
-      // 改画风 = 改**每一个**地块的提示词 → 全部产物作废（重新生成要花钱）
-      tilegen.invalidateItems(project);
-    }
-    if (input.resetItemsToDefault === true) {
-      project.items = tilegen.defaultTileItems(lang);
-      tilegen.invalidateItems(project);
-    } else if (Array.isArray(input.items)) {
-      const merged = mergeTileItems(project.items, input.items as any[]);
-      project.items = merged.items;
-      // ⚠️ 只作废**提示词真的变了**的那些地块。
-      // 这里一度无脑调 `invalidateFrom(project, "generate")`，而它是全量销毁 ——
-      // 结果「只改一个标签」也会把全部（花钱生成的）产物清空。
-      // 真机验证时抓出来的：验收之后任何一次保存都会让产物消失。
-      if (merged.changed.length > 0) tilegen.invalidateItems(project, merged.changed);
-    }
-    if (input.settings !== undefined) {
-      const settings = { ...project.settings, ...(input.settings as any) };
-      if (settings.cellWidth !== project.settings.cellWidth || settings.cellHeight !== project.settings.cellHeight) {
-        project.settings = settings;
-        // 几何规格变了：模板与全部产物都作废
-        tilegen.invalidateFrom(project, "template");
-      } else {
-        project.settings = settings;
+    // ⚠️ 整个「读 → 改 → 写」都放进 `patchTileProject`（它带写队列）。
+    // 以前这里是自己 read、改完再调裸的 `writeTileProject` —— 那条路径**绕过队列**，
+    // 于是它和后台作业的 `report()` 会同时 rename 同一个 project.json，
+    // 在 Windows 上报 EPERM、并且互相覆盖（丢更新）。
+    // 实测：用户点「保存布局」时后台恰好在收尾，就报「保存失败」。
+    const next = await tilegen.patchTileProject(id, (project) => {
+      if (typeof input.name === "string" && input.name.trim() !== "") project.name = input.name.trim();
+      if (typeof input.style === "string" && input.style !== project.style) {
+        project.style = input.style;
+        // 改画风 = 改**每一个**地块的提示词 → 全部产物作废（重新生成要花钱）
+        tilegen.invalidateItems(project);
       }
-    }
-    await tilegen.writeTileProject(project);
-    return tilegen.tileView(project);
+      if (input.resetItemsToDefault === true) {
+        project.items = tilegen.defaultTileItems(lang);
+        tilegen.invalidateItems(project);
+      } else if (Array.isArray(input.items)) {
+        const merged = mergeTileItems(project.items, input.items as any[]);
+        project.items = merged.items;
+        // ⚠️ 只作废**提示词真的变了**的那些地块。
+        // 这里一度无脑调 `invalidateFrom(project, "generate")`，而它是全量销毁 ——
+        // 结果「只改一个标签」也会把全部（花钱生成的）产物清空。
+        // 真机验证时抓出来的：验收之后任何一次保存都会让产物消失。
+        if (merged.changed.length > 0) tilegen.invalidateItems(project, merged.changed);
+      }
+      if (input.settings !== undefined) {
+        const settings = { ...project.settings, ...(input.settings as any) };
+        if (settings.cellWidth !== project.settings.cellWidth || settings.cellHeight !== project.settings.cellHeight) {
+          project.settings = settings;
+          // 几何规格变了：模板与全部产物都作废
+          tilegen.invalidateFrom(project, "template");
+        } else {
+          project.settings = settings;
+        }
+      }
+      return project;
+    });
+    return tilegen.tileView(next);
   }
   async runTileTemplate(payload: any) {
     return tilegen.runTemplateStage(asString(asRecord(payload).projectId));
@@ -794,7 +800,8 @@ export class GameStudioGateway extends TypertRemoteService {
       cols: typeof input.cols === "number" ? input.cols : undefined,
       seed: typeof input.seed === "number" ? input.seed : undefined,
       fill: typeof input.fill === "string" ? input.fill : undefined,
-      decorDensity: typeof input.decorDensity === "number" ? input.decorDensity : undefined
+      decorDensity: typeof input.decorDensity === "number" ? input.decorDensity : undefined,
+      reroll: input.reroll === true
     });
   }
   async saveTileMapCells(payload: any) {
@@ -818,14 +825,60 @@ export class GameStudioGateway extends TypertRemoteService {
         }
       }
       if (typeof input.seed === "number") project.map.seed = Math.trunc(input.seed);
+      // 装饰与垫底地面：界面回传的既可能是**地块键**（`tree`），也可能是
+      // 早期版本留下的**贴图路径**（`decor/tree.v1.png`）。两种都接受，
+      // 统一落成宿主认识的 `key#index`。
+      const resolveVariant = (raw: unknown): string => {
+        const value = String(raw ?? "");
+        if (value === "") return "";
+        const item = project.items.find((it) => it.key === value);
+        if (item !== undefined) {
+          const first = item.variants.find((v) => v.cell !== undefined);
+          if (first !== undefined) return `${value}#${first.index}`;
+        }
+        for (const it of project.items) {
+          const hit = it.variants.find((v) => v.cell === value);
+          if (hit !== undefined) return `${it.key}#${hit.index}`;
+        }
+        return "";
+      };
       if (input.decor !== undefined && typeof input.decor === "object") {
-        project.map.decor = Object.fromEntries(
-          Object.entries(input.decor as Record<string, unknown>).map(([k, v]) => [k, String(v)]));
+        const next: Record<string, string> = {};
+        for (const [pos, raw] of Object.entries(input.decor as Record<string, unknown>)) {
+          const name = resolveVariant(raw);
+          if (name !== "") next[pos] = name;
+        }
+        project.map.decor = next;
       }
-      if (Array.isArray(input.buildings)) {
-        project.map.buildings = (input.buildings as unknown[][])
-          .filter((entry) => Array.isArray(entry) && entry.length >= 3)
-          .map((entry) => [Number(entry[0]), Number(entry[1]), String(entry[2])] as [number, number, string]);
+      // ★ 建筑由界面**显式回传**（`layouts`）：它带着占格与垫底地面。
+      //
+      // 不靠「cells 里有没有建筑键」反推：那样界面为了预览就得把建筑键铺满占格，
+      // 而一旦占格被清空（拼图会清）就再也推不出来了 —— 建筑会凭空消失。
+      if (Array.isArray(input.layouts)) {
+        project.map.buildings = [];
+        project.map.buildingGround = [];
+        for (const raw of input.layouts as unknown[]) {
+          const e = raw as Record<string, unknown>;
+          const r = Math.trunc(Number(e.r));
+          const c = Math.trunc(Number(e.c));
+          const fw = Math.max(1, Math.min(4, Math.trunc(Number(e.width ?? 1))));
+          const fh = Math.max(1, Math.min(4, Math.trunc(Number(e.height ?? 1))));
+          const key = String(e.key ?? "");
+          if (!Number.isFinite(r) || !Number.isFinite(c) || key === "") continue;
+          if (r < 0 || c < 0 || r + fh > project.map.rows || c + fw > project.map.cols) continue;
+          const name = (project.items.find((it) => it.key === key)?.variants ?? [])
+            .find((v) => v.cell !== undefined);
+          if (name === undefined) continue;
+          const underName = resolveVariant(e.under);
+          project.map.buildings.push([r, c, `${key}#${name.index}`]);
+          project.map.buildingGround.push([r, c, fw, fh, underName]);
+          // 界面已经把这些格子留空了，这里再兜一次：拼图不该在建筑占格上再画地面
+          for (let dr = 0; dr < fh; dr++) {
+            for (let dc = 0; dc < fw; dc++) {
+              if (project.map.cells[r + dr] !== undefined) project.map.cells[r + dr][c + dc] = "";
+            }
+          }
+        }
       }
       // 手动改布局不作废地块（那是花钱买的），只作废下游
       tilegen.invalidateFrom(project, "map");
