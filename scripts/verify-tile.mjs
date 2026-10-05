@@ -906,13 +906,32 @@ section("S4h 任意形状（L 形 / T 形 / 线形）");
   check("S4k-4 模板登记的底面菱形数 = 形状格数",
     tplL.diamonds.length === 3 && tplSq.diamonds.length === 4,
     `L=${tplL.diamonds.length} 2x2=${tplSq.diamonds.length}`);
-  // 3×1 与 2×2 的等距底面**本来就是同一个菱形**（`(3+1)/2 = (2+2)/2`），
-  // 所以两者的模板“应该”一样 —— 别拿它们互相区分，那是个错误判据。
-  // 真正需要区分的是**矩形 vs 非矩形**（上面的 S4k-2/3）。
+  // ★★ 3×1 与 2×2 **必须能区分**。
+  //
+  // ⚠️ 这条断言原来写的是「两者模板相同是正确的」—— **那是错的**，
+  // 而且正是用户报的那个 bug（「3×1 建筑模板和 2×2 没有区别」）。
+  //
+  // 事实是：等距投影下两者的**包围菱形完全相同**（半宽半高都是 64×32、
+  // `(3+1)/2 == (2+2)/2`），而且格子的并集也把同一个菱形铺满 ——
+  // 实测两张模板曾经**逐像素完全一样**。光靠外轮廓**永远**区分不了，
+  // 所以必须画出**逐格分格线**（见 `renderBuildingTemplate` 里的 divider）。
+  //
+  // 也不能拿「不透明像素数」当判据：分格线是画在已有灰底上的，像素数会**增大**。
+  // 要比就比**像素内容是否相同**。
   const tpl31 = renderBuildingTemplate({ settings: S, shape: [[0, 0], [0, 1], [0, 2]], size: 256 });
-  check("S4k-5 3×1 与 2×2 共用同一个等距底面（模板相同是正确的）",
-    opaque(tpl31.bitmap) === opaque(tplSq.bitmap),
-    `3x1=${opaque(tpl31.bitmap)} 2x2=${opaque(tplSq.bitmap)}`);
+  check("★★ 3×1 与 2×2 的模板**必须不同**（靠逐格分格线区分）",
+    Buffer.compare(tpl31.bitmap.rgba, tplSq.bitmap.rgba) !== 0,
+    "两张模板逐像素相同 —— 用户会以为形状没生效");
+  check("★★ 1×3 与 3×1 的模板也不同（方向要分得清）",
+    Buffer.compare(
+      renderBuildingTemplate({ settings: S, shape: [[0, 0], [1, 0], [2, 0]], size: 256 }).bitmap.rgba,
+      tpl31.bitmap.rgba
+    ) !== 0);
+  check("★★ 单格不画分格线（没有内部分隔）",
+    Buffer.compare(
+      renderBuildingTemplate({ settings: S, shape: [[0, 0]], size: 256 }).bitmap.rgba,
+      renderBuildingTemplate({ settings: S, shape: [[0, 0]], size: 256 }).bitmap.rgba
+    ) === 0);
   // 4×2（和 = 6）与 2×2（和 = 4）必须不同
   const tpl42 = renderBuildingTemplate({ settings: S, shape: [[0, 0], [0, 1], [0, 2], [0, 3], [1, 0], [1, 1], [1, 2], [1, 3]], size: 256 });
   check("S4k-6 4×2 的底面比 2×2 大（跨度不同 → 模板不同）",

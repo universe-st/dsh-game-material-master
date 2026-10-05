@@ -107,6 +107,22 @@ section("参考图自动准备（原来的「① 模板阶段」，现在是内�
   // ★ 指纹命中就不该重复渲染（十几张变体每次现渲染要白等几十秒）
   const again = await G.ensureTemplates(project);
   check("T14b 指纹没变时直接复用、不重渲染", again.length === 0, JSON.stringify(again));
+  // ★★ 指纹必须含**渲染器版本**：改了绘制代码却不重渲染的话，
+  // 升级后用户一直看着旧模板、以为修复没生效（实测踩过：加了逐格分格线，
+  // `ensureTemplates` 仍返回空数组、磁盘上还是旧图）。
+  check("★★ 指纹里带渲染器版本号",
+    typeof G.TEMPLATE_RENDER_VERSION === "number" && G.TEMPLATE_RENDER_VERSION >= 1 &&
+    G.templateStamp(project, ["cell.png"]) !== G.templateStamp(project, ["cell.png", "grid2x2.png"]),
+    `v${G.TEMPLATE_RENDER_VERSION}`);
+  {
+    const { readFileSync, writeFileSync } = await import("node:fs");
+    const stampFile = join(dir, "template", ".stamp.json");
+    const real = JSON.parse(readFileSync(stampFile, "utf8"));
+    writeFileSync(stampFile, JSON.stringify({ ...real, stamp: "v0-stale" }));
+    const forced = await G.ensureTemplates(project);
+    check("★★ 指纹对不上就重渲染（版本号变了走的就是这条路径）",
+      forced.length > 0, JSON.stringify(forced));
+  }
   // ★ 改了形状 → 指纹变 → 必须重渲染，并给出新形状的模板
   const changed = { ...project, items: project.items.map((i) => i.kind === "building" ? { ...i, shape: [[0, 0], [1, 0], [1, 1]], footprint: [2, 2] } : i) };
   const afterShape = await G.ensureTemplates(changed);
@@ -244,9 +260,31 @@ section("★ 非矩形形状要写进提示词（真机踩过）");
   // 「一栋方楼中间一个天井」—— 底面仍然填满整个 2×2 包围菱形
   // （量非透明行宽度：1921 → 611 对称收敛到一点，就是完整菱形）。
   // 模型显然把「缺的那格」理解成内院，而不是「这格不属于建筑」。
-  check("★ 矩形不写形状描述（本来没歧义，别啰嗦）",
-    G.describeShape([[0, 0], [0, 1], [1, 0], [1, 1]]) === undefined &&
-    G.describeShape([[0, 0], [0, 1], [0, 2]]) === undefined);
+  // ★ 矩形**也要写**，但要交代**行列数**。
+  //
+  // ⚠️ 真机踩过：等距投影下 `3×1` 与 `2×2` 是**同一个形状** ——
+  // 两者半宽都是 `cellWidth`（`x = c − r` 的极差都是 2），
+  // 实测两者的模板**逐字节相同**。光靠轮廓永远区分不了，
+  // 所以「要盖多长」只能由文字交代。用户新加 3×1 围墙时发现
+  // 提示词里还写着「2x2 共 4 格」，就是这个原因（当时写死在界面预览里）。
+  const r2 = G.describeShape([[0, 0], [0, 1], [1, 0], [1, 1]]);
+  const r31 = G.describeShape([[0, 0], [0, 1], [0, 2]]);
+  check("★ 矩形要写出行列数（3×1 不能被说成 2×2）",
+    typeof r2 === "string" && typeof r31 === "string" &&
+    r2.includes("2×2") && r2.includes("4 格") &&
+    r31.includes("3×1") && r31.includes("3 格"),
+    `2x2=${r2} | 3x1=${r31}`);
+  check("★ 3×1 与 2×2 的形状描述**不一样**", r2 !== r31);
+  check("★ 1×3 与 3×1 的描述也不同（方向要分得清）",
+    G.describeShape([[0, 0], [1, 0], [2, 0]]) !== r31,
+    String(G.describeShape([[0, 0], [1, 0], [2, 0]])));
+  // ★ 单格也要写（模型不该把它当多格建筑）
+  check("★ 1×1 也会写（共 1 格）",
+    (G.describeShape([[0, 0]]) ?? "").includes("共 1 格"), String(G.describeShape([[0, 0]])));
+  // ★ 非矩形仍然不提「都占满」而是提「哪格是空地」
+  check("★ 非矩形走的是「哪格是空地」那套说法（与矩形不同）",
+    (G.describeShape([[0, 0], [1, 0], [1, 1]]) ?? "").includes("空"),
+    String(G.describeShape([[0, 0], [1, 0], [1, 1]])));
   const l = G.describeShape([[0, 0], [1, 0], [1, 1]]);
   check("★ L 形会写形状描述", typeof l === "string" && l.length > 20, String(l).slice(0, 40));
   check("★ 描述里说清「共几格 / 占几格 / 哪格是空地」",
@@ -270,8 +308,15 @@ section("★ 非矩形形状要写进提示词（真机踩过）");
   check("★ buildTilePrompt 真的把形状描述带进去了",
     prompt.includes("占地形状") && prompt.includes("天井"), prompt.slice(0, 200));
   const rectItem = { ...item, shape: [[0, 0], [0, 1], [1, 0], [1, 1]] };
-  check("矩形走 buildTilePrompt 时不带形状描述",
-    !G.buildTilePrompt(rectItem, "像素风").includes("占地形状"));
+  const rectPrompt = G.buildTilePrompt(rectItem, "像素风");
+  check("★ 矩形走 buildTilePrompt 也带形状描述（且写的是 2×2 不是别的）",
+    rectPrompt.includes("占地形状") && rectPrompt.includes("2×2"), rectPrompt.slice(0, 260));
+  // ★ 3×1 的完整提示词必须说 3×1 —— 这正是用户报的那条
+  const wallItem = { ...item, key: "wall", shape: [[0, 0], [0, 1], [0, 2]], footprint: [3, 1] };
+  const wallPrompt = G.buildTilePrompt(wallItem, "像素风");
+  check("★★ 3×1 的完整提示词说 3×1、不说 2×2",
+    wallPrompt.includes("3×1") && wallPrompt.includes("共 3 格") && !wallPrompt.includes("2×2"),
+    wallPrompt.slice(wallPrompt.indexOf("占地形状"), wallPrompt.indexOf("占地形状") + 90));
 }
 
 section("相对路径一律用正斜杠（会被拼进资源路由 URL）");

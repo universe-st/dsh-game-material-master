@@ -345,9 +345,19 @@ export function renderTemplate(options: TemplateOptions = {}): TemplateResult {
 /**
  * 底面各格在模板里的**菱形中心**（逻辑单位，未乘缩放系数）。
  *
- * 坐标以「各格中心的包围盒中点」为原点（最终会平移到 `(cx, baseCy)`）。
- * 每格的等距偏移：`dx = (dc − dr)·cellWidth/4`、`dy = (dc + dr)·cellWidth/8`
- * （菱形高 = cellWidth/2，半格步进 = cellWidth/4）。
+ * ★ 以 `tilemap.shapeBaseOffset` 的**同一个点**为原点 —— 即
+ * 「各格菱形中心相对**锚点格中心**的偏移」，也就是
+ * `dx = ((min(c−r) + max(c−r))/2)·cellWidth/2`、
+ * `dy = ((min(c+r) + max(c+r))/2)·cellWidth/4`。
+ * 最终整块会平移到 `(cx, baseCy)`。
+ *
+ * ⚠️ **不能用「各格中心的包围盒中点」当原点**：两者对非对称形状**不是同一个点**。
+ * 实测 `3×1`（格子 `(0,0)(0,1)(0,2)`）：
+ *   · 拼图口径（`shapeBaseOffset`）→ 底心相对锚点 `dx = +32`
+ *   · 包围盒中点口径 → `dx = 0`
+ * 于是模板把 `3×1` 画在了与 `2×2` **完全相同**的位置上（两者半宽半高都是
+ * 64×32），两张模板**逐字节相同** —— 用户报的「3×1 模板和 2×2 没区别」。
+ * 统一到拼图口径之后，`3×1` 的底面会在模板里**偏右半格**，一眼能看出不同。
  *
  * 为什么按「一格一个菱形」而不是「一个大包围菱形」：
  * L 形、T 形这类**非矩形**占地，用一个包围菱形画出来模型会以为整块都是地基，
@@ -358,18 +368,22 @@ export function buildingBaseCells(
   shape: Array<[number, number]>
 ): Array<{ cx: number; cy: number }> {
   if (shape.length === 0) return [{ cx: 0, cy: 0 }];
-  const q = settings.cellWidth / 4;
-  const raw = shape.map(([r, c]) => ({ x: (c - r) * q, y: (c + r) * (q / 2) }));
-  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-  for (const p of raw) {
-    if (p.x < minX) minX = p.x;
-    if (p.x > maxX) maxX = p.x;
-    if (p.y < minY) minY = p.y;
-    if (p.y > maxY) maxY = p.y;
+  const stepX = settings.cellWidth / 2;
+  const stepY = settings.cellWidth / 4;
+  // 锚点格中心 → 底面中心的偏移（与 tilemap.shapeBaseOffset 同式）
+  let minDR = Infinity, maxDR = -Infinity, minDC = Infinity, maxDC = -Infinity;
+  for (const [r, c] of shape) {
+    if (r < minDR) minDR = r;
+    if (r > maxDR) maxDR = r;
+    if (c < minDC) minDC = c;
+    if (c > maxDC) maxDC = c;
   }
-  const cx = (minX + maxX) / 2;
-  const cy = (minY + maxY) / 2;
-  return raw.map((p) => ({ cx: p.x - cx, cy: p.y - cy }));
+  const baseX = ((minDC - minDR) + (maxDC - maxDR)) / 2;
+  const baseY = ((minDC + minDR) + (maxDC + maxDR)) / 2;
+  return shape.map(([r, c]) => ({
+    cx: ((c - r) - baseX) * stepX,
+    cy: ((c + r) - baseY) * stepY
+  }));
 }
 
 export function renderBuildingTemplate(options: {
@@ -472,11 +486,41 @@ export function renderBuildingTemplate(options: {
       const cBottom: [number, number] = [bx, by + cellHalfH];
       const cLeft: [number, number] = [bx - cellHalfW, by];
       const quad = [cTop, cRight, cBottom, cLeft];
-      fillTri(quad, ground);
+      // 矩形已经用大菱形铺过灰底了，逐格只需要**分格线**，不必再填一遍 ——
+      // 填了会在底面里叠出一圈比底面更亮的格子，看着像浮着几个小菱形。
+      if (!isRect) fillTri(quad, ground);
       for (let i = 0; i < 4; i++) {
         const a = quad[i];
         const b = quad[(i + 1) % 4];
         for (let t = -lw; t <= lw; t++) line(rgba, S.w, a[0], a[1] + t, b[0], b[1] + t, magenta, ss);
+      }
+    }
+  }
+
+  // ★ 多格形状再画出**逐格分隔线**。
+  //
+  // ⚠️ 为什么非画不可（真机踩过）：等距投影下 `3×1` 与 `2×2` 的底面
+  // **占用完全相同的菱形**（半宽半高都是 64×32，只是内部切法不同）——
+  // 实测两张模板**逐像素完全一样**，用户报的「3×1 模板和 2×2 没区别」
+  // 不是错觉，是渲染结果真的相同。轮廓一样的时候，
+  // 「一共几格、怎么排」只能靠**分格线**表达。
+  //
+  // 单格不画（没有内部分隔）。用稍暗的洋红，免得与底面外轮廓糊成一片。
+  if (shape.length > 1) {
+    const divider: [number, number, number] = [190, 0, 190];
+    for (const cell of baseCells) {
+      const bx = cx + cell.cx * k;
+      const by = baseCy + cell.cy * k;
+      const quad: Array<[number, number]> = [
+        [bx, by - cellHalfH],
+        [bx + cellHalfW, by],
+        [bx, by + cellHalfH],
+        [bx - cellHalfW, by]
+      ];
+      for (let i = 0; i < 4; i++) {
+        const a = quad[i];
+        const b = quad[(i + 1) % 4];
+        for (let t = -lw; t <= lw; t++) line(rgba, S.w, a[0], a[1] + t, b[0], b[1] + t, divider, ss);
       }
     }
   }
@@ -487,7 +531,6 @@ export function renderBuildingTemplate(options: {
   const right = bRight;
   const bottom = bBottom;
   const left = bLeft;
-
   // 立方体线框：四个角往上拉，顶面再画一个同样的菱形轮廓
   const lift = (p: [number, number]): [number, number] => [p[0], p[1] - boxH * k];
   const corners = [top, right, bottom, left];

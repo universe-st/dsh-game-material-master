@@ -835,6 +835,37 @@ section("② 生成阶段：地块清单的增 / 删 / 改");
       `${byClassPart(render([[0, 0], [0, 1], [1, 0], [1, 1]]), "SPR_shapeCell").filter((n) => n.props["data-on"] === "1").length} 格亮`);
   }
 
+  // ★★ 回归：界面上的「最终提示词」预览必须按**这个地块自己的形状**写行列数。
+  //
+  // 真机踩过：用户新加了一个 3×1 的「围墙」，预览里仍然写着
+  // 「是一栋大型建筑占用的 2x2 共 4 格地块」—— 那句话是**写死在预览函数里**的。
+  // 后果不只是看着别扭：用户以为形状没生效，而且预览与实际发给模型的提示词
+  // 完全对不上（宿主那边其实是按形状算的）。
+  {
+    const previewFor = (draft) => allText(renderTile(makeProject(), {
+      stage: "generate", editingKey: "grass", itemDraft: draft
+    }).tree);
+    const base = {
+      key: "grass", label: "围墙", kind: "building", family: "building",
+      content: "一堵石墙。", mode: "grid2x2", variantCount: 1
+    };
+    const wallText = previewFor({ ...base, footprint: [3, 1], shape: [[0, 0], [0, 1], [0, 2]] });
+    check("★★ 3×1 的提示词预览写「3×1 / 共 3 格」",
+      wallText.includes("3×1") && wallText.includes("共 3 格"),
+      (wallText.match(/占地形状[^再]{0,70}/) ?? ["(没找到形状描述)"])[0]);
+    check("★★ 3×1 的预览里**不再出现**「2x2 共 4 格」",
+      !wallText.includes("2x2 共 4 格") && !wallText.includes("2×2 的等距菱形"),
+      wallText.includes("2x2 共 4 格") ? "还写着 2x2" : "ok");
+    const sqText = previewFor({ ...base, footprint: [2, 2], shape: [[0, 0], [0, 1], [1, 0], [1, 1]] });
+    check("★★ 2×2 的预览写「2×2 / 共 4 格」",
+      sqText.includes("2×2") && sqText.includes("共 4 格"),
+      (sqText.match(/占地形状[^再]{0,70}/) ?? ["(没找到)"])[0]);
+    // 非矩形预览也要带「哪格是空地」
+    const lText = previewFor({ ...base, footprint: [2, 2], shape: [[0, 0], [1, 0], [1, 1]] });
+    check("★★ L 形的预览带「哪格是空地」那套说法",
+      lText.includes("空地") && lText.includes("天井"), lText.slice(-200));
+  }
+
   // ★ 回归：数字输入框必须把新值**真的**交给上层。
   //
   // 曾经的 bug：5 处 `NumField` 传的是 `onCommit`，而组件解构的是 `onChange`
