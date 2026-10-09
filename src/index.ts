@@ -337,7 +337,10 @@ export class GameStudioGateway extends TypertRemoteService {
       "bgTolerance",
       "edgeShrink",
       "rowOrder",
-      "concurrency"
+      "concurrency",
+      // 功能可见性：设置页的「功能管理」写它，`normalizeConfig` 会收敛成合法子集。
+      // 对话工具面**不允许**改它（见 tools.ts），否则模型可以自己把隐藏的功能放出来。
+      "hiddenModules"
     ];
     for (const key of directKeys) {
       if (input[key] !== undefined)

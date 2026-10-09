@@ -18,6 +18,10 @@ no system image libraries required, and your assets are never uploaded to a thir
 > upload your character sheet → click "Generate turn video" (the default path: the character rotates steadily
 > in place for one full turn, then the eight directions are cut out automatically; switch the method in
 > stage ① if you'd rather generate each direction separately).
+>
+> The sidebar entry also carries a **small chevron menu button**: click it to pop up the five features and
+> jump straight into the one you want. Features you do not use can be turned off in settings (see
+> "Feature management").
 
 All four modules share the same "generate → review → re-run" workbench. Every stage can be **redone on its
 own**, and every asset can be **approved item by item**. The "review mode" lets an agent approve each step
@@ -238,15 +242,31 @@ point `FFMPEG_PATH` / `FFPROBE_PATH` at absolute paths. The package has **no run
 | Item | Description |
 |---|---|
 | Volcengine Ark API Key | "Test connection" really generates a 1K thumbnail (a small charge) and validates both the key and the model |
-| Image model | Defaults to `doubao-seedream-4-0-250828`; switchable to 4.5 / 5.0 Lite / Pro |
+| Image model | Defaults to `doubao-seedream-5-0-flash-260915`; switchable to 5.0 Pro / Lite / 4.5 |
 | MiniMax API Key | "Test connection" is free and can tell an invalid key apart from other errors |
 | Video model | Defaults to `MiniMax-H3` (v2 protocol); Hailuo / I2V use v1; the UCloud version of H3 is selected explicitly |
 | Base URL | Host root, without `/v1` or `/v2`. `api.minimax.cn` in mainland China, `api.minimaxi.com` internationally |
 | Default parameters | Cell width and height, frame count, pixel block size, keying threshold, and so on |
+| Feature management | Per-module switches: a disabled module disappears from the UI **and the agent cannot call it either** (see below) |
 
 Keys are written only to `<DSH_HOME>/game-material-master/config.json` on your machine, and the UI always
 masks them when displaying them back. **The model is a plugin-level setting shared by all three modules**;
 after you switch models, tasks align to the new tier automatically.
+
+### Feature management (hiding modules you do not use)
+
+Turn a module off under **Settings → Game Material Master → Feature management**; turn it back on any time.
+Existing project data is never deleted.
+
+- **UI**: the module disappears from the workbench tabs and from the sidebar shortcut menu. If you were
+  sitting on that module, the workbench falls back to the first visible one.
+- **Chat**: `game_material_call` / `status` / `intake` / `upload` / `wait` / `review` / `approve` all refuse,
+  and the error says where to turn the feature back on. Hiding only the UI would not be hiding at all: the
+  agent cannot see the tab but could still call generation methods and spend real money, so the host half
+  re-checks the current setting on every call.
+- Visibility is **user-only**: the tool surface rejects `saveConfig({hiddenModules})`, otherwise the model
+  could simply unhide a feature by itself.
+- Hiding everything is allowed; the workbench then says every feature is hidden.
 
 ## UI language
 

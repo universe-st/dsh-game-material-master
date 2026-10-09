@@ -187,6 +187,21 @@ async function main() {
   check("默认抽帧工作尺寸 768", initial.workingLongEdge === 768, String(initial.workingLongEdge));
   check("默认开启背景空间分割", initial.bgTolerance === 90, String(initial.bgTolerance));
   check("初始未配置 Key", initial.arkApiKeySet === false && initial.minimaxApiKeySet === false);
+  // 功能管理：默认五个模块全可见；写进去的非法 key 要被丢掉、顺序要固定
+  // （顺序固定是为了让「同一组勾选」永远序列化成同一份 JSON）。
+  check("默认没有任何被隐藏的功能", JSON.stringify(initial.hiddenModules) === JSON.stringify([]), JSON.stringify(initial.hiddenModules));
+  const hiddenSaved = await studio.saveConfig({ hiddenModules: ["tile", "nope", "sprite", "tile"] });
+  check(
+    "hiddenModules 落盘时收敛成合法子集并按固定顺序",
+    JSON.stringify(hiddenSaved.hiddenModules) === JSON.stringify(["sprite", "tile"]),
+    JSON.stringify(hiddenSaved.hiddenModules)
+  );
+  check("重新读配置仍是同一份", JSON.stringify((await studio.getConfig()).hiddenModules) === JSON.stringify(["sprite", "tile"]));
+  const hiddenDraft = (await studio.getConfig()).hiddenModules;
+  hiddenDraft.push("rig");
+  check("回传的数组是副本（界面改草稿不会写花宿主缓存）", JSON.stringify((await studio.getConfig()).hiddenModules) === JSON.stringify(["sprite", "tile"]));
+  await studio.saveConfig({ hiddenModules: [] });
+  check("可以全部恢复成可见", JSON.stringify((await studio.getConfig()).hiddenModules) === JSON.stringify([]));
 
   // ── 2b. 优云智算版 H3 是模型下拉里的独立选项（不由 Base URL 推断）─────
   const compshareId = initial.minimaxCompshareModelId;

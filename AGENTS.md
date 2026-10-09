@@ -52,11 +52,11 @@ npm run typecheck    # 只做类型检查
 纯本地自检（不联网、不花钱），改完代码**至少跑这几个**：
 
 ```bash
-node scripts/verify-host.mjs       # 宿主全链路（317 项）
-node scripts/verify-client.mjs     # 浏览器半区契约（332 项）
-node scripts/verify-tools.mjs      # 对话调用面（123 项）
+node scripts/verify-host.mjs       # 宿主全链路（322 项）
+node scripts/verify-client.mjs     # 浏览器半区契约（347 项）
+node scripts/verify-tools.mjs      # 对话调用面（147 项）
 node scripts/verify-pipeline.mjs   # 抽帧 / 抠像 / 合成（40 项）
-node scripts/verify-feedback.mjs   # 浏览器半区真渲染（119 项）
+node scripts/verify-feedback.mjs   # 浏览器半区真渲染（154 项，含功能管理与侧栏菜单）
 node scripts/verify-i18n.mjs       # 中英词条表契约（9 项）
 node scripts/verify-tile.mjs       # 地图地块几何内核（147 项，含反向验证）
 node scripts/verify-tile-pipeline.mjs  # 地图地块数据层与流水线（115 项）

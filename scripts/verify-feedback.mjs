@@ -324,7 +324,7 @@ const api = new Proxy(
  * 本地却什么都看不出来。数字变了就说明 Hook 顺序改了，必须同步这里的槽位。
  */
 const EXPECTED_HOOKS = {
-  StudioPanel: 19,
+  StudioPanel: 20,
   ImageModule: 15,
   SequenceModule: 16
 };
@@ -332,34 +332,41 @@ const EXPECTED_HOOKS = {
 /**
  * 渲染 StudioPanel 的某个阶段。
  *
- * StudioPanel 的 Hook 顺序（只列 state 槽，顺序不能错）：
- *   0 useLocaleTick（语言切换重渲染的计数器，值没人读）/
- *   1 projects / 2 projectId / 3 project / 4 stage / 5 module / 6 notice /
- *   7 loading / 8 promptDraft / 9 promptOpen / 10 videoPromptDraft /
- *   11 settingsDraft / 12 sourceBusy / 13 dropOver / 15 usePendingTasks.map /
- *   16 useStudioIntent（深链接意图；null = 没有待处理的链接）
- * useRef（14 fileInputRef，以及 usePendingTasks 内部的 ref）与 useCallback 不占 state 槽。
+ * StudioPanel 的 Hook 顺序（**槽位下标**，顺序不能错；useRef 不读槽位，
+ * 但同样占一个下标）：
+ *   0 useLocaleTick / 1 projects / 2 projectId / 3 project / 4 stage / 5 module /
+ *   6 notice / 7 loading / 8 promptDraft / 9 promptOpen / 10 videoPromptDraft /
+ *   11 settingsDraft / 12 sourceBusy / 13 dropOver /
+ *   14 fileInputRef(useRef) / 15 usePendingTasks 的 map / 16·17 usePendingTasks 内部两个 ref /
+ *   18 useStudioIntent（深链接意图；null = 没有待处理的链接）/
+ *   19 useHiddenModules（被隐藏的功能模块 key 数组；[] = 五个全可见）
+ *
+ * ⚠️ 槽位是**稀疏**的：下标 18 之前的几个 `undefined` 会让桩回落到 Hook 的初始值，
+ * 所以新加的 Hook 必须显式写它的下标——顺手 append 到数组末尾会落到 ref 槽上，
+ * 测试会「看起来没生效」。
+ *
+ * `hidden` 就是第 19 槽：传 `["rig"]` 之类就能测「隐藏后页签里不再出现」。
  */
-function renderStage(project, stage, tasks) {
-  HOOK.slots = [
-    0,
-    ["p1"],
-    "p1",
-    project,
-    stage,
-    "sprite",
-    null,
-    false,
-    {},
-    {},
-    "",
-    {},
-    false,
-    false,
-    undefined,
-    tasks.map,
-    null
-  ];
+function renderStage(project, stage, tasks, hidden = []) {
+  HOOK.slots = [];
+  HOOK.slots[0] = 0;
+  HOOK.slots[1] = ["p1"];
+  HOOK.slots[2] = "p1";
+  HOOK.slots[3] = project;
+  HOOK.slots[4] = stage;
+  HOOK.slots[5] = "sprite";
+  HOOK.slots[6] = null;
+  HOOK.slots[7] = false;
+  HOOK.slots[8] = {};
+  HOOK.slots[9] = {};
+  HOOK.slots[10] = "";
+  HOOK.slots[11] = {};
+  HOOK.slots[12] = false;
+  HOOK.slots[13] = false;
+  HOOK.slots[14] = undefined;
+  HOOK.slots[15] = tasks.map;
+  HOOK.slots[16] = null;
+  HOOK.slots[19] = hidden;
   HOOK.cursor = 0;
   hookOverflow = false;
   const tree = panel({ api });
@@ -986,6 +993,199 @@ section("深链接");
   check("地址栏里的参数被清掉", windowStub.location.search === "", windowStub.location.search);
   unsubscribeBootstrap();
   CLICK_LISTENERS.splice(0, CLICK_LISTENERS.length);
+}
+
+// ── 功能管理：隐藏的模块在界面上也必须真的消失 ────────────────────────────
+//
+// 「隐藏」是双向的（工具面由 verify-tools.mjs 钉），这里只管界面这一半：
+// 页签、侧栏菜单、以及全隐藏时的空态。设置页的勾选要能写回宿主。
+section("功能管理（隐藏模块）");
+{
+  const test = bundle.__test ?? {};
+  const { visibleModulesOf, normalizeHiddenKeys, StudioGlyph, ConfigSection } = test;
+  check(
+    "测试把手导出可见性工具",
+    typeof visibleModulesOf === "function" && typeof normalizeHiddenKeys === "function" && typeof StudioGlyph === "function",
+    Object.keys(test).join("、")
+  );
+
+  // 收敛口径：只留已知模块，顺序固定 —— 与宿主 normalizeHiddenModules 同口径。
+  check("空数组 = 五个全可见", visibleModulesOf([]).length === 5, `${visibleModulesOf([]).length}`);
+  check(
+    "隐藏 rig / tile 后只剩三个",
+    JSON.stringify(visibleModulesOf(["rig", "tile"]).map((entry) => entry.key)) === JSON.stringify(["sprite", "image", "sequence"]),
+    JSON.stringify(visibleModulesOf(["rig", "tile"]).map((entry) => entry.key))
+  );
+  check(
+    "不认识的 key 被丢掉、顺序固定",
+    JSON.stringify(normalizeHiddenKeys(["nope", "tile", "sprite"])) === JSON.stringify(["sprite", "tile"]),
+    JSON.stringify(normalizeHiddenKeys(["nope", "tile", "sprite"]))
+  );
+
+  const tabs = (tree) => byClass(tree, "SPR_module").map((node) => node.props?.["data-module"]);
+  const all = renderStage(makeProject(), "images", makeTasks());
+  check("默认五个页签都在", tabs(all.tree).length === 5, tabs(all.tree).join("、"));
+  check("默认没有「已隐藏」提示", byClass(all.tree, "SPR_modulesHiddenNote").length === 0);
+
+  const some = renderStage(makeProject(), "images", makeTasks(), ["rig", "tile"]);
+  check("隐藏后对应页签不再渲染", !tabs(some.tree).includes("rig") && !tabs(some.tree).includes("tile"), tabs(some.tree).join("、"));
+  check("其余页签保留", tabs(some.tree).join("、") === "sprite、image、sequence", tabs(some.tree).join("、"));
+  check("出现「已隐藏 N 个功能」提示", byClass(some.tree, "SPR_modulesHiddenNote").length === 1);
+
+  // 当前选中的模块被隐藏时，界面必须落到第一个可见模块，而不是渲染一个被隐藏的模块。
+  const fallback = renderStage(makeProject(), "images", makeTasks(), ["sprite"]);
+  check(
+    "选中的模块被隐藏时落到第一个可见模块",
+    tabs(fallback.tree).join("、") === "image、sequence、rig、tile",
+    tabs(fallback.tree).join("、")
+  );
+  check("被隐藏模块的界面不再渲染", byClass(fallback.tree, "SPR_moduleTitle").map(textOf).includes("图片生成"));
+
+  const none = renderStage(makeProject(), "images", makeTasks(), ["sprite", "image", "sequence", "rig", "tile"]);
+  check("全隐藏时一个页签都没有", tabs(none.tree).length === 0, tabs(none.tree).join("、"));
+  check(
+    "全隐藏时给出去哪打开的提示",
+    textOf(none.tree).includes("所有功能都已被隐藏") && textOf(none.tree).includes("功能管理"),
+    textOf(none.tree).slice(0, 120)
+  );
+
+  // ── 侧栏入口的菜单按钮 ──────────────────────────────────────────────────
+  //
+  // StudioGlyph 渲染在宿主 `<button class=…panelRow>` **内部**，所以它只能自己
+  // 挂一个 `span[role=button]` 的触发器，并把这一下点击 stopPropagation 掉。
+  // Hook 顺序：0 useHiddenModules / 1 open / 2 anchor / 3 rootRef / 4 menuRef。
+  function renderRail(hidden, open = true) {
+    HOOK.slots = [hidden, open, { left: 300, top: 120, bottom: 140 }];
+    HOOK.cursor = 0;
+    hookOverflow = false;
+    return StudioGlyph({ size: 18, api: undefined, studioCtx: fakeCtx });
+  }
+
+  const closed = renderRail([], false);
+  const trigger = byClass(closed, "SPR_railMenuBtn");
+  check("入口上有菜单按钮", trigger.length === 1, `${trigger.length} 个`);
+  check("菜单按钮带 aria 契约", trigger[0]?.props?.role === "button" && trigger[0]?.props?.["aria-haspopup"] === "menu", JSON.stringify({ role: trigger[0]?.props?.role, haspopup: trigger[0]?.props?.["aria-haspopup"] }));
+  check("菜单默认不展开", byClass(closed, "SPR_railMenu").length === 0);
+  check("图标本体还在", collect(closed, (node) => node.type === "svg").length >= 1);
+
+  // 点一下菜单按钮：必须 preventDefault + 拦住冒泡，否则会顺带把面板切了。
+  let toggled = false;
+  const triggerEvent = {
+    currentTarget: { getBoundingClientRect: () => ({ left: 10, top: 100, right: 46, bottom: 136 }) },
+    preventDefault: () => {
+      toggled = true;
+    },
+    stopPropagation: () => {
+      toggled = true;
+    }
+  };
+  trigger[0].props.onClick(triggerEvent);
+  check("点菜单按钮时拦住冒泡（不会顺手切面板）", toggled === true);
+
+  const opened = renderRail(["rig"], true);
+  const menu = byClass(opened, "SPR_railMenu");
+  check("展开后出现菜单", menu.length === 1, `${menu.length} 个`);
+  const items = byClass(opened, "SPR_railMenuItem");
+  check("菜单列出全部可见模块", items.length === 4, `${items.length} 个`);
+  check(
+    "被隐藏的模块不在菜单里",
+    !items.some((node) => node.props?.["data-module"] === "rig"),
+    items.map((node) => node.props?.["data-module"]).join("、")
+  );
+  check("菜单里能直接点进某个功能", typeof items[0]?.props?.onClick === "function");
+  check("菜单容器吞掉点击，不会冒泡到宿主按钮", typeof menu[0]?.props?.onClick === "function" && typeof menu[0]?.props?.onMouseDown === "function");
+  check("菜单底部说明隐藏了几个", textOf(opened).includes("已隐藏 1 个功能"), textOf(opened).slice(0, 80));
+
+  // 点某一项 → 广播意图 + 切到工作台面板（与深链接同一条路径）。
+  const received = [];
+  const unsubscribe = test.subscribeIntent((intent) => received.push(intent));
+  const panelsBefore = SELECTED_PANELS.length;
+  items.find((node) => node.props?.["data-module"] === "sequence").props.onClick({
+    preventDefault() {},
+    stopPropagation() {}
+  });
+  check("点菜单项会切到工作台面板", SELECTED_PANELS.length === panelsBefore + 1 && SELECTED_PANELS.at(-1) === bundle.GAME_STUDIO_PANEL_ID, SELECTED_PANELS.at(-1));
+  check("点菜单项广播对应模块的意图", JSON.stringify(received.at(-1)) === JSON.stringify({ module: "sequence" }), JSON.stringify(received.at(-1)));
+  unsubscribe();
+
+  const railAllHidden = renderRail(["sprite", "image", "sequence", "rig", "tile"], true);
+  check("全隐藏时菜单给出提示而不是空菜单", byClass(railAllHidden, "SPR_railMenuEmpty").length === 1 && byClass(railAllHidden, "SPR_railMenuItem").length === 0);
+
+  // ── 设置页的「功能管理」分组 ────────────────────────────────────────────
+  check("设置页组件已注册", typeof ConfigSection === "function", typeof ConfigSection);
+  if (typeof ConfigSection === "function") {
+    const featureConfig = {
+      hiddenModules: ["rig"],
+      arkApiKeySet: false,
+      minimaxApiKeySet: false,
+      arkModel: "doubao-seedream-5-0-flash-260915",
+      arkRedrawModel: "",
+      arkSize: "2K",
+      arkBaseUrl: "https://ark.example/api/v3",
+      arkModels: [],
+      minimaxModel: "MiniMax-H3",
+      minimaxDuration: 5,
+      minimaxResolution: "2K",
+      minimaxBaseUrl: "https://api.minimaxi.com",
+      minimaxModels: [],
+      minimaxHosts: [],
+      cellWidth: 256,
+      cellHeight: 256,
+      frameCount: 8,
+      concurrency: 3,
+      keyLow: 14,
+      keyHigh: 80,
+      despill: 0.65,
+      edgeShrink: 0,
+      bgTolerance: 90,
+      workingLongEdge: 768,
+      pixelSize: 0,
+      fillRatio: 0.94,
+      bottomMargin: 2,
+      dataRoot: "/tmp/dsh-gmm"
+    };
+
+    const saved = [];
+    const configApi = {
+      getConfig: () => Promise.resolve(featureConfig),
+      saveConfig: (payload) => {
+        saved.push(payload);
+        return Promise.resolve({ ...featureConfig, ...payload });
+      },
+      testArk: () => Promise.resolve({}),
+      testMinimax: () => Promise.resolve({})
+    };
+
+    // Hook 顺序：0 useLocaleTick / 1 config / 2 arkKey / 3 minimaxKey / 4 notice / 5 testing。
+    HOOK.slots = [0, featureConfig, "", "", null, null];
+    HOOK.cursor = 0;
+    hookOverflow = false;
+    const settings = ConfigSection({ api: configApi });
+
+    const rows = collect(settings, (node) => typeof node.props?.["data-feature"] === "string");
+    check("设置页有五个功能开关", rows.length === 5, `${rows.length} 个`);
+    const rigRow = rows.find((node) => node.props["data-feature"] === "rig");
+    check("被隐藏的那一行标成已隐藏", rigRow?.props?.["data-hidden"] === "true");
+    const checkboxes = collect(settings, (node) => typeof node.props?.["data-testid"] === "string" && node.props["data-testid"].startsWith("cfg-feature-"));
+    check("每个开关都有可点的勾选框", checkboxes.length === 5, `${checkboxes.length} 个`);
+    check(
+      "勾选框与隐藏状态一致（rig 未勾）",
+      checkboxes.find((node) => node.props["data-testid"] === "cfg-feature-rig")?.props?.checked === false &&
+        checkboxes.find((node) => node.props["data-testid"] === "cfg-feature-sprite")?.props?.checked === true
+    );
+
+    // 重新勾上 rig → 写回宿主的 hiddenModules 应当只剩空数组。
+    checkboxes.find((node) => node.props["data-testid"] === "cfg-feature-rig").props.onChange({ target: { checked: true } });
+    check("勾选后写回宿主", JSON.stringify(saved.at(-1)) === JSON.stringify({ hiddenModules: [] }), JSON.stringify(saved.at(-1)));
+
+    // 隐藏 sprite → hiddenModules 按固定顺序排列。
+    checkboxes.find((node) => node.props["data-testid"] === "cfg-feature-sprite").props.onChange({ target: { checked: false } });
+    check("取消勾选后写回宿主", JSON.stringify(saved.at(-1)) === JSON.stringify({ hiddenModules: ["sprite", "rig"] }), JSON.stringify(saved.at(-1)));
+    check("设置页说明隐藏后 AI 也调不到", textOf(settings).includes("对话里的 AI 也无法调用它"));
+  }
+
+  // 收尾：把共享状态复位，免得影响后续断言。
+  test.publishHiddenModules([]);
 }
 
 report();

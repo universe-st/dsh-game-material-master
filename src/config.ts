@@ -9,6 +9,7 @@ import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_ROW_ORDER } from "./directions.js";
+import { STUDIO_MODULES } from "./links.js";
 
 /**
  * 上一版的默认行序（按生成依赖顺序）。方位语义修正后，默认改成罗盘顺时针；
@@ -180,6 +181,17 @@ export interface Config {
   rowOrder: string[];
   rowOrderVersion: number;
 
+  /**
+   * **被隐藏的功能模块**（`links.ts` 的 `STUDIO_MODULES` 子集）。
+   *
+   * 「隐藏」是**双向**的：界面上不再出现这个模块的页签与入口，对话工具面也
+   * 拒绝对它的任何调用（`game_material_call` / `status` / `review` … 一律报错）。
+   * 只挡界面不挡工具等于没挡——模型照样能调 `runTileItems` 真实计费。
+   *
+   * 空数组（默认）= 五个模块全部可见。全隐藏是允许的：面板会显示一句空态。
+   */
+  hiddenModules: string[];
+
   /** 并发请求数（生图 / 视频 / 抽帧各自受限）。 */
   concurrency: number;
 }
@@ -235,6 +247,7 @@ export const DEFAULT_CONFIG: Config = {
 
   rowOrder: [...DEFAULT_ROW_ORDER],
   rowOrderVersion: ROW_ORDER_VERSION,
+  hiddenModules: [],
   concurrency: 3
 };
 
@@ -285,6 +298,20 @@ function asNumber(value: unknown, fallback: number, min: number, max: number): n
   const n = typeof value === "number" ? value : Number.parseFloat(String(value ?? ""));
   if (!Number.isFinite(n)) return fallback;
   return Math.min(max, Math.max(min, n));
+}
+
+/**
+ * 收敛「被隐藏的功能模块」：只留合法 key、去重，并按 `STUDIO_MODULES` 的固定
+ * 顺序排列。
+ *
+ * 排序不是为了好看：它让「同一组勾选」永远序列化成同一份 JSON，于是界面可以
+ * 用字符串比较判断「有没有变」，自检里也能直接对整份数组断言。
+ * 不认识的 key 一律丢掉——旧版本配置里留着的模块名不该让整个设置页起不来。
+ */
+export function normalizeHiddenModules(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const wanted = new Set(value.filter((key): key is string => typeof key === "string"));
+  return STUDIO_MODULES.filter((key) => wanted.has(key));
 }
 
 /** 把任意读入的 JSON 收敛成一份合法配置，缺项一律回落默认值。 */
@@ -342,6 +369,7 @@ export function normalizeConfig(input: unknown): Config {
 
     rowOrder,
     rowOrderVersion: ROW_ORDER_VERSION,
+    hiddenModules: normalizeHiddenModules(raw.hiddenModules),
     concurrency: asInt(raw.concurrency, DEFAULT_CONFIG.concurrency, 1, 8)
   };
 }
@@ -354,7 +382,7 @@ export async function loadConfig(): Promise<Config> {
     const text = await readFile(configPath(), "utf8");
     cache = normalizeConfig(JSON.parse(text));
   } catch {
-    cache = { ...DEFAULT_CONFIG, rowOrder: [...DEFAULT_ROW_ORDER] };
+    cache = { ...DEFAULT_CONFIG, rowOrder: [...DEFAULT_ROW_ORDER], hiddenModules: [] };
   }
   return cache;
 }
@@ -384,6 +412,8 @@ export function maskConfig(config: Config): ConfigView {
   return {
     ...rest,
     rowOrder: [...config.rowOrder],
+    // 复制一份再回传：界面改勾选后会把它当草稿改，共享同一个数组会互相写花。
+    hiddenModules: [...config.hiddenModules],
     arkApiKeySet: arkApiKey.trim() !== "",
     arkApiKeyHint: hintOf(arkApiKey),
     minimaxApiKeySet: minimaxApiKey.trim() !== "",

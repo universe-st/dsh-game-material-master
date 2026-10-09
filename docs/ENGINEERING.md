@@ -85,6 +85,10 @@
 底层没有第二套实现：工具直接复用界面用的那个 Typert 远程服务，所以
 「界面上做到的事」与「对话里做到的事」永远是同一件事、同一份数据。
 
+**被用户隐藏的模块是例外**：工具面每次调用都先按 `hiddenModules` 查一次模块归属，
+命中就拒绝（`game_material_status` 既不列它的清单也不给它的深链接）。理由与做法见
+「配置 → 功能管理：隐藏的模块必须对 AI 也关上」。
+
 ### 固定流程
 
 ```
@@ -157,11 +161,12 @@ dsh plugin --profile web add /path/to/dsh-game-material-master
 | 项 | 说明 |
 |---|---|
 | 火山方舟 API Key | 「测试连接」会**真实生成一张 1K 小图**（产生少量费用），同时验证 Key 与模型 / 接入点 |
-| 生图模型 | 默认 `doubao-seedream-4-0-250828`；也可选 4.5 / 5.0 Lite / Pro，或填自定义接入点 ID |
+| 生图模型 | 默认 `doubao-seedream-5-0-flash-260915`；也可选 5.0 Pro / Lite、4.5，或填自定义接入点 ID（**别用 4.0**：它只输出 JPEG 且会把 2:1 等距菱形画变形，地图地块模块量不出几何） |
 | MiniMax API Key | 「测试连接」只查一个不存在的任务，**免费**，能区分 Key 无效与其它错误 |
 | 视频模型 | 默认 `MiniMax-H3`。选 H3/H3-Max 自动走 v2 协议，选 Hailuo/I2V 走 v1；**优云智算版 H3** 在同一个下拉里显式选择 |
 | Base URL | **主机根**，不含 `/v1`、`/v2`。国内站 `https://api.minimax.cn`，国际站 `https://api.minimaxi.com`。选中「优云智算版 H3」时该字段固定为 `https://cp.compshare.cn`、不可编辑 |
 | 默认参数 | 单格宽高、抽帧张数与工作尺寸、像素块边长、抠像阈值等 |
+| 功能管理 | 逐个开关五个模块；关掉的模块界面不出现，对话工具面也拒绝（见下） |
 
 Key 只写入本机 `<DSH_HOME>/game-material-master/config.json`，回传界面时始终脱敏（只给尾号）。
 
@@ -192,6 +197,55 @@ Key 只写入本机 `<DSH_HOME>/game-material-master/config.json`，回传界面
 
 切换模型时非法值会被自动收敛（例如从 Hailuo 换到 H3 时 `1080P` → `2K`）。
 **参考图 / 参考视频模式是 v2 才有的能力**，选 v1 模型时会明确报错而不是静默失败。
+
+### 功能管理：隐藏的模块必须对 AI 也关上
+
+设置页的「功能管理」逐个开关五个模块，配置字段是 `hiddenModules: string[]`
+（合法值 = `links.ts` 的 `STUDIO_MODULES`；`normalizeHiddenModules` 丢掉不认识的 key
+并按固定顺序排列，这样同一组勾选永远序列化成同一份 JSON）。
+
+**只在界面上藏起来等于没藏。** 模型看不见页签，照样能调 `runTileItems` /
+`runRigSheet` 这类方法，而且**每次调用都真实计费**。所以这道闸门有两半：
+
+| 半区 | 做什么 | 在哪 |
+|---|---|---|
+| 浏览器 | 页签与侧栏菜单按可见性过滤；选中项被隐藏时落到第一个可见模块 | `client.ts` 的 `useHiddenModules` / `visibleModulesOf` / `activeModule` |
+| 宿主 | `game_material_call` / `status` / `intake` / `upload` / `wait` / `review` / `approve` 全部拒绝 | `tools.ts` 的 `assertModuleVisible` + `METHOD_MODULE` |
+
+几个刻意的选择：
+
+- **归类表是一份显式清单**（`METHOD_MODULE`），不是按方法名前缀猜。`verify-tools.mjs`
+  有一条契约要求**每个** `TOOL_METHODS` 方法要么在表里、要么在 `SHARED_TOOL_METHODS` 里，
+  新加方法忘了归类会直接红——漏一个就是「这个功能隐藏了但还能调」。
+- **先拦后查**。`status({id:"t…"})` 在不存在的 id 上也先报「已被隐藏」，而不是
+  「找不到」。否则模型会以为只是没找到，换个 id 继续试。
+- **可见性本身不许模型改**。工具面对 `saveConfig({hiddenModules})` 直接报错，
+  否则模型可以自己把隐藏的功能放出来，「隐藏」就成了摆设。
+- **每次都现读配置**。`loadConfig()` 命中内存缓存、不打盘，所以用户在设置页取消隐藏后
+  **下一次调用立刻可用**，不需要重启宿主（配置缓存由 `saveConfig` 更新，两侧读同一份）。
+- **全隐藏是允许的**：工作台显示一句空态，侧栏菜单显示同样一句，不是白屏。
+
+### 侧栏入口上的菜单按钮
+
+需求是「在入口按钮上加快捷菜单」。实现上有个硬约束：宿主把插件的 `sidebar.panellist`
+**渲染在它自己的 `<button class="…panelRow">` 内部**（`dsh-client-ui-sidebar` 的 `PanelRow`），
+所以：
+
+- 不能加平级的 `<button>`（会变成嵌套按钮），于是触发器是一个
+  `span[role="button"][aria-haspopup="menu"]`，挂在图标右下角；
+- 点击必须 `preventDefault` + `stopPropagation`：宿主那个 `<button>` 的 onClick
+  就在同一条冒泡路径上，不拦就会「打开菜单顺带切面板」；
+- 菜单用 **`position:fixed`** 而不是 `absolute`：侧栏面板列本身不裁剪，
+  但祖先里有 `overflow:hidden` 的容器，`absolute` 在某些窗口布局下会被切掉；
+- 菜单容器自己也吞掉 `onClick` / `onMouseDown`，理由同第二条；
+- **被隐藏的模块不出现在菜单里**，菜单底部说明隐藏了几个。
+
+侧栏收起（36×36 的窄栏）时同一个触发器仍然可点——`getBoundingClientRect()` 拿的是
+图标的实际位置，菜单贴到窄栏右侧展开。
+
+真机验证过：展开 / 收起两种侧栏宽度、点菜单项确实切面板且菜单自动关闭、
+隐藏后页签与菜单同时消失（**不用刷新页面**）、深链接指向被隐藏模块时落到第一个可见模块、
+全隐藏时的空态。
 
 ---
 
@@ -1634,7 +1688,7 @@ node scripts/dsh-web-cookie.mjs 127.0.0.1:43121 --json
 | `node scripts/e2e-rig-live.mjs <角色整图>` | 模块四真实链路：**真的调一次生图模型**拆件，再跑完装配/骨骼/图集（约 0.2 元） |
 | `node scripts/e2e-tile-live.mjs [项目名] [key,…]` | 模块五真实链路：**每个变体一次生图调用**（默认 3 类 ≈ 0.9 元），再跑参考图 → 规整 → 铺图 → 导出。参考图不是阶段（原「① 模板」已并入生成阶段），脚本只是先本地渲染一遍好在花钱前确认菱形比例 |
 | `node scripts/e2e-tile-rebuild.mjs <源项目id> [新项目名]` | 模块五**不花钱**的重建：复用已有 `raw/` 按当前代码重新规整、铺图、导出，改了几何/路径/界面之后用它造一个「内容真实、数据干净」的项目，再在浏览器里看界面 |
-| `node scripts/verify-host.mjs` | 宿主半区全链路（**317 项**）：五个模块的本地链路、**阶段①的转圈截帧（合成一段「转动」视频跑真实 ffmpeg，覆盖截帧位置、按比例换算、下游作废、切换生成方式）**、**模块五的资源路由（真起一台 server 走 HTTP 取回 `tile-assets` 的模板图，并验证 403 与目录穿越）**、资源路由（含 `turn/` 白名单）、预览页的 `text/html`、目录穿越与 id 前缀校验 |
+| `node scripts/verify-host.mjs` | 宿主半区全链路（**322 项**）：五个模块的本地链路、**阶段①的转圈截帧（合成一段「转动」视频跑真实 ffmpeg，覆盖截帧位置、按比例换算、下游作废、切换生成方式）**、**模块五的资源路由（真起一台 server 走 HTTP 取回 `tile-assets` 的模板图，并验证 403 与目录穿越）**、资源路由（含 `turn/` 白名单）、预览页的 `text/html`、目录穿越与 id 前缀校验 |
 | `node scripts/verify-tile.mjs` | 模块五几何内核（**147 项**）：模板比例严格 2:1、合成图菱形测量、规整后无缺口/无越界、装饰锚点与遮挡、拼图无洞与同种子逐像素一致、PNG 往返。含**两条反向验证**——把模板几何改回硬编码错误值必须产生透明缺口、把抠底换回硬阈值必须留下近白像素；修复一旦被回退，这两条会红 |
 | `node scripts/verify-tile-pipeline.mjs` | 模块五数据层与流水线（**98 项**）：项目 CRUD（含非法单元格尺寸被拒）、参考图自动准备与几何、指纹复用、用**研究期真实 2K 图**喂规整（不花钱）、拼图与导出的产物、同种子重拼逐像素一致、换种子结果不同、**`map.pixel`**（叠层对齐用的裁剪偏移与交付尺寸）、**失效传播**（作废 generate 要清空变体与地图；只作废 map 时已花钱的地块必须保住）、**手改布局必须被保留**（传 `decorDensity` 等覆盖参数不能把它冲掉）、**全部为空的布局要走 fill 而不是渲染一张空画布**、**相对路径一律正斜杠**（`join()` 在 Windows 上给 `cell\…`，它会被拼进 URL）、提示词构造、快照给界面是相对路径而给对话工具是绝对 URL |
 | `node scripts/verify-tile-gateway.mjs` | 模块五**走真实网关**（**78 项**）：payload 解析、中英默认清单、模板作业、验收回写、`saveTileProject` 的**作废边界**（只改标签产物必须保住；改内容只废那一个；改画风全废）、**增删改地块**（新增计入 progress、改用途/家族/占格/变体数生效、删除后数量正确、提交空清单不能清空项目、`resetItemsToDefault` 中英各一份）、**手动改布局**（写回 cells/rows/cols/seed、不作废地块、带空格能重铺、空 cells 不清空）、拼图/导出、错误路径、`setReviewMode` 支持 tile。纯函数与直接调 tilegen 都测不到这一层——实测它抓出过「验收一个地块就崩」与「任何一次保存都清空全部（花钱生成的）产物」 |
@@ -1642,7 +1696,7 @@ node scripts/dsh-web-cookie.mjs 127.0.0.1:43121 --json
 | `node scripts/find-missing-i18n.mjs` | **工具**（不是断言）：列出所有还没进词条表的 `T("…")` 原文，直接输出可粘贴的条目 |
 | `node scripts/verify-i18n.mjs` | 中英词条表契约：**每个 `T()` 都有英文条目 / 没有死条目 / `{nN}` 占位符两侧一致 / 译文不残留汉字与全角标点 / `lib/client.js` 与 `src/client.ts` 的词条表一致（忘了 build 就发版会整体退回中文）** |
 | `node scripts/i18n-wrap.mjs` | 词法级 codemod：把 `src/client.ts` 里含中日韩字符的字面量包成 `T(...)`（模板字面量拆成 `{nN}` 占位符，幂等，`i18n-ignore-*` 区间不碰） |
-| `node scripts/verify-tools.mjs` / `verify-client.mjs` / `verify-pipeline.mjs` | 对话调用面（含五个模块 status/review 的文字渲染）、浏览器半区契约（含「每个远程方法都有 api 实现」与手动装配的四条回归）、抠像回归 |
+| `node scripts/verify-tools.mjs` / `verify-client.mjs` / `verify-pipeline.mjs` | 对话调用面（**147 项**，含五个模块 status/review 的文字渲染与「隐藏的模块必须拒绝调用」）、浏览器半区契约（**347 项**，含「每个远程方法都有 api 实现」「手动装配的四条回归」「功能管理 / 侧栏菜单的类名与接线」）、抠像回归（40 项） |
 
 
 
@@ -1652,10 +1706,10 @@ npm run build          # tsc → lib/，并剥掉浏览器束结尾的 export {}
 # 纯本地测试（不联网、不花钱）
 node scripts/verify-minimax.mjs    # MiniMax 协议层（85 项，含请求体逐字段断言）
 node scripts/verify-pipeline.mjs   # 抽帧/抠像/合成链路（40 项，含回归用例）
-node scripts/verify-host.mjs       # 宿主冒烟（317 项，真实 cordis + 真实 HTTP；含内置默认提示词的语言切换、模块五资源路由）
-node scripts/verify-client.mjs     # 浏览器半区契约（319 项：阶段 ctx 键必须被转发、每个生成类调用点都带 loading 反馈、转圈时间轴与八圆圈、手动装配的四个坑、拆件质检 / IK 约束组件）
-node scripts/verify-feedback.mjs   # 浏览器半区渲染（119 项：真加载 lib/client.js，断言遮罩真的出现 / 空闲时真的不出现 / 转圈模式两种生成方式与八圆圈都在 / 深链接点击真的切面板）
-node scripts/verify-tools.mjs      # 对话调用面（110 项：工具 schema、方法覆盖、**客户端清单的 payload 标记与宿主 manifest 逐条一致**、返回值无损 JSON 审计、固定流程（含阶段①生成方式必问）、审核模式、深链接契约、转圈模式的 status/review 渲染）
+node scripts/verify-host.mjs       # 宿主冒烟（322 项，真实 cordis + 真实 HTTP；含内置默认提示词的语言切换、hiddenModules 落盘与收敛、模块五资源路由）
+node scripts/verify-client.mjs     # 浏览器半区契约（347 项：阶段 ctx 键必须被转发、每个生成类调用点都带 loading 反馈、转圈时间轴与八圆圈、手动装配的四个坑、拆件质检 / IK 约束组件、功能管理 / 侧栏菜单的文本与样式契约）
+node scripts/verify-feedback.mjs   # 浏览器半区渲染（154 项：真加载 lib/client.js，断言遮罩真的出现 / 空闲时真的不出现 / 转圈模式两种生成方式与八圆圈都在 / 深链接点击真的切面板 / 隐藏模块后页签与菜单真的消失、设置页勾选真的写回宿主）
+node scripts/verify-tools.mjs      # 对话调用面（147 项：工具 schema、方法覆盖、**客户端清单的 payload 标记与宿主 manifest 逐条一致**、返回值无损 JSON 审计、固定流程（含阶段①生成方式必问）、审核模式、深链接契约、转圈模式的 status/review 渲染、**功能管理（每个方法都归了模块 / 隐藏后一律拒绝 / 可见性不许模型改）**）
 node scripts/verify-i18n.mjs       # 中英词条表契约（9 项：覆盖 / 死条目 / 占位符 / 译文纯净度 / 产物同步）
 node scripts/verify-tile.mjs       # 模块五几何内核（109 项，含两条反向验证）
 node scripts/verify-tile-pipeline.mjs # 模块五数据层与流水线（83 项）
@@ -1716,6 +1770,10 @@ node scripts/retry-video.mjs <项目 id> <方向> [--soft]         # 单方向�
 各插了一个 `useLocaleTick()`（一个 `useState`），表现就是 `usePendingTasks` 读到 `undefined`
 直接抛错——桩里的槽位数组与 `EXPECTED_HOOKS` 要跟着一起加。数字对不上不是「测试太严」，
 而是**Hook 顺序真的改了**：真实 React 下同样会读串，只是后果更隐蔽。
+功能管理那次又踩了一次，而且更阴：**槽位是稀疏的**（`useRef` 也占下标却不读槽位），
+把新的 `useState` 顺手 append 到数组末尾，它落到了 ref 槽上，测试表现是
+「传了 `hidden: ["rig"]` 但页签一个都没少」——看起来像功能没生效。
+新 Hook 必须**显式写它的下标**。
 
 `verify-tools.mjs` 盯的是对话调用面这一类坑：工具 schema 必须落在 DSH 支持的关键字子集里、
 `game_material_call` 的 method 枚举必须**覆盖插件的每一个远程方法**（少一个就是「某个功能对话里调不了」）、
@@ -1731,6 +1789,11 @@ undefined」的断言永远为真（这里真踩过，见上面的坑）。它�
 最后用**文本契约**把宿主 `links.ts` 与浏览器半区
 `client.ts` 的深链接常量钉成一致——两边是两份实现（经典脚本不能 `import`），
 参数名或模块名改单边会静默失效。
+
+第 6.7 节是**功能管理**：先断言「每个 `TOOL_METHODS` 方法都归了模块」（归类表漏一个
+就是「隐藏了但还能调」），再把 `hiddenModules` 写进配置，逐个工具验证被隐藏的模块
+**一律被拒**（含只能按 payload 判断的 `setReviewMode`）、`status` 既不列清单也不给深链接、
+`saveConfig({hiddenModules})` 被工具面拒绝，最后验证**取消隐藏后不需要重启就恢复可用**。
 
 `verify-live-bundle.mjs` 回答的是另一个问题：「我改完了，运行中的宿主到底有没有换新束？」
 自己拼 `/plugins/<id>/client.js` 一定 404（浏览器束是按模块图里带 rev 的 URL 提供的），

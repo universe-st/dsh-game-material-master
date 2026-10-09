@@ -35,11 +35,192 @@ import { listSequenceJobs, readSequenceJob, listSequenceTasks } from "./seqgen.j
 import { listRigJobs, readRigJob, rigSnapshot } from "./riggen.js";
 import { listTileProjects, readTileProject, tileSnapshot } from "./tilegen.js";
 import { TOOL_METHODS } from "./wire.js";
-import { PANEL_KEY, buildOpenLink, originForLinks, type OpenIntent } from "./links.js";
+import { PANEL_KEY, STUDIO_MODULES, buildOpenLink, originForLinks, type OpenIntent } from "./links.js";
+import { loadConfig } from "./config.js";
 
-/** 四个模块的 key 与界面里的模块 key 完全一致。 */
-const MODULES = ["sprite", "image", "sequence", "rig", "tile"] as const;
+/**
+ * 五个模块的 key 与界面里的模块 key 完全一致。
+ *
+ * 真源是 `links.ts` 的 `STUDIO_MODULES`（配置层的 `hiddenModules` 也按它收敛），
+ * 这里只是换个短名字。
+ */
+const MODULES = STUDIO_MODULES;
 type ModuleKey = (typeof MODULES)[number];
+
+/** 模块的中文名，与界面页签的 title 逐字一致（报错信息里直接引用）。 */
+export const MODULE_LABELS: Record<ModuleKey, string> = {
+  sprite: "八方向图生成",
+  image: "图片生成",
+  sequence: "序列帧生成",
+  rig: "骨骼动画生成",
+  tile: "45°地图地块生成"
+};
+
+/**
+ * 远程方法 → 它属于哪个模块。
+ *
+ * 这张表是「隐藏了功能，AI 也调不到」的落点：`game_material_call` 每次调用都
+ * 按它查一次模块再拦。`scripts/verify-tools.mjs` 有一条契约要求
+ * **每个** `TOOL_METHODS` 方法要么在这里、要么在 `SHARED_TOOL_METHODS` 里——
+ * 新加方法忘了归类会直接红，不会静默漏过。
+ */
+export const METHOD_MODULE: Record<string, ModuleKey> = {
+  // 模块一 八方向图
+  listProjects: "sprite",
+  createProject: "sprite",
+  getProject: "sprite",
+  deleteProject: "sprite",
+  renameProject: "sprite",
+  uploadSource: "sprite",
+  savePrompts: "sprite",
+  saveSettings: "sprite",
+  setApproved: "sprite",
+  revealProject: "sprite",
+  runImage: "sprite",
+  runImages: "sprite",
+  setImageMode: "sprite",
+  runTurnVideo: "sprite",
+  runTurnFrames: "sprite",
+  setTurnPick: "sprite",
+  setTurnPicks: "sprite",
+  resetTurnPicks: "sprite",
+  cutTurnFrames: "sprite",
+  runVideos: "sprite",
+  pollVideos: "sprite",
+  clearVideos: "sprite",
+  runFrames: "sprite",
+  prepareFramePick: "sprite",
+  setFramePick: "sprite",
+  setFramePicks: "sprite",
+  resetFramePicks: "sprite",
+  rekey: "sprite",
+  compose: "sprite",
+  // 模块二 图片生成
+  listImageJobs: "image",
+  createImageJob: "image",
+  getImageJob: "image",
+  deleteImageJob: "image",
+  saveImageJob: "image",
+  uploadImageRef: "image",
+  removeImageRef: "image",
+  addImageItem: "image",
+  removeImageItem: "image",
+  runImageJob: "image",
+  keyImageJob: "image",
+  // 模块三 序列帧生成
+  listSequenceJobs: "sequence",
+  createSequenceJob: "sequence",
+  getSequenceJob: "sequence",
+  deleteSequenceJob: "sequence",
+  saveSequenceJob: "sequence",
+  uploadSequenceRef: "sequence",
+  removeSequenceRef: "sequence",
+  runSequenceVideo: "sequence",
+  pollSequenceVideo: "sequence",
+  clearSequenceVideo: "sequence",
+  runSequenceFrames: "sequence",
+  keySequenceFrames: "sequence",
+  composeSequence: "sequence",
+  // 模块四 骨骼动画生成
+  listRigJobs: "rig",
+  createRigJob: "rig",
+  getRigJob: "rig",
+  deleteRigJob: "rig",
+  saveRigJob: "rig",
+  uploadRigSource: "rig",
+  uploadRigPart: "rig",
+  removeRigPart: "rig",
+  renameRigPart: "rig",
+  setRigPartVisibility: "rig",
+  saveRigLayoutItem: "rig",
+  saveRigLayoutItems: "rig",
+  setRigLayoutHints: "rig",
+  setRigSemantics: "rig",
+  setRigBoneOffsets: "rig",
+  resetRigBoneOffsets: "rig",
+  setRigAnimationSettings: "rig",
+  resetRigAnimationSettings: "rig",
+  getRigAnimation: "rig",
+  saveRigAnimation: "rig",
+  resetRigAnimation: "rig",
+  runRigQa: "rig",
+  setRigConstraints: "rig",
+  resetRigConstraints: "rig",
+  setRigMesh: "rig",
+  resetRigMesh: "rig",
+  setRigPath: "rig",
+  resetRigPath: "rig",
+  tintRigParts: "rig",
+  uploadRigTexture: "rig",
+  setRigTextureVersion: "rig",
+  removeRigTextureVersion: "rig",
+  runRigRedraw: "rig",
+  runRigSheet: "rig",
+  runRigSegment: "rig",
+  runRigLayout: "rig",
+  runRigBones: "rig",
+  runRigAtlas: "rig",
+  // 模块五 45°地图地块
+  listTileProjects: "tile",
+  createTileProject: "tile",
+  getTileProject: "tile",
+  deleteTileProject: "tile",
+  saveTileProject: "tile",
+  runTileItems: "tile",
+  runTileItem: "tile",
+  setTileApproved: "tile",
+  runTileMap: "tile",
+  saveTileMapCells: "tile",
+  runTileExport: "tile",
+  cancelTileJob: "tile",
+  revealTileProject: "tile"
+};
+
+/**
+ * 不隶属于任何模块的方法：配置类 + 跨模块的审核模式
+ * （`setReviewMode` 的模块在 payload 里，另外判）。
+ */
+export const SHARED_TOOL_METHODS: ReadonlySet<string> = new Set([
+  "getConfig",
+  "saveConfig",
+  "testArk",
+  "testMinimax",
+  "setReviewMode"
+]);
+
+/**
+ * 当前被隐藏的模块集合。
+ *
+ * 直接读配置缓存（`loadConfig` 命中内存缓存，不打盘），所以每次工具调用都能
+ * 拿到**最新**的勾选：用户在设置里取消隐藏后，下一次调用立刻可用，不需要重启。
+ */
+async function hiddenModulesNow(): Promise<Set<string>> {
+  const config = await loadConfig();
+  return new Set(config.hiddenModules);
+}
+
+/**
+ * 【功能管理】被隐藏的模块对模型一律不可用。
+ *
+ * 只在界面上藏起来是不够的：模型看不见页签，照样能调 `runTileItems` 真实计费。
+ * 所以工具面必须自己再拦一次，并且报错里告诉用户去哪里打开。
+ */
+async function assertModuleVisible(module: ModuleKey | undefined): Promise<void> {
+  if (module === undefined) return;
+  const hidden = await hiddenModulesNow();
+  if (hidden.has(module)) {
+    throw new Error(
+      `功能「${MODULE_LABELS[module]}」已被用户在「设置 → 游戏素材大师 → 功能管理」里隐藏，不能调用。` +
+        `请让用户先在那里把它打开；不要绕过这一限制。`
+    );
+  }
+}
+
+/** 方法属于哪个模块（共享方法返回 undefined）。 */
+export function moduleOfMethod(method: string, payload?: Record<string, any>): ModuleKey | undefined {
+  if (method === "setReviewMode") return moduleOf(payload?.module);
+  return METHOD_MODULE[method];
+}
 
 /** 工具名统一前缀，避免和别家插件撞名。 */
 const PREFIX = "game_material_";
@@ -403,6 +584,8 @@ function intentFromCall(method: string, payload: Record<string, any>): OpenInten
 const CALL_DESCRIPTION = [
   "调用「游戏素材大师」插件的任意远程方法——插件界面上的每个功能都能在这里调用。",
   "配置：getConfig() / saveConfig(payload: 任意配置字段，如 arkApiKey、arkModel、minimaxModel、cellWidth…) / testArk() / testMinimax()",
+  "  ⚠️ 用户可以在「设置 → 游戏素材大师 → 功能管理」里隐藏某些功能模块。被隐藏的模块**工具面一律拒绝**（界面也看不到），",
+  "    调用会直接报错并说明去哪里打开；不要试图绕过。hiddenModules 本身只能由用户在设置界面里改，工具面不允许写。",
   "八方向图：listProjects() / createProject({name}) / getProject({projectId}) / deleteProject({projectId}) / renameProject({projectId,name}) /",
   "  uploadSource({projectId,name,data:base64}) / savePrompts({projectId,images?,video?,turn?,videoPerDirection?,suffix?,resetImagesToDefault?,resetVideoToDefault?,resetTurnToDefault?}) /",
   "  saveSettings({projectId,settings}) / setApproved({projectId,stage:images|videos|frames|sheet,key?,approved}) / revealProject({projectId}) /",
@@ -519,6 +702,13 @@ export function registerStudioTools(host: StudioToolHost, gateway: GameStudioGat
         if (!spec.payload && payload !== undefined && Object.keys(payload).length > 0) {
           throw new Error(`${method} 不接受 payload`);
         }
+        // 「功能管理」的两道闸：被隐藏的模块整体拒掉；可见性本身只许用户在设置页里改。
+        await assertModuleVisible(moduleOfMethod(method, payload));
+        if (method === "saveConfig" && payload?.hiddenModules !== undefined) {
+          throw new Error(
+            "hiddenModules（功能可见性）只能由用户在「设置 → 游戏素材大师 → 功能管理」里修改，工具面不允许改动。"
+          );
+        }
         const fn = (gateway as any)[method];
         if (typeof fn !== "function") throw new Error(`方法未实现：${method}`);
         let value: unknown;
@@ -552,24 +742,28 @@ export function registerStudioTools(host: StudioToolHost, gateway: GameStudioGat
       output: { schema: OBJECT_SCHEMA, render: (_args: unknown, value: any) => textBlocks(renderStatus(value)) },
       async execute(args: any) {
         const id = asString(args?.id);
+        const hidden = await hiddenModulesNow();
         if (id === "") {
+          // 只列可见模块的清单：隐藏的模块连「有哪些项目」都不给模型看一眼。
+          await assertModuleVisible(moduleOf(args?.module));
           const [projects, images, sequences, rigs, tiles] = await Promise.all([
-            listProjects(), listImageJobs(), listSequenceJobs(), listRigJobs(), listTileProjects()
+            hidden.has("sprite") ? [] : listProjects(),
+            hidden.has("image") ? [] : listImageJobs(),
+            hidden.has("sequence") ? [] : listSequenceJobs(),
+            hidden.has("rig") ? [] : listRigJobs(),
+            hidden.has("tile") ? [] : listTileProjects()
           ]);
+          const links: Record<string, string> = {};
+          for (const key of MODULES) if (!hidden.has(key)) links[key] = buildOpenLink({ module: key });
           return {
             module: moduleOf(args?.module) ?? null,
+            hiddenModules: [...hidden],
             projects,
             imageJobs: images,
             sequenceJobs: sequences,
             rigJobs: rigs,
             tileProjects: tiles,
-            links: {
-              sprite: buildOpenLink({ module: "sprite" }),
-              image: buildOpenLink({ module: "image" }),
-              sequence: buildOpenLink({ module: "sequence" }),
-              rig: buildOpenLink({ module: "rig" }),
-              tile: buildOpenLink({ module: "tile" })
-            },
+            links,
             hint: "用 game_material_status({module,id}) 看某个目标的细节；八方向图的四步是 images → videos → frames → sheet，45°地图地块是 generate → review → map → export。"
           };
         }
@@ -577,6 +771,7 @@ export function registerStudioTools(host: StudioToolHost, gateway: GameStudioGat
         // 短路会把「带 id 的查询」变成「列清单」，assetBase / 几何报告全丢。
         // 只给了 module、没给 id 的情况，上面的 `id === ""` 分支已经覆盖了。
         const module = resolveTarget(args?.module, id);
+        await assertModuleVisible(module);
         const snapshot = await snapshotOf(module, id);
         const stage = typeof args?.stage === "string" ? args.stage : undefined;
         return { ...snapshot, ...openInfo(intentOf(module, id, { stage }), "点开可以看到产物并打「通过」") };
@@ -611,6 +806,7 @@ export function registerStudioTools(host: StudioToolHost, gateway: GameStudioGat
       async execute(args: any) {
         const module = moduleOf(args?.module);
         if (module === undefined) throw new Error(`未知模块：${String(args?.module)}`);
+        await assertModuleVisible(module);
         const id = asString(args?.id);
         const told = new Set<string>(Array.isArray(args?.told) ? args.told.map((entry: unknown) => String(entry)) : []);
         const config = await (gateway as any).getConfig();
@@ -649,6 +845,7 @@ export function registerStudioTools(host: StudioToolHost, gateway: GameStudioGat
       async execute(args: any) {
         const module = moduleOf(args?.module);
         if (module === undefined) throw new Error(`未知模块：${String(args?.module)}`);
+        await assertModuleVisible(module);
         const id = asString(args?.id);
         const kind = asString(args?.kind);
         const path = asString(args?.path);
@@ -678,6 +875,7 @@ export function registerStudioTools(host: StudioToolHost, gateway: GameStudioGat
       async execute(args: any) {
         const module = moduleOf(args?.module);
         if (module === undefined) throw new Error(`未知模块：${String(args?.module)}`);
+        await assertModuleVisible(module);
         const result = await (gateway as any).setReviewMode({
           module,
           id: asString(args?.id),
@@ -711,6 +909,7 @@ export function registerStudioTools(host: StudioToolHost, gateway: GameStudioGat
         const id = asString(args?.id);
         if (id === "") throw new Error("id 不能为空");
         const module = resolveTarget(args?.module, id);
+        await assertModuleVisible(module);
         const timeoutMs = clampInt(args?.timeoutSeconds, 120, 1, 900) * 1000;
         const startedAt = Date.now();
         let snapshot = await snapshotOf(module, id);
@@ -756,6 +955,7 @@ export function registerStudioTools(host: StudioToolHost, gateway: GameStudioGat
         const id = asString(args?.id);
         if (id === "") throw new Error("id 不能为空");
         const module = resolveTarget(args?.module, id);
+        await assertModuleVisible(module);
         const snapshot = await snapshotOf(module, id);
         const stage = typeof args?.stage === "string" ? args.stage : undefined;
         const direction = typeof args?.direction === "string" ? args.direction : undefined;
@@ -872,6 +1072,7 @@ export function registerStudioTools(host: StudioToolHost, gateway: GameStudioGat
         if (id === "") throw new Error("id 不能为空");
         if (typeof args?.approved !== "boolean") throw new Error("approved 必须是布尔值");
         const module = resolveTarget(args?.module, id);
+        await assertModuleVisible(module);
         const approved = args.approved === true;
 
         if (module === "sprite") {
@@ -1014,7 +1215,15 @@ const PROMPT_SECTION = [
   "`manual` 模式下每完成一步都要贴一次；`auto` 模式下至少在全部完成或需要用户决策时贴。",
   "",
   "### 计费与重复提交",
-  "生图与生视频都真实计费：不要为了确认状态而重复提交同一个目标；提交类调用返回后一律先 `game_material_wait`。"
+  "生图与生视频都真实计费：不要为了确认状态而重复提交同一个目标；提交类调用返回后一律先 `game_material_wait`。",
+  "",
+  "### 被用户隐藏的功能（功能管理）",
+  "用户可以在「设置 → 游戏素材大师 → 功能管理」里把某个模块隐藏起来。被隐藏的模块：",
+  "  · 插件界面里不再出现它的页签与侧栏菜单项；",
+  "  · 工具面**同样不可用**——`game_material_call` / `status` / `intake` / `upload` / `wait` / `review` / `approve` 都会明确报错。",
+  "`game_material_status`（不带 id）返回的 `hiddenModules` 是当前被隐藏的模块 key 列表。",
+  "遇到这类报错时**不要重试、也不要绕过**（例如直接改配置文件）：告诉用户这个功能被隐藏了，请他在设置里打开。",
+  "`hiddenModules` 也不能通过 `game_material_call({method:\"saveConfig\"})` 修改——工具面会拒绝。"
 ].join("\n");
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -1404,6 +1613,9 @@ function renderStatus(value: any): string {
       ...value.imageJobs.map((j: any) => `  - ${j.id} ${j.name} — ${j.ready}/${j.total} 张（抠像 ${j.keyed}）`),
       `序列帧任务（${value.sequenceJobs.length}）：`,
       ...value.sequenceJobs.map((j: any) => `  - ${j.id} ${j.name} — 视频${j.videoReady ? "✓" : "✗"} 帧${j.frameReady ? "✓" : "✗"} 条图${j.sheetReady ? "✓" : "✗"}`),
+      ...(Array.isArray(value.hiddenModules) && value.hiddenModules.length > 0
+        ? [`已隐藏的功能（工具面同样不可调用）：${value.hiddenModules.map((key: string) => MODULE_LABELS[key as ModuleKey] ?? key).join("、")}`]
+        : []),
       value.hint
     ];
     return lines.join("\n");

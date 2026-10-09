@@ -36,7 +36,7 @@ const plugin = await import("../lib/index.js");
 const links = await import("../lib/links.js");
 const { METHODS } = await import("../lib/wire.js");
 const { encodePng } = await import("../lib/png.js");
-const { moduleForId } = await import("../lib/tools.js");
+const { moduleForId, METHOD_MODULE, SHARED_TOOL_METHODS } = await import("../lib/tools.js");
 
 const failures = [];
 let checks = 0;
@@ -491,6 +491,71 @@ async function main() {
   // 也被盖住了。
   console.log("\n6.5) 工具返回值的无损 JSON 审计");
   check("所有工具调用的返回值都能无损过 JSON", losslessAudit.length === 0, losslessAudit.slice(0, 3).join(" | "));
+
+  // ── 6.7 功能管理：被隐藏的模块，工具面也必须拒绝 ────────────────────────
+  //
+  // 「隐藏」如果只做在界面上等于没做：模型看不见页签，照样能调 runTileItems
+  // 真实计费。这一段钉住宿主那一半闸门。
+  console.log("\n6.7) 功能管理（隐藏的模块对模型不可用）");
+  const unclassified = exposed.filter((method) => METHOD_MODULE[method] === undefined && !SHARED_TOOL_METHODS.has(method));
+  check("每个工具方法都归了模块（或明确标为共享）", unclassified.length === 0, unclassified.join("、"));
+  const knownMethods = new Set([...Object.keys(METHOD_MODULE), ...SHARED_TOOL_METHODS]);
+  check("归类表里没有多余 / 打错的方法名", [...knownMethods].every((method) => exposed.includes(method)), [...knownMethods].filter((method) => !exposed.includes(method)).join("、"));
+
+  const hiddenConfig = await studio.saveConfig({ hiddenModules: ["tile", "rig", "nope"] });
+  check(
+    "hiddenModules 收敛成合法子集并按固定顺序排列",
+    JSON.stringify(hiddenConfig.hiddenModules) === JSON.stringify(["rig", "tile"]),
+    JSON.stringify(hiddenConfig.hiddenModules)
+  );
+  check("读回来的配置里有 hiddenModules", Array.isArray((await studio.getConfig()).hiddenModules));
+
+  await expectThrow("隐藏模块的远程方法被拒绝", () => run("game_material_call", { method: "listTileProjects" }), "已被用户");
+  await expectThrow("隐藏模块（骨骼）同样被拒绝", () => run("game_material_call", { method: "runRigSheet", payload: { jobId: "r1" } }), "隐藏");
+  await expectThrow("setReviewMode 也按 payload 里的模块拦", () => run("game_material_call", { method: "setReviewMode", payload: { module: "tile", id: "t1", reviewMode: "auto" } }), "隐藏");
+  await expectThrow(
+    "工具面不允许改功能可见性（否则模型能自己放出来）",
+    () => run("game_material_call", { method: "saveConfig", payload: { hiddenModules: [] } }),
+    "不允许"
+  );
+  const visibleCall = await run("game_material_call", { method: "listProjects" });
+  check("没被隐藏的模块照常可用", visibleCall.ok === true, JSON.stringify(visibleCall).slice(0, 60));
+
+  await expectThrow("intake 对隐藏模块直接拒绝", () => run("game_material_intake", { module: "tile" }), "隐藏");
+  await expectThrow("upload 对隐藏模块直接拒绝", () => run("game_material_upload", { module: "rig", id: "r1", kind: "source", path: sourcePath }), "隐藏");
+  await expectThrow("reviewMode 对隐藏模块直接拒绝", () => run("game_material_reviewMode", { module: "tile", id: "t1", reviewMode: "auto" }), "隐藏");
+  // 「先拦后查」：这几个 id 根本不存在，但被隐藏的模块要先报「隐藏」，
+  // 否则模型会以为「只是没找到」，转头换个 id 继续试。
+  await expectThrow("status 先报隐藏、再谈找不找得到", () => run("game_material_status", { id: "tdeadbeef" }), "隐藏");
+  await expectThrow("status 只给 module 时也拦", () => run("game_material_status", { module: "tile" }), "隐藏");
+  await expectThrow("review 对隐藏模块直接拒绝", () => run("game_material_review", { id: "tdeadbeef" }), "隐藏");
+  await expectThrow("wait 对隐藏模块直接拒绝", () => run("game_material_wait", { id: "rdeadbeef", timeoutSeconds: 1 }), "隐藏");
+  await expectThrow("approve 对隐藏模块直接拒绝", () => run("game_material_approve", { id: "tdeadbeef", approved: true }), "隐藏");
+
+  const hiddenStatus = await run("game_material_status", {});
+  check("status 里列出当前被隐藏的模块", JSON.stringify(hiddenStatus.hiddenModules) === JSON.stringify(["rig", "tile"]), JSON.stringify(hiddenStatus.hiddenModules));
+  check(
+    "status 不再列出被隐藏模块的清单",
+    Array.isArray(hiddenStatus.tileProjects) && hiddenStatus.tileProjects.length === 0 && hiddenStatus.rigJobs.length === 0,
+    `${hiddenStatus.tileProjects?.length} / ${hiddenStatus.rigJobs?.length}`
+  );
+  check(
+    "status 不再给被隐藏模块的深链接",
+    hiddenStatus.links?.tile === undefined && hiddenStatus.links?.rig === undefined,
+    Object.keys(hiddenStatus.links ?? {}).join("、")
+  );
+  check("可见模块的深链接还在", typeof hiddenStatus.links?.sprite === "string", String(hiddenStatus.links?.sprite));
+  const hiddenStatusText = tool("game_material_status").output
+    .render({}, hiddenStatus)
+    .map((block) => block.text)
+    .join("\n");
+  check("status 的文本渲染里点明了隐藏项", hiddenStatusText.includes("已隐藏的功能"), hiddenStatusText.slice(0, 90).replace(/\n/g, " | "));
+
+  // 取消隐藏必须**立刻**生效，不需要重启宿主（配置是内存缓存，工具每次现读）。
+  await studio.saveConfig({ hiddenModules: [] });
+  const restored = await run("game_material_call", { method: "listTileProjects" });
+  check("取消隐藏后立刻恢复可调用", restored.ok === true, JSON.stringify(restored).slice(0, 60));
+  check("恢复后 status 重新给出全部链接", Object.keys((await run("game_material_status", {})).links ?? {}).length === 5);
 
   // ── 7. 深链接：宿主与浏览器半区必须用同一套常量 ─────────────────────────
   console.log("\n7) 深链接契约");
