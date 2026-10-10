@@ -988,6 +988,12 @@ stepY = diamondHeight/2 = cellWidth / 4 = 16     ← 不是 cellHeight/4 = 24
 **头的祖先链经过肢体** / 左右镜像缺失），并且**永远返回可用的语义表**，
 让界面能显示「哪一条、为什么不对」，而不是一个保存失败的红点。
 
+`parent: null` 是明确选择「挂 root」的持久化标记，经过保存、JSON 往返与骨骼重建都保留。
+缺省 `parent` 才允许按名字/角色推断；不能用 `?? undefined` 把这两个意图混为一谈。
+导出的普通部件骨骼总有父级（直接挂根时写 `parent: "root"`），只有系统根骨没有父级。
+语义保存的业务结果 `ok: false` 不会抛异常；客户端必须读取这个字段并展示具体校验错误，
+不能把 RPC 正常返回当成语义已保存。
+
 ### 骨骼的手工偏移：三通道
 
 骨骼的局部姿势被拆成两层（照搬 DragonBones `Bone.offsetMode = Additive` 的思路）：
@@ -1191,10 +1197,14 @@ row 4: left-lower-leg| right-lower-leg| left-foot        | right-foot
 
 ### 骨骼是怎么推出来的
 
-- **骨骼原点**取部件的近端锚点（上臂取上端＝肩，大腿取上端＝胯），**朝向**取近端 → 远端。
+- **骨骼原点**取部件的近端锚点（上臂取上端＝肩，大腿取上端＝胯）；装配里旋转过的部件，
+  先把近端/远端锚点绕图片中心旋转，再换到 Spine 坐标。图片的正旋转是顺时针，Spine 是逆时针。
+- **骨轴是 Spine 的局部 +X**，朝向取 `atan2(dirY, dirX)`，骨尖是 `origin + length × (cosθ, sinθ)`。
+  把骨轴误当 +Y 会让自己的播放器看着正常，但官方 IK 求值后整段手臂跳到另一侧。
 - 骨骼的 `x`/`y` 换算到**父骨骼的局部坐标系**（spine-core 会先用父骨骼的旋转去转它）。
 - 挂点用「图片中心 − 骨骼原点」再逆旋转到骨骼局部系，并用 `rotation` 抵消骨骼朝向——
-  于是**初始姿态与装配结果逐像素一致**（`scripts/verify-rig.mjs` 断言偏差 < 0.02px），
+  于是**初始姿态与装配结果逐像素一致**（`scripts/verify-rig.mjs` 断言偏差 < 0.02px，
+  `verify-rig-runtime.mjs` 用官方解析器检查非90度旋转的锚点、region四角与mesh顶点），
   而动画一开始，部件就绕着正确的那节骨头转。
 - 动画是 Spine **4.2 wire format**：旋转值写在 `value` 下（不是 3.8 时代的 `angle`），
   bezier 控制点是**绝对量**、且**每个被动画属性一份**（`rotate` 4 个数、`translate` 8 个）。
@@ -1287,13 +1297,49 @@ row 4: left-lower-leg| right-lower-leg| left-foot        | right-foot
 
 另外两处决定「画出来对不对」：图片落点靠 `pivot` + `frame*`（`_pivotX = pivot.x * frameWidth
 + frameX`），裁剪过的部件少给 `frame*` 会整体偏掉；坐标是 **y 向下**（`DragonBones.yDown`
-默认 `true`），与我们的图像坐标一致，旋转角不取反。
+默认 `true`），所以从 Spine 的Y向上坐标转换时，骨骼/挂点的Y与旋转、动画位移Y与旋转值
+都必须取反；图片像素仍按原来的方向存进图集。
+
+当前 DragonBones 导出覆盖刚体图片、骨骼与动画、IK。mesh降为刚体图片且不输出FFD，
+Path约束与路径槽位不输出，并通过`exportWarnings`/校验warning明确报告降级；需保留蒙皮、
+FFD与Path效果时使用Spine导出。不会给image挂一个看似存在但引擎不会生效的FFD时间轴。
 
 ### 预览为什么不用官方 Spine Web Player
 
 官方播放器要从 CDN 拉 `spine-player.js`，而验收页可能在没有外网的环境里打开。所以
 `preview.html` 把部件图片与骨架 JSON 全部 base64 内联、自带一个 Canvas 渲染器（含贝塞尔
 插值、骨骼叠加显示、时间轴），双击就能看，零外部依赖。
+
+开发自检另用固定版本 `@esotericsoftware/spine-core@4.2.120` 做真正的解析与求值。
+它只在 `devDependencies`，不进入插件运行时依赖。`node scripts/verify-rig-runtime.mjs`
+在内存中构造纹理，不联网也不调用生图；覆盖旋后的锚点/图片、mesh自身权重与动画跟随、
+IK同弯曲方向加约束不跳姿态（含手工骨偏移）、开放/闭合Path实际摆骨、FFD时间轴实际加载与
+顶点变形、预览与官方FFD顶点对照、IK和Path同架求值、官方图集解析。
+`--preview` 可把免费带纹理的样例骨架与自包含预览输出到临时目录，供浏览器视觉验收。
+
+IK目前只支持两根骨骼（`chain = 1`，不含末端自身的父级数量）。编辑接口拒绝其它长度且
+不落盘，历史任务里的更长链在构建时整条跳过并明确告警。自动目标使用包含手工偏移的
+实际装配骨尖；保持已有肘侧时须选同一弯曲方向，主动切换方向会得到另一侧的合法解。
+
+原来的JSON/HTML字符串检查不能证明引擎会加载并播放。尤其FFD须写在
+`animations[id].attachments.default[slot][attachment].deform`；加权网格每个骨骼影响各写一对
+局部位移。mesh权重候选必须包含自身骨骼，否则骨骼动画旋转了而图片仍只跟父级走。
+Path的target指向路径槽位，附件要写`vertexCount`与三次Bezier控制点；折线逐段转换为直线Bezier，
+不能直接把折线点数组冒充Spine路径附件。
+
+**2026-10-10绑定修复后的旧任务**：重新生成③骨骼与④图集，让产物采用修正后的骨轴、
+旋后锚点、权重与FFD/Path格式。已有手工数值与动画数据会保留；因骨骼局部坐标系已经纠正，
+旧任务的手工位移偏置与自定义`translate`轨道需要重新核对，尤其旋转过的部件。
+这些修复保证输入布局与导出/播放遵守同一坐标约定，不替代真实关节识别。
+自动生图拆件、部件语义与不同姿态下的手腕/脚踝定位仍为实验性，必要时调整近端/远端锚点。
+
+本轮纯本地验证环境为Windows、Node 22.22.1、ffmpeg/ffprobe 8.1、官方Spine 4.2.120。
+最终骨骼回归全部通过：`verify-rig` 281项、`verify-rig-module` 229项、`verify-rigsemantics`
+58项、`verify-feedback` 161项、`verify-rig-runtime` 41项（包含重复路径端点/越界与官方求值对照）。
+另有两处地图自检基线问题，在原始HEAD的临时检出中也能复现：`verify-tile.mjs` 的D9
+软alpha档位期望不匹配（合成前景到背景的最小RGB距离455，超过软区间40～190），
+以及`verify-tile-pipeline.mjs` 的T23c缺少gitignored研究素材，`relatives=[]` 后报没有已验收地块。
+这些地图夹具问题不属于本轮骨骼修复，未修改地图代码或放宽地图断言。
 
 ### 验收与重试
 
@@ -1681,6 +1727,7 @@ node scripts/dsh-web-cookie.mjs 127.0.0.1:43121 --json
 |---|---|
 | `node scripts/verify-rigsemantics.mjs` | 模块四语义层：角色推断（含中文名与关键词优先级）、默认语义与 v1 的 `RIG_SLOTS` **逐条一致**、父级沿角色链回退、成环/悬空父级/锚点退化的校验与自动修复、确定性 |
 | `node scripts/verify-rig.mjs` | 模块四算法层：拆件分割、装配定位精度、遮挡排序、骨骼初始姿态逐像素还原、Spine 4.2 wire format、**DragonBones 5.5 双格式导出（每个地雷都配了反例）**、语义成环时的无环保证、**拆件质检（重复件 / 镜像判别 / 装配质量）**、图集装箱、预览 HTML（合成图像素级断言） |
+| `node scripts/verify-rig-runtime.mjs` | 模块四官方 Spine 4.2.120 解析与求值：旋后锚点、region四角/mesh UV、+X骨尖、mesh自身旋转、IK不跳与追目标、开放/闭合Path实际摆骨、FFD实际加载变形、图集解析；`--preview`免费生成本地视觉样例 |
 | `node scripts/verify-rig-module.mjs` | 模块四端到端：建任务 → 上传 → **语义** → 装配 → **手工骨骼偏移（含「重跑骨骼后仍在」）** → **关键帧编辑（含「改动作废骨骼」「导出 JSON 里是改后的值」）** → 骨骼 → 图集 → 打标 → 删除级联（走真实模块代码，数据落在临时 DSH_HOME） |
 | `node scripts/montage-parts.mjs <部件目录> <输出.png> <部件名…>` | 把若干部件拼成一张带分隔的对比图，用来人工核对「哪几块其实是同一个部位」。肉眼看蒙太奇小图分不清，放大并排才看得出来 |
 | `node scripts/make-rig-fixtures.mjs <目录>` | 生成**免费**的合成部件 PNG（`--full` 出完整 16 件），让除拆件以外的整条链可以零成本测试 |
@@ -1708,7 +1755,7 @@ node scripts/verify-minimax.mjs    # MiniMax 协议层（85 项，含请求体�
 node scripts/verify-pipeline.mjs   # 抽帧/抠像/合成链路（40 项，含回归用例）
 node scripts/verify-host.mjs       # 宿主冒烟（322 项，真实 cordis + 真实 HTTP；含内置默认提示词的语言切换、hiddenModules 落盘与收敛、模块五资源路由）
 node scripts/verify-client.mjs     # 浏览器半区契约（347 项：阶段 ctx 键必须被转发、每个生成类调用点都带 loading 反馈、转圈时间轴与八圆圈、手动装配的四个坑、拆件质检 / IK 约束组件、功能管理 / 侧栏菜单的文本与样式契约）
-node scripts/verify-feedback.mjs   # 浏览器半区渲染（154 项：真加载 lib/client.js，断言遮罩真的出现 / 空闲时真的不出现 / 转圈模式两种生成方式与八圆圈都在 / 深链接点击真的切面板 / 隐藏模块后页签与菜单真的消失、设置页勾选真的写回宿主）
+node scripts/verify-feedback.mjs   # 浏览器半区渲染（161 项：真加载 lib/client.js，断言遮罩真的出现 / 空闲时真的不出现 / 转圈模式两种生成方式与八圆圈都在 / 深链接点击真的切面板 / 隐藏模块后页签与菜单真的消失、设置页勾选真的写回宿主 / 语义校验失败没有误报成功）
 node scripts/verify-tools.mjs      # 对话调用面（147 项：工具 schema、方法覆盖、**客户端清单的 payload 标记与宿主 manifest 逐条一致**、返回值无损 JSON 审计、固定流程（含阶段①生成方式必问）、审核模式、深链接契约、转圈模式的 status/review 渲染、**功能管理（每个方法都归了模块 / 隐藏后一律拒绝 / 可见性不许模型改）**）
 node scripts/verify-i18n.mjs       # 中英词条表契约（9 项：覆盖 / 死条目 / 占位符 / 译文纯净度 / 产物同步）
 node scripts/verify-tile.mjs       # 模块五几何内核（109 项，含两条反向验证）

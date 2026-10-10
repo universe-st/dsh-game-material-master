@@ -501,6 +501,7 @@
       "取消隐藏": "Unhide",
       "隐藏": "Hide",
       "已更新「{n0}」的语义": "Updated semantics for \"{n0}\"",
+      "语义校验失败": "Semantics validation failed",
       "{n0}{n1}": "{n0}{n1}",
       "近端": "proximal",
       "远端": "distal",
@@ -8671,7 +8672,13 @@
 
       const patch = (name, fields) =>
         void run(
-          () => api.setRigSemantics({ jobId: job.id, parts: [{ name, ...fields }], by: "human" }),
+          async () => {
+            const result = await api.setRigSemantics({ jobId: job.id, parts: [{ name, ...fields }], by: "human" });
+            if (result?.ok === false) {
+              throw new Error((result.errors ?? []).map((issue) => issue.message).join("；") || T("语义校验失败"));
+            }
+            return result;
+          },
           T("已更新「{n0}」的语义", { n0: name }),
           activeKey
         );
@@ -9603,7 +9610,7 @@
                         label: "",
                         value: entry.chain,
                         min: 1,
-                        max: 4,
+                        max: 1,
                         step: 1,
                         onChange: (value) => write([{ name: entry.name, bone: entry.bone, target: entry.target, chain: value, bendPositive: entry.bendPositive, weight: entry.weight }], T("已改「{n0}」的链长", { n0: entry.name }))
                       })
@@ -12558,7 +12565,7 @@
     bundleModule.exports.GAME_STUDIO_PANEL_ID = GAME_STUDIO_PANEL_ID;
     // 仅测试用把手：三个模块组件在工厂闭包里，脚本要能拿出来单独渲染
     // （见 scripts/verify-feedback.mjs）。运行时没有任何调用点。
-    bundleModule.exports.__test = { StudioPanel, TileModule, ImageModule, SequenceModule, usePendingTasks, LoadingOverlay, MediaBox, BusyBtn, BusyBadge, NumField, ZoomableImage, CSS, subscribeIntent, parseIntents, openStudioIntent, OPEN_QUERY_KEY, StudioGlyph, StudioGlyphIcon, publishHiddenModules, useHiddenModules, visibleModulesOf, normalizeHiddenKeys, ConfigSection };
+    bundleModule.exports.__test = { StudioPanel, TileModule, ImageModule, SequenceModule, RigSemanticsPanel, usePendingTasks, LoadingOverlay, MediaBox, BusyBtn, BusyBadge, NumField, ZoomableImage, CSS, subscribeIntent, parseIntents, openStudioIntent, OPEN_QUERY_KEY, StudioGlyph, StudioGlyphIcon, publishHiddenModules, useHiddenModules, visibleModulesOf, normalizeHiddenKeys, ConfigSection };
     return bundleModule.exports;
   }
 });

@@ -56,8 +56,9 @@ node scripts/verify-host.mjs       # 宿主全链路（322 项）
 node scripts/verify-client.mjs     # 浏览器半区契约（347 项）
 node scripts/verify-tools.mjs      # 对话调用面（147 项）
 node scripts/verify-pipeline.mjs   # 抽帧 / 抠像 / 合成（40 项）
-node scripts/verify-feedback.mjs   # 浏览器半区真渲染（154 项，含功能管理与侧栏菜单）
+node scripts/verify-feedback.mjs   # 浏览器半区真渲染（161 项，含功能管理、侧栏菜单与语义保存错误）
 node scripts/verify-i18n.mjs       # 中英词条表契约（9 项）
+node scripts/verify-rig-runtime.mjs  # 骨骼改动：官方 Spine 4.2 实际加载/IK/Path/FFD/顶点求值（开发依赖）
 node scripts/verify-tile.mjs       # 地图地块几何内核（147 项，含反向验证）
 node scripts/verify-tile-pipeline.mjs  # 地图地块数据层与流水线（115 项）
 node scripts/verify-tile-gateway.mjs   # 地图地块走真实网关（81 项：payload / 验收 / 作废边界 / 建筑 / 布局冻住 / 保存往返）

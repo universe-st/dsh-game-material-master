@@ -507,8 +507,8 @@ check("预览 HTML 内联了骨架", html.includes('"spine\\":\\"4.2.0') || html
     const spineBone = skeleton.bones.find((b) => b.name === bone.name);
     return spineBone !== undefined && (spineBone.parent ?? undefined) === bone.parent &&
       Math.abs(spineBone.x - bone.transform.x) < 1e-6 &&
-      Math.abs(spineBone.y - bone.transform.y) < 1e-6 &&
-      Math.abs(spineBone.rotation - bone.transform.skX) < 1e-6 &&
+      Math.abs(spineBone.y + bone.transform.y) < 1e-6 &&
+      Math.abs(spineBone.rotation + bone.transform.skX) < 1e-6 &&
       Math.abs(bone.transform.skX - bone.transform.skY) < 1e-9;
   }));
   check("DragonBones 动画是帧数而不是秒（idle = 1.6s × 30）",
@@ -688,6 +688,45 @@ console.log("=== 4b. 关键帧编辑（M3）===");
     await riggen.buildRigOutput(job.id);
     state = await riggen.readRigJob(job.id);
   }
+}
+
+console.log("=== 4c. 显式 root 经过保存、重读与骨骼重建 ===");
+{
+  const name = "right-foot";
+  const before = await riggen.readRigJob(job.id);
+  const parent = before.parts.find((p) => p.name === name).parent;
+  const items = JSON.stringify(before.layout.items);
+  const detached = await riggen.setRigSemantics(job.id, [{ name, parent: null }]);
+  check("显式 root 语义保存成功", detached.ok);
+  let persisted = await riggen.readRigJob(job.id);
+  check("显式 root 落盘后仍有 null 标记", persisted.parts.find((p) => p.name === name).parent === null);
+  check("改父级保留装配位置", JSON.stringify(persisted.layout.items) === items);
+  check("显式 root 经重新语义校验保留", riggen.validateRigSemantics(persisted).parts.find((p) => p.name === name).parent === null);
+  await riggen.buildRigOutput(job.id);
+  persisted = await riggen.readRigJob(job.id);
+  check("显式 root 能成功重建骨骼", persisted.rig.status === "ready", persisted.rig.error ?? "");
+  const output = JSON.parse(await readFile(riggen.rigAssetPath(job.id, "rig/skeleton.json"), "utf8"));
+  check("重建不会按标准名字把脚接回腿", output.bones.find((b) => b.name === name).parent === "root");
+  check("重建后任务仍保留显式 root", persisted.parts.find((p) => p.name === name).parent === null);
+  await riggen.setRigSemantics(job.id, [{ name, parent }]);
+  await riggen.buildRigOutput(job.id);
+  state = await riggen.readRigJob(job.id);
+}
+
+console.log("=== 4d. IK 只接受两根骨骼，非法请求不落盘 ===");
+{
+  const before = await riggen.readRigJob(job.id);
+  let message = "";
+  try {
+    await riggen.setRigConstraints(job.id, [{ type: "ik", name: "unsupported-three-bone",
+      bone: "right-foot", target: "test-target", chain: 2 }]);
+  } catch (error) {
+    message = error.message;
+  }
+  check("三根骨骼的请求明确报两骨限制", message.includes("两根骨骼") && message.includes("chain = 1"), message);
+  const after = await riggen.readRigJob(job.id);
+  check("拒绝三骨IK不会写入或改变其它约束", JSON.stringify(after.constraints) === JSON.stringify(before.constraints));
+  check("拒绝三骨IK不会作废已生成骨骼", JSON.stringify(after.rig) === JSON.stringify(before.rig));
 }
 
 console.log("=== 5. 图集打包 ===");

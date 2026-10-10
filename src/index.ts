@@ -1832,7 +1832,7 @@ export class GameStudioGateway extends TypertRemoteService {
       const record = asRecord(item);
       const patch: any = { name: asString(record.name) };
       if (typeof record.role === "string") patch.role = record.role;
-      if (record.parent === null) patch.parent = undefined;
+      if (record.parent === null) patch.parent = null;
       else if (typeof record.parent === "string") patch.parent = record.parent;
       if (Array.isArray(record.proximal) && record.proximal.length === 2) patch.proximal = [Number(record.proximal[0]), Number(record.proximal[1])];
       if (Array.isArray(record.distal) && record.distal.length === 2) patch.distal = [Number(record.distal[0]), Number(record.distal[1])];

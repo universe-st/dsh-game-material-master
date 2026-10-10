@@ -147,8 +147,8 @@ export interface PartSemantics {
   /** 部件名（唯一键，同时也是骨骼名与 slot 名）。 */
   name: string;
   role: RigRole;
-  /** 父部件名；`undefined`/空串表示直接挂 root。 */
-  parent?: string;
+  /** 父部件名；null 显式挂 root，undefined 表示尚未指定父级。 */
+  parent?: string | null;
   /** 锚点，归一化到该部件包围盒；y 向下。 */
   proximal: [number, number];
   distal: [number, number];
@@ -370,12 +370,12 @@ export function validateSemantics(
       ? [...new Set(raw.tags.filter((tag): tag is string => typeof tag === "string" && tag.trim() !== "").map((tag) => tag.trim()))]
       : [];
     const source = raw.source === "ai" || raw.source === "human" ? raw.source : "default";
-    return { name: raw.name, role, parent: typeof raw.parent === "string" && raw.parent.trim() !== "" ? raw.parent.trim() : undefined, proximal, distal, tags, source };
+    return { name: raw.name, role, parent: raw.parent === null ? null : typeof raw.parent === "string" && raw.parent.trim() !== "" ? raw.parent.trim() : undefined, proximal, distal, tags, source };
   });
 
   // ③ 父级存在性与自环。
   for (const part of parts) {
-    if (part.parent === undefined) continue;
+    if (part.parent == null) continue;
     if (part.parent === part.name) {
       errors.push({ name: part.name, level: "error", message: "父级指向自己" });
       part.parent = undefined;
@@ -393,7 +393,7 @@ export function validateSemantics(
   for (const part of parts) {
     const path = new Set<string>([part.name]);
     let cursor = part.parent;
-    while (cursor !== undefined) {
+    while (cursor != null) {
       if (path.has(cursor)) {
         errors.push({ name: part.name, level: "error", message: `父级链成环：${[...path].join(" → ")} → ${cursor}；已改挂 root` });
         part.parent = undefined;
@@ -422,7 +422,7 @@ export function validateSemantics(
       const chain: RigRole[] = [];
       let cursor = part.parent;
       let guard = 0;
-      while (cursor !== undefined && guard++ < 64) {
+      while (cursor != null && guard++ < 64) {
         const parent = byName.get(cursor);
         if (parent === undefined) break;
         chain.push(parent.role);

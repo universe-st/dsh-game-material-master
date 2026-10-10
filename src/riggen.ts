@@ -137,8 +137,8 @@ export interface RigPartNode {
    * 路径都不需要用户先填表。
    */
   role?: string;
-  /** 父部件名；`undefined` 表示直接挂 root。改它会立刻改变骨架层级。 */
-  parent?: string;
+  /** 父部件名；null 显式挂 root，undefined 表示尚未推断。 */
+  parent?: string | null;
   /** 近端锚点（归一化到部件包围盒，y 向下）——骨骼原点落在这里。 */
   proximal?: [number, number];
   /** 远端锚点；骨骼朝向 = 近端 → 远端。 */
@@ -711,7 +711,7 @@ function normalizeRigJob(raw: any): RigJob {
           error: typeof part.error === "string" ? part.error : undefined,
           updatedAt: Number.isFinite(part.updatedAt) ? part.updatedAt : undefined,
           role: typeof part.role === "string" && part.role !== "" ? part.role : undefined,
-          parent: typeof part.parent === "string" && part.parent !== "" ? part.parent : undefined,
+          parent: part.parent === null ? null : typeof part.parent === "string" && part.parent !== "" ? part.parent : undefined,
           proximal: Array.isArray(part.proximal) && part.proximal.length === 2 ? [num(part.proximal[0], 0.5), num(part.proximal[1], 0)] : undefined,
           distal: Array.isArray(part.distal) && part.distal.length === 2 ? [num(part.distal[0], 0.5), num(part.distal[1], 1)] : undefined,
           tags: Array.isArray(part.tags) ? part.tags.filter((tag: unknown) => typeof tag === "string") : undefined,
@@ -2416,11 +2416,12 @@ export async function setRigConstraints(
       name: patch.name,
       bone: patch.bone ?? (index >= 0 ? current[index].bone : ""),
       target: patch.target ?? (index >= 0 ? current[index].target : `${patch.name}-target`),
-      chain: Math.max(1, Math.min(8, Math.round(num(patch.chain, index >= 0 ? current[index].chain : 1)))),
+      chain: num(patch.chain, index >= 0 ? current[index].chain : 1),
       bendPositive: patch.bendPositive ?? (index >= 0 ? current[index].bendPositive : true),
       weight: Math.max(0, Math.min(1, num(patch.weight, index >= 0 ? current[index].weight : 1)))
     };
     if (merged.bone === "") throw new Error(`IK「${merged.name}」缺少被约束的骨骼`);
+    if (merged.chain !== 1) throw new Error(`IK「${merged.name}」目前只支持两根骨骼（chain = 1）`);
     if (index >= 0) current[index] = merged;
     else current.push(merged);
     touched++;
@@ -3877,8 +3878,8 @@ export async function buildRigOutput(jobId: string): Promise<void> {
         scale: item.scale,
         rotation: item.rotation,
         z: item.z,
-        // 语义层的父级与锚点优先；没给时 `buildSkeleton` 会回落到按名字推断。
-        parent: node?.parent,
+        // 语义已补齐：没有语义父级也属于已确定的 root，不再按名字兜底。
+        parent: node?.parent ?? null,
         proximal: node?.proximal,
         distal: node?.distal,
         // 三通道的中间那一层：人的手工偏置，任何自动重跑都不碰它。

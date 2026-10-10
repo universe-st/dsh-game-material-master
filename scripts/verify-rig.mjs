@@ -444,8 +444,8 @@ check("没有告警", warnings.length === 0, warnings.join(" | "));
     const world = localWorldOf(bone.name);
     const childWorld = localWorldOf(child.name);
     if (world === undefined || childWorld === undefined) continue;
-    const tipX = world.x - Math.sin(world.rot) * bone.length;
-    const tipY = world.y + Math.cos(world.rot) * bone.length;
+    const tipX = world.x + Math.cos(world.rot) * bone.length;
+    const tipY = world.y + Math.sin(world.rot) * bone.length;
     worst = Math.max(worst, Math.hypot(tipX - childWorld.x, tipY - childWorld.y));
     checked++;
   }
@@ -491,7 +491,7 @@ for (const part of layoutParts) {
   worstCentre = Math.max(worstCentre, Math.abs(cx - expectX), Math.abs(cy - expectY));
   // 装配结果里这块部件被拧了 part.rotation，初始姿态就该呈现同样的角度。
   const worldRot = ((bone.rot + attRot) * 180) / Math.PI;
-  const delta = (((worldRot - (part.rotation ?? 0)) % 360) + 540) % 360 - 180;
+  const delta = (((worldRot + (part.rotation ?? 0)) % 360) + 540) % 360 - 180;
   worstRot = Math.max(worstRot, Math.abs(delta));
 }
 check("初始姿态挂点位置逐像素还原", worstCentre < 0.02, `最大偏差 ${worstCentre.toFixed(4)} px`);
@@ -910,9 +910,9 @@ console.log("=== 11. DragonBones 5.5 导出 ===");
       const cy = (frameHeight / 2 - pivotY);
       const wx = d.transform.x + cx * Math.cos(rad) - cy * Math.sin(rad);
       const wy = d.transform.y + cx * Math.sin(rad) + cy * Math.cos(rad);
-      worst = Math.max(worst, Math.hypot(wx - att.x, wy - att.y));
+      worst = Math.max(worst, Math.hypot(wx - att.x, wy + att.y));
     }
-    check("图片中心与 Spine 挂点重合（偏差 < 0.01px）", worst < 0.01, `最差 ${worst.toFixed(5)}px`);
+    check("图片中心经Y轴转换与 Spine 挂点重合（偏差 < 0.01px）", worst < 0.01, `最差 ${worst.toFixed(5)}px`);
   }
 
   // 动画：时长是帧数、补间帧必须显式声明缓动、curve 是 0~1 归一化。
@@ -1121,7 +1121,7 @@ console.log("=== 13. 默认网格的骨架不该有互环 ===");
   });
   const hip = grid.spine.bones.find((b) => b.name === "hip");
   const torso = grid.spine.bones.find((b) => b.name === "torso");
-  check("hip 是根骨骼", hip.parent === undefined, `hip<-${hip.parent}`);
+  check("hip 直接挂系统 root 骨骼", hip.parent === "root", `hip<-${hip.parent}`);
   check("torso 挂在 hip 上", torso.parent === "hip", `torso<-${torso.parent}`);
   check("默认网格不产生任何告警", grid.warnings.length === 0, grid.warnings.join(" | "));
   check("默认网格的骨骼表是拓扑序", grid.spine.bones.every((bone) =>
@@ -1286,8 +1286,8 @@ console.log("=== 15. IK 约束（M5）===");
       };
     };
     const tip = worldOfBone("left-lower-arm");
-    const tipX = tip.x - Math.sin(tip.rot) * byName.get("left-lower-arm").length;
-    const tipY = tip.y + Math.cos(tip.rot) * byName.get("left-lower-arm").length;
+    const tipX = tip.x + Math.cos(tip.rot) * byName.get("left-lower-arm").length;
+    const tipY = tip.y + Math.sin(tip.rot) * byName.get("left-lower-arm").length;
     const target = byName.get("arm-target");
     check("目标骨落在链末端的骨尖上（加约束时姿态不跳）",
       Math.hypot(target.x - tipX, target.y - tipY) < 0.02,
@@ -1314,7 +1314,7 @@ console.log("=== 15. IK 约束（M5）===");
     check("DragonBones 的 bone 是链末端、chain 不含末端自己",
       dbIk[0].bone === "left-lower-arm" && dbIk[0].chain === 1 && dbIk[0].target === "arm-target",
       JSON.stringify(dbIk[0]));
-    check("DragonBones 保留了弯曲方向与权重", dbIk[0].bendPositive === true && dbIk[0].weight === 1);
+    check("DragonBones 反射Y轴时翻转IK弯曲方向并保留权重", dbIk[0].bendPositive === false && dbIk[0].weight === 1);
   }
 
   // 正例：这份骨架必须过校验器。
@@ -1339,7 +1339,18 @@ console.log("=== 15. IK 约束（M5）===");
     spine.bones.find((b) => b.name === "left-upper-arm").length = 0;
   }).ok);
   check("抓住「链不足两根骨」", !mutateIk((c) => { c.bones = ["left-lower-arm"]; }).ok);
+  check("抓住「链超过两根骨」", !mutateIk((c) => { c.bones = ["torso", "left-upper-arm", "left-lower-arm"]; }).ok);
   check("抓住「mix 越界」", !mutateIk((c) => { c.mix = 1.5; }).ok);
+
+  // 历史任务可能保存了超出官方两骨求解器能力的约束；构建不能静默截断成另一条链。
+  const legacy = buildSkeleton({ canvasWidth: W, canvasHeight: H, animationIds: [],
+    parts: [
+      { name: "torso", file: "torso.png", x: 260, y: 180, width: 120, height: 160, scale: 1, rotation: 0, z: 0 },
+      { name: "left-upper-arm", file: "ua.png", x: 300, y: 320, width: 50, height: 130, scale: 1, rotation: 0, z: 1 },
+      { name: "left-lower-arm", file: "la.png", x: 300, y: 450, width: 46, height: 130, scale: 1, rotation: 0, z: 2 }
+    ], constraints: [{ type: "ik", name: "legacy-three-bone", bone: "left-lower-arm", target: "legacy-target", chain: 2 }] });
+  check("历史三骨IK整条跳过，不截成两骨", legacy.spine.ik === undefined && !legacy.spine.bones.some((b) => b.name === "legacy-target"));
+  check("历史三骨IK跳过时保留明确警告", legacy.warnings.some((w) => w.includes("legacy-three-bone") && w.includes("两骨链") && w.includes("已跳过")));
 }
 
 console.log("=== 16. 蒙皮网格与 FFD 变形（M5）===");
@@ -1419,7 +1430,7 @@ console.log("=== 16. 蒙皮网格与 FFD 变形（M5）===");
     check("mesh 有 uvs / triangles / path", Array.isArray(att.uvs) && Array.isArray(att.triangles) && att.path === "hip");
     // 「顶点以部件中心为原点」只对**非加权**格式成立（加权顶点写的是骨骼局部坐标，
     // 精度与正确性由下面 LBS 那节单独断言）。
-    check("非加权网格的顶点以部件中心为原点", (() => {
+    check("叶子网格包含自身骨骼权重", (() => {
       const plain = buildSkeleton({
         canvasWidth: W, canvasHeight: H,
         parts: [{ name: "head", file: "h.png", x: 100, y: 100, width: 200, height: 160, scale: 1, rotation: 0, z: 0 }],
@@ -1427,19 +1438,40 @@ console.log("=== 16. 蒙皮网格与 FFD 变形（M5）===");
         meshes: { head: { cols: 4, rows: 4 } }
       });
       const plainAtt = plain.spine.skins[0].attachments.head.head;
-      // 骨架里只有 head 一根骨 → 没有别的骨骼可以影响它 → 走非加权分支
-      if (plainAtt.vertices.length !== plainAtt.uvs.length) return false;
-      let minX = Infinity, maxX = -Infinity;
-      for (let i = 0; i < plainAtt.vertices.length; i += 2) { minX = Math.min(minX, plainAtt.vertices[i]); maxX = Math.max(maxX, plainAtt.vertices[i]); }
-      return Math.abs(minX + 100) < 0.01 && Math.abs(maxX - 100) < 0.01;
+      const headIndex = plain.spine.bones.findIndex((bone) => bone.name === "head");
+      let cursor = 0;
+      let count = 0;
+      while (cursor < plainAtt.vertices.length) {
+        const influences = plainAtt.vertices[cursor++];
+        if (influences !== 1 || plainAtt.vertices[cursor] !== headIndex) return false;
+        cursor += 4;
+        count++;
+      }
+      return cursor === plainAtt.vertices.length && count === plainAtt.uvs.length / 2;
     })());
-    const deform = meshed.spine.animations.idle.deform?.hip?.default;
+    const deform = meshed.spine.animations.idle.attachments?.default?.hip?.hip?.deform;
     check("idle 有 hip 的 deform 时间轴", Array.isArray(deform) && deform.length === 7, String(deform?.length));
     check("deform 覆盖整个动画时长且首尾闭合", (() => {
       if (!Array.isArray(deform)) return false;
       const last = deform[deform.length - 1];
       return Math.abs(last.time - 1.6) < 0.01 && deform[0].vertices.every((v, i) => Math.abs(v - last.vertices[i]) < 1e-6);
     })());
+    const mutateDeform = (fn) => {
+      const copy = JSON.parse(JSON.stringify(meshed.spine));
+      fn(copy);
+      return validateSpineWire(copy);
+    };
+    check("旧根级deform被拒绝而不是被引擎静默忽略", !mutateDeform((s) => {
+      s.animations.idle.deform = { hip: { default: deform } };
+      delete s.animations.idle.attachments;
+    }).ok);
+    check("FFD引用不存在的网格附件会被拒绝", !mutateDeform((s) => {
+      s.animations.idle.attachments.default.hip.noSuchMesh = s.animations.idle.attachments.default.hip.hip;
+      delete s.animations.idle.attachments.default.hip.hip;
+    }).ok);
+    check("加权FFD位移超出影响骨数量会被拒绝", !mutateDeform((s) => {
+      s.animations.idle.attachments.default.hip.hip.deform[0].vertices = Array(10000).fill(0);
+    }).ok);
     check("没有网格的部件仍是 region 附件", (() => {
       const plain = buildSkeleton({
         canvasWidth: W, canvasHeight: H,
@@ -1456,10 +1488,10 @@ console.log("=== 16. 蒙皮网格与 FFD 变形（M5）===");
     // 这个骨架有权重，DragonBones 侧会**有意**退回 image：它的加权网格是另一套编码
     // （weights + slotPose + bonePose），直接吃 Spine 的交错流只会画出一团乱线。
     check("DragonBones 对加权网格退回 image（不是 mesh）", display.type === "image", JSON.stringify(display.type));
-    const ffd = db.armature[0].animation.find((a) => a.name === "idle").ffd;
-    check("DragonBones 出 ffd 时间轴", Array.isArray(ffd) && ffd.length === 1 && ffd[0].frame.length === 7, JSON.stringify(ffd?.length));
-    check("ffd 首帧顶点数与 mesh 一致", ffd[0].frame[0].vertices.length / 2 === 25);
-    check("ffd 中间帧 duration ≥ 1（末帧被忽略）", ffd[0].frame.slice(0, -1).every((f) => f.duration >= 1));
+    check("DragonBones 刚体降级不留指向image的无效FFD",
+      db.armature[0].animation.every((a) => a.ffd === undefined));
+    check("DragonBones 蒙皮降级有明确告警", db.exportWarnings.some((w) => w.includes("hip") && w.includes("FFD")));
+    check("DragonBones 校验将降级信息透传给调用者", validateDragonBones(db).warnings.some((w) => w.code === "db-export-limitation"));
   }
 
   // ── LBS 加权顶点（Spine 的交错格式）──────────────────────────────────
@@ -1549,9 +1581,21 @@ console.log("=== 17. Path 约束（M5）===");
   const inSecond = samplePath(corner, 50, lengths);
   check("弧长 50 落在第二段中点", Math.abs(inSecond.x - 30) < 1e-6 && Math.abs(inSecond.y - 20) < 1e-6, JSON.stringify(inSecond));
   check("第二段的切线角为 π/2（向 +y，图像坐标向下）", Math.abs(inSecond.angle - Math.PI / 2) < 1e-6, String(inSecond.angle));
-  // 越界夹紧而不是报错：排列骨链时本来就会算出越界值，那时"停在端点"才是想要的。
-  check("弧长越界会夹到端点（负）", (() => { const p = samplePath(corner, -10, lengths); return p.x === 0 && p.y === 0; })());
-  check("弧长越界会夹到端点（超长）", (() => { const p = samplePath(corner, 999, lengths); return Math.abs(p.x - 30) < 1e-6 && Math.abs(p.y - 40) < 1e-6; })());
+  // 与官方Path一致：开放路径沿端点切线外推，避免固定间距的骨骼堆在端点。
+  check("开放路径负弧长沿首段切线外推", (() => { const p = samplePath(corner, -10, lengths); return p.x === -10 && p.y === 0; })());
+  check("开放路径超长弧长沿末段切线外推", (() => { const p = samplePath(corner, 999, lengths); return Math.abs(p.x - 30) < 1e-6 && Math.abs(p.y - 969) < 1e-6; })());
+  check("路径首段重复点不会丢失有效切线", (() => {
+    const p = samplePath({ points: [100, 100, 100, 100, 100, 200], closed: false }, 0);
+    return p.x === 100 && p.y === 100 && Math.abs(p.angle - Math.PI / 2) < 1e-6;
+  })());
+  check("路径尾段重复点不会阻止端点外推", (() => {
+    const p = samplePath({ points: [100, 100, 100, 200, 100, 200], closed: false }, 150);
+    return p.x === 100 && p.y === 250 && Math.abs(p.angle - Math.PI / 2) < 1e-6;
+  })());
+  check("全重复点返回有限退化路径采样", (() => {
+    const p = samplePath({ points: [100, 100, 100, 100], closed: false }, 999);
+    return p.x === 100 && p.y === 100 && p.angle === 0;
+  })());
 
   // 排列：spacing=0 均匀铺满（末根落在终点），spacing>0 就是固定间距。
   const even = pathPlacements(corner, 3, 0);
@@ -1563,6 +1607,7 @@ console.log("=== 17. Path 约束（M5）===");
   // 闭合路径会比开放路径多一段（最后一点回到第一点）。
   const closed = { points: [0, 0, 30, 0, 30, 40], closed: true };
   check("闭合路径多一段（30/40/50）", pathSegmentLengths(closed).join(",") === "30,40,50", pathSegmentLengths(closed).join(","));
+  check("闭合路径超出总长后循环", (() => { const p = samplePath(closed, 135); return p.x === 15 && p.y === 0; })());
 
   check("包围盒覆盖所有点", (() => {
     const box = pathBounds(corner);
@@ -1571,7 +1616,7 @@ console.log("=== 17. Path 约束（M5）===");
   check("归一化会保留 closed", normalizePath({ points: [0, 0, 10, 10], closed: true }).closed === true);
 
   // 导出：Spine 的 path 约束要带一个**路径槽位 + PathAttachment**；
-  // DragonBones 要的是「链的第一根 + 目标骨骼」加数字枚举。
+  // DragonBones 暂不输出未经官方验证的 Path，而是明确给出导出降级告警。
   {
     const pathed = buildSkeleton({
       canvasWidth: W,
@@ -1597,12 +1642,13 @@ console.log("=== 17. Path 约束（M5）===");
     const pc = pathed.spine.path[0];
     check("path.bones 是从根到末端的骨骼名", pc.bones.join(",") === "left-upper-arm,left-lower-arm", pc.bones.join(","));
     check("path 的枚举字段齐全（positionMode/spacingMode/rotateMode）",
-      pc.positionMode === "percent" && pc.spacingMode === "length" && pc.rotateMode === "tangent", JSON.stringify(pc));
-    check("path 保留了 translateMix / rotateMix", pc.translateMix === 1 && pc.rotateMix === 0.8);
+      pc.positionMode === "percent" && pc.spacingMode === "percent" && pc.rotateMode === "tangent", JSON.stringify(pc));
+    check("path 使用4.2的mixX/mixY/mixRotate", pc.mixX === 1 && pc.mixY === 1 && pc.mixRotate === 0.8);
     const pathAtt = pathed.spine.skins[0].attachments[`path:${pc.name}`][pc.name];
     check("建了路径槽位与 path 附件", pathAtt !== undefined && pathAtt.type === "path");
-    check("path 附件顶点数 = 点数", pathAtt.vertices.length / 2 === 3, String(pathAtt.vertices.length / 2));
-    check("path 附件段数 = 点数 − 1（开放路径）", pathAtt.lengths.length === 2, String(pathAtt.lengths.length));
+    check("path目标指向路径槽位", pc.target === `path:${pc.name}`);
+    check("开放path编码为Bezier控制点与两端哑点", pathAtt.vertexCount === 9 && pathAtt.vertices.length === 18, String(pathAtt.vertexCount));
+    check("开放path长度表为累计段长与末端总长", pathAtt.lengths.length === 3 && pathAtt.lengths[2] === pathAtt.lengths[1], JSON.stringify(pathAtt.lengths));
     check("恒定速度开启（与预览器的弧长算法一致）", pathAtt.constantSpeed === true);
     check("带 Path 的骨架通过 validateSpineWire", validateSpineWire(pathed.spine).ok,
       validateSpineWire(pathed.spine).errors.map((e) => `${e.where} ${e.message}`).join("；"));
@@ -1616,18 +1662,16 @@ console.log("=== 17. Path 约束（M5）===");
     check("抓住「Path 链引用了不存在的骨骼」", !mutatePath((s) => { s.path[0].bones = ["nope", "left-lower-arm"]; }).ok);
     check("抓住「缺少路径槽位」", !mutatePath((s) => { delete s.skins[0].attachments["path:path-arm"]; }).ok);
     check("抓住「lengths 段数与顶点数不匹配」", !mutatePath((s) => { s.skins[0].attachments["path:path-arm"]["path-arm"].lengths = [1]; }).ok);
-    check("抓住「目标骨骼不在骨架里」", !mutatePath((s) => { s.path[0].target = "no-such-bone"; }).ok);
+    check("抓住「目标槽位不存在」", !mutatePath((s) => { s.path[0].target = "no-such-slot"; }).ok);
+    check("抓住旧Path混合字段的静默失效", !mutatePath((s) => { s.path[0].translateMix = 1; }).ok);
+    check("抓住Path缺失vertexCount", !mutatePath((s) => { delete s.skins[0].attachments["path:path-arm"]["path-arm"].vertexCount; }).ok);
 
     const db = buildDragonBonesSkeleton({
       name: "path", canvasWidth: W, canvasHeight: H, spine: pathed.spine, animations: pathed.animationsRaw
     });
-    const dbPath = db.armature[0].path;
-    check("DragonBones 导出了 path 约束", Array.isArray(dbPath) && dbPath.length === 1);
-    check("DragonBones 的 bone 是链的**第一根**", dbPath[0].bone === "left-upper-arm", dbPath[0].bone);
-    check("枚举转成了数字（percent→1 / length→0 / tangent→0）",
-      dbPath[0].positionMode === 1 && dbPath[0].spacingMode === 0 && dbPath[0].rotateMode === 0, JSON.stringify(dbPath[0]));
-    const pathDisplay = db.armature[0].skin[0].slot.find((s) => s.name === `path:${pc.name}`).display[0];
-    check("DragonBones 的路径 display 是 path 类型", pathDisplay.type === "path" && pathDisplay.vertices.length === 6, pathDisplay.type);
+    check("DragonBones 不输出未支持的Path约束", db.armature[0].path === undefined);
+    check("DragonBones 不保留失去约束的路径槽位", db.armature[0].slot.every((slot) => slot.name !== `path:${pc.name}`));
+    check("DragonBones Path降级写明可保留效果的格式", db.exportWarnings.some((w) => w.includes("Path") && w.includes("Spine")));
     check("DragonBones 校验通过", validateDragonBones(db).ok, validateDragonBones(db).errors.map((e) => e.code).join(","));
   }
 
