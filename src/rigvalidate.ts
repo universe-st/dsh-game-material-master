@@ -98,8 +98,8 @@ export function validateSpineWire(spine: any): ValidationReport {
     for (const constraint of Array.isArray(spine?.ik) ? spine.ik : []) {
       const where = `ik/${constraint?.name ?? "?"}`;
       const chain: string[] = Array.isArray(constraint?.bones) ? constraint.bones.filter((name: unknown) => typeof name === "string") : [];
-      if (chain.length < 2) {
-        errors.push({ level: "error", code: "ik-chain", where, message: `IK 的骨骼链至少要有两根骨，当前 ${chain.length} 根` });
+      if (chain.length !== 2) {
+        errors.push({ level: "error", code: "ik-chain", where, message: `当前只支持两根骨骼的 IK，当前 ${chain.length} 根` });
         continue;
       }
       for (const name of chain) {
@@ -155,11 +155,12 @@ export function validateSpineWire(spine: any): ValidationReport {
         }
       }
       const target = typeof constraint?.target === "string" ? constraint.target : "";
-      if (!boneNames.has(target)) {
-        errors.push({ level: "error", code: "path-target", where, message: `Path 的目标骨骼「${target}」不在骨架里` });
+      if (!slotNames.has(target)) {
+        errors.push({ level: "error", code: "path-target", where, message: `Path 的目标槽位「${target}」不在骨架里` });
       }
-      const slotName = `path:${constraint?.name}`;
-      const attachment = attachmentOf(slotName, String(constraint?.name));
+      const slotName = target;
+      const slot = (spine.slots ?? []).find((item: any) => item?.name === slotName);
+      const attachment = attachmentOf(slotName, String(slot?.attachment ?? ""));
       if (!slotNames.has(slotName)) {
         errors.push({ level: "error", code: "path-slot", where, message: `缺少路径槽位「${slotName}」，运行时找不到这条路径` });
       } else if (attachment === undefined || attachment.type !== "path") {
@@ -167,22 +168,24 @@ export function validateSpineWire(spine: any): ValidationReport {
       } else {
         const vertices: number[] = Array.isArray(attachment.vertices) ? attachment.vertices : [];
         const lengths: number[] = Array.isArray(attachment.lengths) ? attachment.lengths : [];
-        if (vertices.length < 4) {
-          errors.push({ level: "error", code: "path-vertices", where, message: "Path 附件至少要有两个顶点" });
+        const vertexCount = attachment.vertexCount;
+        if (!Number.isInteger(vertexCount) || vertexCount < 6 || vertexCount % 3 !== 0 || vertices.length !== vertexCount * 2 || vertices.some((value) => !Number.isFinite(value))) {
+          errors.push({ level: "error", code: "path-vertices", where, message: "Path 必须声明 vertexCount，顶点包含三次贝塞尔控制点（点数为 3 的倍数）" });
         }
-        // 段数 = 点数 − 1（闭合时 = 点数）。`lengths` 与顶点数不匹配时，
-        // 运行时按弧长取位置会直接越界。
-        const expected = attachment.closed === true ? vertices.length / 2 : vertices.length / 2 - 1;
-        if (lengths.length !== expected) {
+        const expected = vertexCount / 3;
+        if (lengths.length !== expected || lengths.some((value, index) => !Number.isFinite(value) || value <= 0 || (index > 0 && value < lengths[index - 1]))) {
           errors.push({
             level: "error",
             code: "path-lengths",
             where,
-            message: `Path 的 lengths 段数（${lengths.length}）与顶点数（${vertices.length / 2}）不匹配，应为 ${expected}`
+            message: `Path 的 lengths 必须为 ${expected} 项正数累计弧长，当前 ${lengths.length} 项`
           });
         }
       }
-      for (const key of ["translateMix", "rotateMix"]) {
+      if (constraint.translateMix !== undefined || constraint.rotateMix !== undefined) {
+        errors.push({ level: "error", code: "path-legacy-mix", where, message: "Spine 4.2 Path 必须使用 mixX/mixY/mixRotate，旧混合字段会被忽略" });
+      }
+      for (const key of ["mixX", "mixY", "mixRotate"]) {
         const value = numOr(constraint?.[key], 1);
         if (value < 0 || value > 1) {
           errors.push({ level: "error", code: "path-mix", where, message: `${key} 必须在 0~1，当前 ${value}` });
@@ -197,6 +200,40 @@ export function validateSpineWire(spine: any): ValidationReport {
   }
 
   for (const [animationName, animation] of Object.entries<any>(animations)) {
+    if (animation?.deform !== undefined) {
+      errors.push({ level: "error", code: "deform-nesting", where: animationName, message: "Spine 4.2 的 deform 必须放在 attachments/皮肤/槽位/附件下，动画根字段会被忽略" });
+    }
+    for (const [skinName, slots] of Object.entries<any>(animation?.attachments ?? {})) {
+      const skin = spine.skins?.find((item: any) => item?.name === skinName);
+      for (const [slotName, byAttachment] of Object.entries<any>(slots ?? {})) {
+        for (const [attachmentName, kinds] of Object.entries<any>(byAttachment ?? {})) {
+          if (kinds?.deform === undefined) continue;
+          const where = `${animationName}/attachments/${skinName}/${slotName}/${attachmentName}/deform`;
+          const attachment = skin?.attachments?.[slotName]?.[attachmentName];
+          if (attachment?.type !== "mesh") {
+            errors.push({ level: "error", code: "deform-attachment", where, message: "deform 引用的网格附件不存在" });
+            continue;
+          }
+          const expected = meshDeformLength(attachment);
+          const frames = kinds.deform;
+          if (expected === undefined || !Array.isArray(frames) || frames.length === 0) {
+            errors.push({ level: "error", code: "deform-shape", where, message: "deform 的网格顶点流或关键帧数组无效" });
+            continue;
+          }
+          for (const [index, frame] of frames.entries()) {
+            const time = frame?.time ?? 0;
+            const offset = frame?.offset ?? 0;
+            const values = frame?.vertices ?? [];
+            if (!Number.isFinite(time) || time < 0 || (index > 0 && time <= (frames[index - 1]?.time ?? 0))) {
+              errors.push({ level: "error", code: "deform-time", where: `${where}[${index}]`, message: "deform 时间必须非负、严格递增" });
+            }
+            if (!Number.isInteger(offset) || offset < 0 || !Array.isArray(values) || offset + values.length > expected || values.some((value: unknown) => typeof value !== "number" || !Number.isFinite(value))) {
+              errors.push({ level: "error", code: "deform-vertices", where: `${where}[${index}]`, message: `deform 位移越界或非有限数：该网格最多 ${expected} 个值（加权网格每影响骨两个值）` });
+            }
+          }
+        }
+      }
+    }
     const boneTracks = animation?.bones;
     if (boneTracks === null || typeof boneTracks !== "object") continue;
 
@@ -308,6 +345,20 @@ export function validateSpineWire(spine: any): ValidationReport {
   }
 
   return report(errors, warnings);
+}
+
+function meshDeformLength(attachment: any): number | undefined {
+  const vertices = attachment?.vertices, uvs = attachment?.uvs;
+  if (!Array.isArray(vertices) || !Array.isArray(uvs)) return undefined;
+  if (vertices.length === uvs.length) return vertices.length;
+  let cursor = 0, count = 0;
+  for (let vertex = 0; vertex < uvs.length / 2; vertex++) {
+    const influences = vertices[cursor++];
+    if (!Number.isInteger(influences) || influences < 1 || cursor + influences * 4 > vertices.length) return undefined;
+    count += influences * 2;
+    cursor += influences * 4;
+  }
+  return cursor === vertices.length ? count : undefined;
 }
 
 // ── 循环接缝 ────────────────────────────────────────────────────────────
@@ -572,6 +623,10 @@ const DRAGONBONES_VERSIONS = new Set(["2.3", "3.0", "4.0", "4.5", "5.0", "5.5", 
 export function validateDragonBones(skeleton: any): ValidationReport {
   const errors: ValidationIssue[] = [];
   const warnings: ValidationIssue[] = [];
+
+  for (const message of Array.isArray(skeleton?.exportWarnings) ? skeleton.exportWarnings : []) {
+    if (typeof message === "string") warnings.push({ level: "warning", code: "db-export-limitation", where: "export", message });
+  }
 
   if (skeleton === null || typeof skeleton !== "object") {
     errors.push({ level: "error", code: "db-empty", where: "skeleton", message: "DragonBones 骨架为空" });

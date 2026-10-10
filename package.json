@@ -37,9 +37,11 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/strip-client-export.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "verify:rig:runtime": "node scripts/verify-rig-runtime.mjs"
   },
   "devDependencies": {
+    "@esotericsoftware/spine-core": "4.2.120",
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-typert-protocol": "*",
     "@types/node": "^26.2.0",

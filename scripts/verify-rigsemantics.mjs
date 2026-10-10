@@ -199,6 +199,12 @@ console.log("\n[8] mergeSemantics");
   check("source 被更新为 human", head.source === "human");
   check("其它部件不受影响", merged.find((p) => p.name === "neck").parent === "torso");
 
+  const detached = mergeSemantics(base, [{ name: "head", parent: null, source: "human" }]);
+  check("显式挂 root 的 null 补丁不会变成缺省父级", detached.find((p) => p.name === "head").parent === null);
+  const validatedDetached = validateSemantics(JSON.parse(JSON.stringify(detached)));
+  check("显式 root 经 JSON 往返与语义校验仍为 null",
+    validatedDetached.ok && validatedDetached.parts.find((p) => p.name === "head").parent === null);
+
   const grown = mergeSemantics(base, [{ name: "tail-1", role: "accessory", parent: "hip" }]);
   check("新部件会用默认语义起头再套补丁", grown.length === base.length + 1);
   const tail = grown.find((p) => p.name === "tail-1");

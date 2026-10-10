@@ -1188,4 +1188,47 @@ section("功能管理（隐藏模块）");
   test.publishHiddenModules([]);
 }
 
+section("骨骼语义保存：真实组件事件的业务失败反馈");
+{
+  const { RigSemanticsPanel } = bundle.__test ?? {};
+  check("产物暴露骨骼语义面板测试入口", typeof RigSemanticsPanel === "function");
+  if (typeof RigSemanticsPanel === "function") {
+    const notices = [], calls = [], pending = [];
+    let response = { ok: false, touched: 0, errors: [{ message: "父级链成环：torso → head → torso" }], warnings: [] };
+    const run = (fn, text, key) => {
+      const operation = Promise.resolve().then(fn).then((value) => {
+        notices.push({ kind: "ok", text, key }); return value;
+      }, (error) => { notices.push({ kind: "error", text: error.message, key }); });
+      pending.push(operation);
+      return operation;
+    };
+    HOOK.slots = []; HOOK.cursor = 0;
+    const tree = RigSemanticsPanel({
+      job: { id: "rfixture", parts: [
+        { name: "torso", status: "ready", role: "torso", parent: null },
+        { name: "head", status: "ready", role: "head", parent: "torso" }
+      ] },
+      api: { setRigSemantics: (payload) => { calls.push(payload); return Promise.resolve(response); } },
+      run, activeKey: "rig:layout"
+    });
+    const parent = collect(tree, (node) => node.props?.["data-testid"] === "rig-sem-parent-torso")[0];
+    check("语义面板父级下拉有可执行事件", typeof parent?.props?.onChange === "function");
+    if (parent?.props?.onChange) {
+      parent.props.onChange({ target: { value: "head" } });
+      await pending.at(-1);
+      check("成环业务结果显示具体错误", notices.at(-1)?.kind === "error" && notices.at(-1).text.includes("父级链成环"));
+      check("成环没有显示已更新成功", notices.every((n) => n.kind !== "ok"));
+      response = { ok: true, touched: 1, errors: [], warnings: [] };
+      parent.props.onChange({ target: { value: "" } });
+      await pending.at(-1);
+      check("选 root 发送明确的 null 父级", calls.at(-1).parts[0].parent === null);
+      check("合法语义变更仍显示成功", notices.at(-1)?.kind === "ok" && notices.at(-1).text.includes("已更新"));
+      response = { ok: false, touched: 0, errors: [], warnings: [] };
+      parent.props.onChange({ target: { value: "head" } });
+      await pending.at(-1);
+      check("无详细错误时仍显示语义校验失败", notices.at(-1)?.kind === "error" && notices.at(-1).text.includes("语义校验失败"));
+    }
+  }
+}
+
 report();

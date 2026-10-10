@@ -25,7 +25,7 @@
 
 import { createHash } from "node:crypto";
 import { buildRigMesh, buildWaveDeform, type RigMeshBone } from "./rigmesh.js";
-import { pathSegmentLengths, type RigPathSpec } from "./rigpath.js";
+import { normalizePath, pathTotalLength, spinePathGeometry } from "./rigpath.js";
 
 // ── 拆件槽位定义 ────────────────────────────────────────────────────────
 
@@ -307,15 +307,10 @@ function round(value: number, digits: number): number {
 /**
  * 挂点：有网格就出 `mesh`，否则出 `region`。
  *
- * **网格顶点用「部件中心为原点」的坐标**，与 region attachment 的 `-w/2, -h/2` 同一套系——
- * 这样运行时两种附件共用同一条变换链（骨骼世界矩阵 → 挂点 x/y/rotation → 顶点），
- * 不必为 mesh 另写一套定位逻辑。`buildRigMesh` 那边用的是「左上角为原点」，
- * 转换就发生在这里，且只发生一次。
- *
- * 暂时**不写 `weights`**：那是 LBS（多骨骼线性混合蒙皮），格式在两条导出路径里都绕
- * （Spine 的加权顶点是 `[骨骼数, (索引, x, y, 权重)…]` 的交错数组），而它解决的问题是
- * 「一块贴图被多根骨骼共同拉扯」——FFD 时间轴已经把「裙摆上缘不动、下缘甩出去」这件事
- * 做到了，先把能验证的那条链路走通。`RigMesh` 已经产出权重，接进导出是独立的一步。
+ * buildRigMesh 用图片左上角为原点、Y 向下；导出时先转到图片中心、Y 向上，
+ * 再烘附件变换。转换只发生一次，UV 不随动画或骨骼变换改变。
+ * Spine 的 mesh 不读取 region 的 x/y/rotation：非加权顶点必须烘到所属骨骼局部系，
+ * 加权顶点则烘到每根影响骨骼的局部系。UV 始终保留原图的 Y 向下顺序。
  */
 /** 每个变形循环采样几个关键帧。6 段对「裙摆左右摆」这种低频运动足够。 */
 export const ANIMATION_DEFORM_SAMPLES = 6;
@@ -354,14 +349,29 @@ function meshAttachmentOf(
     height: Math.max(1, part.height),
     cols: spec.cols,
     rows: spec.rows,
-    bones: context.imageBones,
+    // 权重在未旋转的图片局部系里计算；把骨骼位置逆回同一套系，距离才与
+    // 实际旋转后的顶点一致（直接拿 world 图片坐标会给斜着的部件算错权重）。
+    bones: context.imageBones.map((bone) => {
+      const rad = -((part.rotation ?? 0) * Math.PI) / 180;
+      const cx = part.x + part.width / 2;
+      const cy = part.y + part.height / 2;
+      const dx = bone.x - cx;
+      const dy = bone.y - cy;
+      return { name: bone.name, x: cx + Math.cos(rad) * dx - Math.sin(rad) * dy, y: cy + Math.sin(rad) * dx + Math.cos(rad) * dy };
+    }),
     x: part.x,
     y: part.y
   });
   if (grid === undefined) return attachment;
   const vertices: number[] = [];
+  const attRad = (attachment.rotation * Math.PI) / 180;
   for (let i = 0; i < grid.vertices.length; i += 2) {
-    vertices.push(round(grid.vertices[i] - part.width / 2, 3), round(grid.vertices[i + 1] - part.height / 2, 3));
+    const x = grid.vertices[i] - part.width / 2;
+    const y = part.height / 2 - grid.vertices[i + 1];
+    vertices.push(
+      round(Math.cos(attRad) * x - Math.sin(attRad) * y + attachment.x, 3),
+      round(Math.sin(attRad) * x + Math.cos(attRad) * y + attachment.y, 3)
+    );
   }
   const base = {
     ...attachment,
@@ -417,7 +427,7 @@ function buildWeightedVertices(
 
   for (let i = 0; i < mesh.vertices.length / 2; i++) {
     const localX = mesh.vertices[i * 2] - halfW;
-    const localY = mesh.vertices[i * 2 + 1] - halfH;
+    const localY = halfH - mesh.vertices[i * 2 + 1];
     const attX = cosA * localX - sinA * localY + (attachment.x ?? 0);
     const attY = sinA * localX + cosA * localY + (attachment.y ?? 0);
     const worldX = cosB * attX - sinB * attY + owned.x;
@@ -456,6 +466,34 @@ function buildWeightedVertices(
 /** 宽容取数：非数字/NaN 一律回落到 `fallback`（约束参数来自界面与对话，不能假设它干净）。 */
 function num(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+/** 图像局部位移 → Spine 顶点位移；加权网格每个影响骨骼各占两个数。 */
+function spineDeformOffsets(
+  offsets: number[], part: RigPlacedPart, attachment: any, bones: Bone[], world: Map<string, WorldPoint>
+): number[] {
+  const result: number[] = [];
+  const imageAngle = -(part.rotation ?? 0) * Math.PI / 180;
+  const imageCos = Math.cos(imageAngle), imageSin = Math.sin(imageAngle);
+  const weighted = attachment.vertices.length !== attachment.uvs.length;
+  let cursor = 0;
+  for (let vertex = 0; vertex < offsets.length / 2; vertex++) {
+    const dx = offsets[vertex * 2], dy = -offsets[vertex * 2 + 1];
+    const wx = dx * imageCos - dy * imageSin, wy = dx * imageSin + dy * imageCos;
+    const append = (name: string) => {
+      const angle = -(world.get(name)?.rotation ?? 0) * Math.PI / 180;
+      result.push(round(wx * Math.cos(angle) - wy * Math.sin(angle), 4), round(wx * Math.sin(angle) + wy * Math.cos(angle), 4));
+    };
+    if (!weighted) append(part.name);
+    else {
+      const count = attachment.vertices[cursor++];
+      for (let influence = 0; influence < count; influence++) {
+        append(bones[attachment.vertices[cursor]]?.name ?? part.name);
+        cursor += 4;
+      }
+    }
+  }
+  return result;
 }
 
 /** 骨骼名 → （时间轴类型 → 关键帧数组）。时间轴类型目前只有 rotate / translate。 */
@@ -954,9 +992,9 @@ export interface RigPlacedPart {
   /**
    * 语义层给出的父部件名（`rigsemantics.ts`）。给了就用它，没给才回落到
    * 按名字关键词猜——这是「语义显式化」在骨骼推导上的落点：
-   * 用户/AI 改一次 `parent`，骨架立刻跟着变，不必去调名字。
+   * 用户/AI 改一次 `parent`，骨架立刻跟着变，不必去调名字；null 表示显式挂 root。
    */
-  parent?: string;
+  parent?: string | null;
   /** 语义层给出的锚点（归一化到部件包围盒，y 向下）。 */
   proximal?: [number, number];
   distal?: [number, number];
@@ -1074,8 +1112,8 @@ function normalizeAngle(value: number): number {
  * 核心：把「每个部件的像素框 + 层级」变成一份可动画的骨架。
  *
  * 对每个部件：
- *   1. 取近端/远端锚点，得到世界坐标下的骨骼原点与朝向（Spine 的 0° 指向 +Y，
- *      所以朝向向量 (dx,dy) 对应 `atan2(-dx, dy)`）。
+ *   1. 锚点先随装配角度绕图片中心旋转，再转到世界坐标；Spine 的 0° 指向 +X，
+ *      所以朝向向量 (dx,dy) 对应 `atan2(dy, dx)`。
  *   2. 骨骼 x/y 换算到**父骨骼的局部坐标系**里（spine-core 会先转父骨骼再平移）。
  *   3. 挂点用「图片中心 − 骨骼原点」再逆旋转到骨骼局部系，并用 `rotation`
  *      补偿骨骼朝向——这样**初始姿态和装配结果逐像素一致**，而动画一开始，
@@ -1105,6 +1143,8 @@ export function buildSkeleton(
     // ① 语义层显式指定的父级优先。它可能指向一个被隐藏/未生成的部件——
     //    那种情况下不能让骨架断链，所以继续走 ②。
     const explicit = byName.get(name)?.parent;
+    // null 表示用户显式选择 root；undefined 才表示没有语义、需要按名字兜底。
+    if (explicit === null) return "root";
     if (explicit !== undefined && explicit !== name && boneNames.has(explicit)) return explicit;
 
     // ② 按名字关键词沿语义链往上找第一个真实存在的骨骼。
@@ -1165,8 +1205,11 @@ export function buildSkeleton(
         warnings.push(`骨骼 ${name} 的兜底宿主 ${parent} 也在环上，改挂到 root`);
         parent = undefined;
       }
+      // 系统 root 是唯一没有父级的骨骼；普通部件即便挂 root 也要写出这个父级。
+      // 官方两骨 IK 要求链首骨有父骨，省略字段会把部件变成第二根系统根。
+      parent = parent ?? "root";
       resolvedParent.set(name, parent);
-      if (parent !== undefined) visit(parent, stack);
+      visit(parent, stack);
     } else {
       resolvedParent.set("root", undefined);
     }
@@ -1192,6 +1235,15 @@ export function buildSkeleton(
    * 拿到子部件的近端坐标，而拓扑序里子部件排在后面。
    */
   const proxWorldOf = new Map<string, { x: number; y: number }>();
+  const anchorWorldOf = (part: RigPlacedPart, anchor: [number, number]): { x: number; y: number } => {
+    const rad = ((part.rotation ?? 0) * Math.PI) / 180;
+    const dx = (anchor[0] - 0.5) * part.width;
+    const dy = (anchor[1] - 0.5) * part.height;
+    // 装配角度是图片坐标中的顺时针角度；像素转换到 Spine 后旋转符号会反过来。
+    const px = part.x + part.width / 2 + Math.cos(rad) * dx - Math.sin(rad) * dy;
+    const py = part.y + part.height / 2 + Math.sin(rad) * dx + Math.cos(rad) * dy;
+    return toWorld(px, py, options.canvasWidth, options.canvasHeight);
+  };
   for (const name of ordered) {
     if (name === "root") continue;
     const part = byName.get(name);
@@ -1200,7 +1252,7 @@ export function buildSkeleton(
     const proximal = part.proximal ?? anchors.proximal;
     proxWorldOf.set(
       name,
-      toWorld(part.x + proximal[0] * part.width, part.y + proximal[1] * part.height, options.canvasWidth, options.canvasHeight)
+      anchorWorldOf(part, proximal)
     );
   }
 
@@ -1232,15 +1284,11 @@ export function buildSkeleton(
     const fallbackAnchors = anchorsOf(name);
     const proximal = part.proximal ?? fallbackAnchors.proximal;
     const distal = part.distal ?? fallbackAnchors.distal;
-    const proxPx = part.x + proximal[0] * part.width;
-    const proxPy = part.y + proximal[1] * part.height;
-    const distPx = part.x + distal[0] * part.width;
-    const distPy = part.y + distal[1] * part.height;
     const centerPx = part.x + part.width / 2;
     const centerPy = part.y + part.height / 2;
 
-    const prox = toWorld(proxPx, proxPy, options.canvasWidth, options.canvasHeight);
-    const ownDist = toWorld(distPx, distPy, options.canvasWidth, options.canvasHeight);
+    const prox = anchorWorldOf(part, proximal);
+    const ownDist = anchorWorldOf(part, distal);
     const center = toWorld(centerPx, centerPy, options.canvasWidth, options.canvasHeight);
 
     // 骨骼末端优先指到**子部件的近端**——「首尾相接」就是这么来的。
@@ -1254,7 +1302,7 @@ export function buildSkeleton(
     const dirX = dist.x - prox.x;
     const dirY = dist.y - prox.y;
     const length = Math.hypot(dirX, dirY) || Math.max(1, Math.max(part.width, part.height));
-    const worldRot = deg(Math.atan2(-dirX, dirY));
+    const worldRot = deg(Math.atan2(dirY, dirX));
 
     const parentName = resolvedParent.get(name);
     const parentWorld = world.get(parentName ?? "root") ?? world.get("root")!;
@@ -1296,8 +1344,8 @@ export function buildSkeleton(
       [name]: {
         x: round(offX * cosB - offY * sinB, 4),
         y: round(offX * sinB + offY * cosB, 4),
-        // 挂点自身旋转 = 抵消骨骼朝向（让初始姿态正立）+ 手动装配里拧的角度。
-        rotation: normalizeAngle(-worldRot + (part.rotation ?? 0)),
+        // 抵消骨骼朝向，再把图片坐标的顺时针装配角转换成 Spine 的逆时针角。
+        rotation: normalizeAngle(-worldRot - (part.rotation ?? 0)),
         width: round(part.width, 4),
         height: round(part.height, 4)
       }
@@ -1332,38 +1380,6 @@ export function buildSkeleton(
   const animations = JSON.parse(JSON.stringify(animationsRaw));
   toSpine42(animations);
 
-  // ── FFD 变形时间轴（M5 的 L3）───────────────────────────────────────
-  //
-  // 把波形**采样**成有限个关键帧再导出：两条导出路径的 deform/ffd 都是关键帧列表，
-  // 而波形是连续的。采样点数取 6（每周期 6 段），对「裙摆左右摆」这个低频运动足够，
-  // 也不会让 JSON 膨胀——顶点数是 49，每帧 98 个数字，6 帧约 600 个。
-  //
-  // 采样时间对齐到**每个动画自己的时长**：这样每个动画的 deform 都首尾闭合，
-  // 切成任何一台动画看，裙摆都不会在接缝处跳一下。
-  for (const [id, animation] of Object.entries<any>(animations)) {
-    const duration = animationDurationOf(id, options.animationSettings ?? {});
-    for (const [name, deform] of Object.entries(options.deforms ?? {})) {
-      const grid = meshGridOf(options.meshes?.[name], byName.get(name));
-      if (grid === undefined || deform === null || deform === undefined) continue;
-      const frames: any[] = [];
-      for (let i = 0; i <= ANIMATION_DEFORM_SAMPLES; i++) {
-        const at = (i / ANIMATION_DEFORM_SAMPLES) * duration;
-        const { offsets } = buildWaveDeform({
-          mesh: grid.mesh,
-          width: grid.width,
-          height: grid.height,
-          phase: at / Math.max(0.01, deform.duration),
-          amplitude: deform.amplitude,
-          cycles: deform.cycles,
-          direction: deform.direction,
-          anchor: deform.anchor
-        });
-        frames.push({ time: round(at, 4), offset: 0, vertices: offsets });
-      }
-      animation.deform = animation.deform ?? {};
-      animation.deform[name] = { default: frames };
-    }
-  }
   if (Object.keys(animations).length === 0) {
     warnings.push("没有生成任何动画：所选预设依赖的骨骼名在本次拆件里都不存在");
   }
@@ -1380,10 +1396,30 @@ export function buildSkeleton(
   // 一个可以直接拖的目标点，而不是先跳一下。
   const ik: any[] = [];
   const boneParent = new Map<string, string | undefined>(bones.map((bone) => [bone.name, bone.parent]));
+  // 绑定缓存 world 不含人的 offset；IK 初始目标需要匹配实际 setup 姿态，另算一份。
+  const setupWorld = new Map<string, WorldPoint>();
+  const setupWorldOf = (name: string): WorldPoint => {
+    const cached = setupWorld.get(name);
+    if (cached !== undefined) return cached;
+    const bone = bones.find((entry) => entry.name === name)!;
+    const parent = bone.parent === undefined ? { x: 0, y: 0, rotation: 0 } : setupWorldOf(bone.parent);
+    const rad = parent.rotation * Math.PI / 180;
+    const value = {
+      x: parent.x + Math.cos(rad) * bone.x - Math.sin(rad) * bone.y,
+      y: parent.y + Math.sin(rad) * bone.x + Math.cos(rad) * bone.y,
+      rotation: parent.rotation + bone.rotation
+    };
+    setupWorld.set(name, value);
+    return value;
+  };
   for (const constraint of options.constraints ?? []) {
     if (constraint === null || typeof constraint !== "object") continue;
     if (constraint.type !== undefined && constraint.type !== "ik") continue;
     const chainLength = Math.max(1, Math.min(8, Math.round(num(constraint.chain, 1))));
+    if (chainLength !== 1) {
+      warnings.push(`IK「${constraint.name}」只支持两骨链（chain = 1），已跳过`);
+      continue;
+    }
     const chain = ikChainOf(boneParent, constraint.bone, chainLength);
     if (chain.length < 2) {
       warnings.push(`IK「${constraint.name}」的链端骨骼不存在或没有父级：${constraint.bone}`);
@@ -1405,17 +1441,17 @@ export function buildSkeleton(
       // 目标点落在链末端的**骨尖**上（原点沿自身朝向再走一个 length，和预览器的画法一致）：
       // 加上约束的那一刻姿态不变，用户看到的是一个可以直接拖的点，而不是先跳一下。
       const tip = bones.find((bone) => bone.name === constraint.bone)!;
-      const origin = world.get(constraint.bone) ?? { x: tip.x, y: tip.y, rotation: 0 };
+      const origin = setupWorldOf(constraint.bone);
       const dirRad = (origin.rotation * Math.PI) / 180;
-      const tipWorldX = origin.x - Math.sin(dirRad) * tip.length;
-      const tipWorldY = origin.y + Math.cos(dirRad) * tip.length;
+      const tipWorldX = origin.x + Math.cos(dirRad) * tip.length;
+      const tipWorldY = origin.y + Math.sin(dirRad) * tip.length;
       bones.splice(
         bones.findIndex((bone) => bone.name === constraint.bone) + 1,
         0,
-        { name: targetName, x: round(tipWorldX, 4), y: round(tipWorldY, 4), rotation: 0, length: 0 }
+        { name: targetName, parent: "root", x: round(tipWorldX, 4), y: round(tipWorldY, 4), rotation: 0, length: 0 }
       );
       boneNames.add(targetName);
-      boneParent.set(targetName, undefined);
+      boneParent.set(targetName, "root");
     }
 
     ik.push({
@@ -1448,26 +1484,25 @@ export function buildSkeleton(
       warnings.push(`Path「${name}」没有可用的骨骼链，已跳过`);
       continue;
     }
-    if (entry.points.length < 4) {
+    const spec = normalizePath(entry);
+    if (spec === undefined || pathTotalLength(spec) <= 1e-6) {
       warnings.push(`Path「${name}」点数不足，已跳过`);
       continue;
     }
-    const spec: RigPathSpec = { points: entry.points, closed: entry.closed === true };
-    const lengths = pathSegmentLengths(spec);
     // 路径点转成**骨骼世界坐标**：槽挂在 root（世界原点），所以 attachment 的顶点
     // 直接用世界坐标即可，不必再相对某根骨骼做一次逆变换。
-    const vertices: number[] = [];
-    for (let i = 0; i + 1 < entry.points.length; i += 2) {
-      const world = toWorld(entry.points[i], entry.points[i + 1], options.canvasWidth, options.canvasHeight);
-      vertices.push(round(world.x, 3), round(world.y, 3));
+    const points: number[] = [];
+    for (let i = 0; i + 1 < spec.points.length; i += 2) {
+      const point = toWorld(spec.points[i], spec.points[i + 1], options.canvasWidth, options.canvasHeight);
+      points.push(point.x, point.y);
     }
+    const geometry = spinePathGeometry({ points, closed: spec.closed });
     const slotName = `path:${name}`;
     slots.push({ name: slotName, bone: "root", attachment: name });
     attachments[slotName] = {
       [name]: {
         type: "path",
-        vertices,
-        lengths,
+        ...geometry,
         closed: spec.closed === true,
         // 恒定速度：让沿路径的采样按**弧长**而不是按段索引走，与预览器的算法一致。
         constantSpeed: true
@@ -1475,16 +1510,19 @@ export function buildSkeleton(
     };
     pathConstraints.push({
       name,
-      order: pathConstraints.length,
+      order: ik.length + pathConstraints.length,
       bones: chain,
-      target: "root",
+      target: slotName,
       // spacing > 0 是「固定间距」，否则「均匀铺满整条路径」。
       positionMode: entry.spacing > 0 ? "fixed" : "percent",
-      spacingMode: "length",
+      spacingMode: entry.spacing > 0 ? "fixed" : "percent",
+      position: 0,
+      spacing: entry.spacing > 0 ? entry.spacing : 1 / Math.max(1, chain.length - 1),
       rotateMode: "tangent",
       rotation: 0,
-      translateMix: Math.max(0, Math.min(1, num(entry.translateMix, 1))),
-      rotateMix: Math.max(0, Math.min(1, num(entry.rotateMix, 1)))
+      mixX: Math.max(0, Math.min(1, num(entry.translateMix, 1))),
+      mixY: Math.max(0, Math.min(1, num(entry.translateMix, 1))),
+      mixRotate: Math.max(0, Math.min(1, num(entry.rotateMix, 1)))
     });
   }
 
@@ -1517,7 +1555,8 @@ export function buildSkeleton(
     }
     for (const child of childrenOf.get(meshName) ?? []) related.add(child);
     const imageBones = [...world.entries()]
-      .filter(([name]) => name !== meshName && related.has(name) && boneNames.has(name))
+      // root 只是坐标原点，没有解剖关节；给它权重会让叶子骨自身旋转被稀释。
+      .filter(([name]) => name !== "root" && related.has(name) && boneNames.has(name))
       .map(([name, point]) => {
         const image = fromWorld(point.x, point.y);
         return { name, x: image.x, y: image.y };
@@ -1529,6 +1568,37 @@ export function buildSkeleton(
         boneIndex
       })
     };
+  }
+
+  // FFD 必须等最终网格编码完成：加权网格按每个骨骼影响写局部位移，不能用UV的点数。
+  for (const [id, animation] of Object.entries<any>(animations)) {
+    const raw = animationsRaw[id];
+    let latest = 0;
+    for (const kinds of Object.values<any>(raw?.bones ?? {})) {
+      for (const frames of Object.values<any>(kinds)) {
+        if (Array.isArray(frames)) for (const frame of frames) latest = Math.max(latest, num(frame?.time, 0));
+      }
+    }
+    const duration = num(raw?.duration, 0) > 0 ? raw.duration : latest || animationDurationOf(id, settings);
+    for (const [name, deform] of Object.entries(options.deforms ?? {})) {
+      const part = byName.get(name);
+      const attachment = attachments[name]?.[name];
+      const grid = meshGridOf(options.meshes?.[name], part);
+      if (!part || !grid || attachment?.type !== "mesh" || !deform) continue;
+      const period = Math.max(0.01, num(deform.duration, duration));
+      const samples = Math.min(600, Math.max(ANIMATION_DEFORM_SAMPLES, Math.ceil(duration / period * Math.abs(num(deform.cycles, 1)) * ANIMATION_DEFORM_SAMPLES)));
+      const frames: any[] = [];
+      for (let i = 0; i <= samples; i++) {
+        const at = i / samples * duration;
+        const { offsets } = buildWaveDeform({ mesh: grid.mesh, width: grid.width, height: grid.height,
+          phase: at / period, amplitude: deform.amplitude, cycles: deform.cycles, direction: deform.direction, anchor: deform.anchor });
+        frames.push({ time: round(at, 4), offset: 0, vertices: spineDeformOffsets(offsets, part, attachment, bones, world) });
+      }
+      animation.attachments ??= {};
+      animation.attachments.default ??= {};
+      animation.attachments.default[name] ??= {};
+      animation.attachments.default[name][name] = { deform: frames };
+    }
   }
 
   const spine = {

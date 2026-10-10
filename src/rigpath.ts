@@ -5,9 +5,8 @@
  * DragonBones / 我们的预览器）都能表达的最小共同集：路径是一串折线点，
  * 骨骼沿弧长均匀（或按固定间距）铺上去，每根骨取所在位置的切线。
  *
- * 不做贝塞尔路径：Spine 的 PathAttachment 存的本来就是**采样后的折线**
- * （`vertices` + `lengths`），编辑器里的曲线在导出前也会被压平。我们直接收折线，
- * 少一层「曲线 → 折线」的采样，也就少一个「预览和导出不一样」的可能。
+ * 编辑数据保留折线；Spine 的 PathAttachment 实际存三次贝塞尔控制点，
+ * 导出时把每条直线段编码为两个共线控制点，形状与弧长不变。
  *
  * 坐标系与部件一致：**参考图像素、Y 向下**。转成骨骼世界坐标由调用方负责
  * （`toWorld` 那一步），这里只做纯几何。
@@ -32,7 +31,7 @@ export function normalizePath(raw: unknown): RigPathSpec | undefined {
   const source = Array.isArray(value.points) ? value.points : [];
   // 扁平数组 `[x0,y0,x1,y1,…]`：**内部表示就是这个形状**（`RigPathEntry.points` 是扁平的），
   // wire 上传过来时也是最省事的一种。另外两种写法是给人手写 JSON 用的。
-  if (source.length >= 4 && source.every((entry: unknown) => typeof entry === "number" && Number.isFinite(entry))) {
+  if (source.length >= 4 && source.length % 2 === 0 && source.every((entry: unknown) => typeof entry === "number" && Number.isFinite(entry))) {
     return { points: source.map((n: number) => Number(n.toFixed(3))), closed: value.closed === true };
   }
   const flat: number[] = [];
@@ -54,7 +53,7 @@ export function pathSegmentCount(path: RigPathSpec): number {
   return path.closed === true ? count : count - 1;
 }
 
-/** 每段的长度——**这就是 Spine 的 `PathAttachment.lengths`**。 */
+/** 每段的长度；Spine 导出另行编成累计弧长表。 */
 export function pathSegmentLengths(path: RigPathSpec): number[] {
   const count = path.points.length / 2;
   const segments: number[] = [];
@@ -73,12 +72,41 @@ export function pathTotalLength(path: RigPathSpec, lengths?: number[]): number {
   return Number(segments.reduce((sum, value) => sum + value, 0).toFixed(4));
 }
 
+/** 折线 → Spine 三次曲线顶点。输入已是槽位局部坐标（Y 向上）。 */
+export function spinePathGeometry(path: RigPathSpec): { vertices: number[]; vertexCount: number; lengths: number[] } {
+  const points: number[] = [];
+  for (let i = 0; i + 1 < path.points.length; i += 2) {
+    if (points.length > 0 && Math.hypot(path.points[i] - points[points.length - 2], path.points[i + 1] - points[points.length - 1]) <= 1e-6) continue;
+    points.push(path.points[i], path.points[i + 1]);
+  }
+  if (path.closed && points.length > 4 && Math.hypot(points[0] - points[points.length - 2], points[1] - points[points.length - 1]) <= 1e-6) points.splice(-2);
+  const count = points.length / 2;
+  const segments = path.closed ? count : count - 1;
+  // 每段 [起点, 1/3 控制点, 2/3 控制点, 终点]，相邻段共用端点。
+  const curve: number[] = [points[0], points[1]];
+  const lengths: number[] = [];
+  let total = 0;
+  for (let i = 0; i < segments; i++) {
+    const j = (i + 1) % count;
+    const x = points[i * 2], y = points[i * 2 + 1];
+    const dx = points[j * 2] - x, dy = points[j * 2 + 1] - y;
+    curve.push(x + dx / 3, y + dy / 3, x + dx * 2 / 3, y + dy * 2 / 3, points[j * 2], points[j * 2 + 1]);
+    total += Math.hypot(dx, dy);
+    lengths.push(Number(total.toFixed(4)));
+  }
+  // 开放路径的首尾额外控制点不参与曲线；闭合路径把末段第二控制点放在首位。
+  const vertices = path.closed
+    ? [...curve.slice(-4, -2), ...curve.slice(0, -4)]
+    : [points[0], points[1], ...curve, points[points.length - 2], points[points.length - 1]];
+  if (!path.closed) lengths.push(Number(total.toFixed(4)));
+  return { vertices: vertices.map((n) => Number(n.toFixed(6))), vertexCount: vertices.length / 2, lengths };
+}
+
 /**
  * 按**弧长**采样：给出沿路径走 `distance` 之后的位置与切线角（弧度）。
  *
- * 用弧长而不是"按段索引"是因为骨骼要**等距**铺开：段长不等时按索引分会让骨骼在
- * 长段上稀疏、短段上挤成一团。`distance` 会被夹进 `[0, 总长]`，越界不报错——
- * 调用方（排列骨链）本来就会算出越界值，那时"停在端点"才是想要的行为。
+ * 用弧长而不是"按段索引"让骨骼等距。与 Spine 一致：闭合路径按总长循环，
+ * 开放路径越界时沿首/末段切线外推，固定间距不会在端点挤成一团。
  */
 export function samplePath(
   path: RigPathSpec,
@@ -89,10 +117,14 @@ export function samplePath(
   const segments = lengths ?? pathSegmentLengths(path);
   const sum = total ?? segments.reduce((acc, value) => acc + value, 0);
   const count = path.points.length / 2;
-  let remaining = Math.max(0, Math.min(sum, distance));
+  if (sum <= 1e-6) return { x: path.points[0], y: path.points[1], angle: 0 };
+  let remaining = path.closed ? ((distance % sum) + sum) % sum : distance;
+  let lastSegment = segments.length - 1;
+  while (lastSegment >= 0 && segments[lastSegment] <= 1e-6) lastSegment--;
   for (let i = 0; i < segments.length; i++) {
     const length = segments[i];
-    if (remaining <= length || i === segments.length - 1) {
+    if (length <= 1e-6) continue;
+    if (remaining <= length || i === lastSegment) {
       const t = length > 1e-9 ? remaining / length : 0;
       const j = (i + 1) % count;
       const x0 = path.points[i * 2];

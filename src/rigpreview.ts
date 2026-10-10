@@ -31,7 +31,7 @@ export interface PreviewOptions {
   defaultAnimation?: string;
   /** 画布背景（CSS 颜色）。 */
   background?: string;
-  /** FFD 变形（部件名 → 参数）。波形位移由预览按当前时间现算。 */
+  /** 保留旧调用参数；预览播放骨架中已导出的 FFD 时间轴。 */
   deforms?: Record<string, { mode: "wave"; amplitude: number; cycles: number; direction: number; anchor: "top" | "bottom" | "none"; duration: number }>;
   /**
    * Path 约束（M5）。**点已经是骨骼世界坐标**（y 向上）——转换在宿主侧做掉了，
@@ -53,8 +53,6 @@ export function buildPreviewHtml(options: PreviewOptions): string {
     ? options.defaultAnimation
     : animations[0] ?? "";
   const background = options.background ?? "#12121c";
-  /** 没有变形的部件不必内联任何东西——预览里靠 DEFORMS[name] 是否存在来分流。 */
-  const deforms = options.deforms ?? {};
   const paths = options.paths ?? {};
 
   return `<!DOCTYPE html>
@@ -102,8 +100,6 @@ export function buildPreviewHtml(options: PreviewOptions): string {
   var SPINE = ${safeJson(options.spine)};
   var IMAGE_DATA = ${safeJson(images)};
   var ANIMS = ${safeJson(animations)};
-  // FFD 变形参数（部件名 → 波形）。没有它就不会走 mesh 渲染那条路。
-  var DEFORMS = ${safeJson(deforms)};
   // Path 约束（名字 → 路径 + 骨链）。点已经是骨骼世界坐标。
   var PATHS = ${safeJson(paths)};
   var current = ${safeJson(defaultAnimation)};
@@ -175,7 +171,7 @@ export function buildPreviewHtml(options: PreviewOptions): string {
       if (!child || !parent || !target) continue;
       // **第一段长度与方向都按「子骨原点在父骨局部系里的实际位置」算**，不用 parent.length。
       //
-      // IK 的经典推导假设链上骨骼首尾相接（子骨原点落在父骨的局部 +y，即骨尖）。
+      // IK 的经典推导假设链上骨骼首尾相接（子骨原点落在父骨的局部 +x，即骨尖）。
       // 而我们的骨骼原点取的是**部件近端锚点**，部件摆得不够首尾相接时这个假设就破了：
       // 实测举起的右臂两段被摆在同一小块区域，实际间距 41.9px、而上臂长度 140px；
       // 更关键的是子骨原点在父骨局部系的**方向**（-160°）与父骨朝向（+90°）差了 250°。
@@ -211,16 +207,18 @@ export function buildPreviewHtml(options: PreviewOptions): string {
       // （实测差了整整 91°）。
       var pTheta = base - a * sign;
       var cTheta = pTheta + (Math.PI - b) * sign;
-      // 骨骼沿**局部 +y** 生长，朝向角 = 世界旋转 + 90°。
-      // 父骨那一段用的是「子骨原点方向」（θ + phi），不是父骨朝向，所以减 phi。
+      // Spine 骨骼沿局部 +x 生长，子骨朝向就是世界旋转。
+      // 父骨那一段用的是「子骨原点方向」（θ + phi），所以仍减 phi。
       var pWant = pTheta - phi;
-      var cWant = cTheta - Math.PI / 2;
+      var cWant = cTheta;
       // 软 IK：在「不约束」与「对齐目标」之间按最短角差插值。
       var pNew = pOrig + shortestAngle(pOrig, pWant) * mix;
       var cNew = cOrig + shortestAngle(cOrig, cWant) * mix;
       var pBase = parent.parentBone ? parent.parentBone.worldRot : 0;
       parent.animRot = pNew * 180 / Math.PI - parent.setupRot - pBase * 180 / Math.PI;
       child.animRot = cNew * 180 / Math.PI - child.setupRot - pNew * 180 / Math.PI;
+      // 后面的约束可能与这条链共享骨骼，必须读到前一条约束已经生效的矩阵。
+      updateWorld(parent);
     }
   }
 
@@ -275,6 +273,13 @@ export function buildPreviewHtml(options: PreviewOptions): string {
         (b[name][kind] || []).forEach(function (f) { if (f.time > max) max = f.time; });
       });
     });
+    Object.values(anim.attachments || {}).forEach(function (skinTracks) {
+      Object.values(skinTracks).forEach(function (slotTracks) {
+        Object.values(slotTracks).forEach(function (attachmentTracks) {
+          (attachmentTracks.deform || []).forEach(function (f) { if (f.time > max) max = f.time; });
+        });
+      });
+    });
     return max;
   }
 
@@ -305,37 +310,40 @@ export function buildPreviewHtml(options: PreviewOptions): string {
   // 有网格的部件走「逐三角形裁剪绘制」，没有的仍是一整块 drawImage。
   // 分流的判据是 att.type === 'mesh'（骨架里写死的），不额外维护一张表。
   //
-  // 顶点坐标在骨架里是「部件中心为原点」，与 region attachment 的 -w/2,-h/2 同一套系，
-  // 所以两种附件的变换链完全一样，这里只是把 drawImage 换成按三角形贴。
+  // mesh 的非加权顶点是骨骼局部坐标；加权流里的每个影响也都是对应骨骼局部坐标。
+  // 不再重用 region 的挂点变换，按 Spine 同一份顶点/FFD/UV 数据绘制。
 
   /**
-   * 当前时刻的顶点位移（FFD）。
-   *
-   * 与宿主 rigmesh.ts 的 buildWaveDeform **同一个公式**：越靠近固定端越不动，
-   * 相位按时间推进。两处必须一致，否则「预览里看到的」和「导出的」不是一回事。
+   * 当前时刻的顶点位移（FFD），直接采样导出的时间轴。
+   * 加权附件的每个骨骼影响都有独立的局部位移，不能把交错顶点流当坐标对。
    */
   function deformOffsetsOf(name, att, t) {
-    var spec = DEFORMS[name];
-    if (!spec) return null;
-    var verts = att.vertices || [];
-    var height = att.height || 1;
-    var duration = spec.duration > 0 ? spec.duration : 1;
-    var phase = ((t / duration) % 1 + 1) % 1;
-    var cycles = spec.cycles || 1;
-    var amplitude = spec.amplitude || 0;
-    var dirX = Math.cos(spec.direction || 0);
-    var dirY = Math.sin(spec.direction || 0);
-    var out = new Array(verts.length);
-    for (var i = 0; i < verts.length; i += 2) {
-      // 顶点是中心坐标，换回「左上角为原点」才能算"离固定端多远"。
-      var ly = verts[i + 1] + height / 2;
-      var along = spec.anchor === 'bottom' ? 1 - ly / height : spec.anchor === 'none' ? 1 : ly / height;
-      // 相位只随时间推进；沿 y 变化的是权重。写成 sin(along·cycles + phase) 会让
-      // 不同高度在同一时刻朝相反方向走，整条裙子被横向扯开（第一版就是这个毛病）。
-      var sway = Math.sin(phase * cycles * Math.PI * 2);
-      var magnitude = amplitude * along * sway;
-      out[i] = dirX * magnitude;
-      out[i + 1] = dirY * magnitude;
+    var anim = SPINE.animations && SPINE.animations[current];
+    var tracks = anim && anim.attachments && anim.attachments.default;
+    var attachmentTracks = tracks && tracks[name] && tracks[name][name];
+    var frames = attachmentTracks && attachmentTracks.deform;
+    if (!frames || frames.length === 0) return null;
+    var length = (att.uvs || []).length;
+    if ((att.vertices || []).length !== length) {
+      length = 0;
+      for (var cursor = 0; cursor < att.vertices.length;) {
+        var count = att.vertices[cursor++];
+        length += count * 2;
+        cursor += count * 4;
+      }
+    }
+    var a = frames[0], b = a;
+    if (t >= frames[frames.length - 1].time) a = b = frames[frames.length - 1];
+    else if (t > a.time) {
+      for (var i = 0; i + 1 < frames.length; i++) {
+        if (t >= frames[i].time && t <= frames[i + 1].time) { a = frames[i]; b = frames[i + 1]; break; }
+      }
+    }
+    var out = new Array(length);
+    for (var j = 0; j < length; j++) {
+      var av = (a.vertices || [])[j - (a.offset || 0)] || 0;
+      var bv = (b.vertices || [])[j - (b.offset || 0)] || 0;
+      out[j] = a === b || a.curve === 'stepped' ? av : bezierValue(a.curve, a.time, av, b.time, bv, t);
     }
     return out;
   }
@@ -352,83 +360,70 @@ export function buildPreviewHtml(options: PreviewOptions): string {
   }
 
   /**
-   * 把附件的顶点解成「**部件中心坐标系**里该画在哪」（也就是 drawMesh 用的那套）。
+   * 把附件顶点解成当前的世界坐标，和官方 VertexAttachment.computeWorldVertices 一致。
    *
    * 两种格式要分开处理，而它们只能靠**长度**区分：
-   *  - 非加权：vertices 就是坐标对，直接可用（长度等于 uvs）；
+   *  - 非加权：vertices 是所属骨骼局部坐标（长度等于 uvs）；
    *  - 加权（LBS）：Spine 的交错流 [骨骼数, (骨骼下标, x, y, 权重) × 骨骼数, …]，
    *    x/y 是**骨骼局部**坐标，得先用各骨骼的**当前**世界变换做线性混合，
-   *    再逐级逆回部件坐标系。
+   *    然后按权重线性混合。
    *
    * 不分开的后果不是报错，是**画出一团乱线**：骨骼下标会被当成坐标用。
    */
-  function meshLocalVertices(att, bone) {
+  function meshWorldVertices(att, bone, offsets) {
     const raw = att.vertices || [];
     const uvs = att.uvs || [];
     if (raw.length === 0) return [];
-    if (raw.length === uvs.length) return raw;
-
     const out = [];
-    const attRad = -((att.rotation || 0) * Math.PI) / 180;
-    const cosA = Math.cos(attRad);
-    const sinA = Math.sin(attRad);
-    const attX = att.x || 0;
-    const attY = att.y || 0;
+    if (raw.length === uvs.length) {
+      for (let i = 0; i < raw.length; i += 2) {
+        const x = raw[i] + (offsets ? offsets[i] : 0);
+        const y = raw[i + 1] + (offsets ? offsets[i + 1] : 0);
+        out.push(bone.worldX + Math.cos(bone.worldRot) * x - Math.sin(bone.worldRot) * y,
+          bone.worldY + Math.sin(bone.worldRot) * x + Math.cos(bone.worldRot) * y);
+      }
+      return out;
+    }
     let cursor = 0;
+    let deformCursor = 0;
     while (cursor < raw.length) {
       const count = raw[cursor++];
       let wx = 0;
       let wy = 0;
       for (let n = 0; n < count; n++) {
         const index = raw[cursor++];
-        const x = raw[cursor++];
-        const y = raw[cursor++];
+        const x = raw[cursor++] + (offsets ? offsets[deformCursor] : 0);
+        const y = raw[cursor++] + (offsets ? offsets[deformCursor + 1] : 0);
+        deformCursor += 2;
         const weight = raw[cursor++];
         const owner = bones[(SPINE.bones || [])[index]?.name];
         if (!owner) continue;
         wx += (Math.cos(owner.worldRot) * x - Math.sin(owner.worldRot) * y + owner.worldX) * weight;
         wy += (Math.sin(owner.worldRot) * x + Math.cos(owner.worldRot) * y + owner.worldY) * weight;
       }
-      // 世界 → 本骨骼局部 → 再逆挂点变换，回到"图片中心"坐标系。
-      const dx = wx - bone.worldX;
-      const dy = wy - bone.worldY;
-      const c = Math.cos(-bone.worldRot);
-      const s = Math.sin(-bone.worldRot);
-      const lx = dx * c - dy * s - attX;
-      const ly = dx * s + dy * c - attY;
-      out.push(lx * cosA - ly * sinA, lx * sinA + ly * cosA);
+      out.push(wx, wy);
     }
     return out;
   }
 
   function drawMesh(bone, att, img, name, t) {
-    const verts = meshLocalVertices(att, bone);
+    var offsets = deformOffsetsOf(name, att, t);
+    const verts = meshWorldVertices(att, bone, offsets);
     const uvs = att.uvs || [];
     const tris = att.triangles || [];
     if (verts.length === 0 || tris.length === 0) return;   // 加权流已在上一步解码成坐标
     var width = att.width || 1;
     var height = att.height || 1;
-    var offsets = deformOffsetsOf(name, att, t);
-    var halfW = width / 2;
-    var halfH = height / 2;
-
     ctx.save();
-    ctx.translate(bone.worldX, bone.worldY);
-    ctx.rotate(bone.worldRot);
-    ctx.translate(att.x || 0, att.y || 0);
-    ctx.rotate((att.rotation || 0) * Math.PI / 180);
-    ctx.scale(1, -1);
-    // 到这里坐标系是「部件中心为原点、y 向上」，而顶点是「中心为原点、y 向下」
-    // （骨架里按图片坐标算的），所以顶点取负 y。
     for (var k = 0; k + 2 < tris.length; k += 3) {
       var i0 = tris[k] * 2, i1 = tris[k + 1] * 2, i2 = tris[k + 2] * 2;
-      var p0 = { x: verts[i0] + (offsets ? offsets[i0] : 0), y: -(verts[i0 + 1] + (offsets ? offsets[i0 + 1] : 0)) };
-      var p1 = { x: verts[i1] + (offsets ? offsets[i1] : 0), y: -(verts[i1 + 1] + (offsets ? offsets[i1 + 1] : 0)) };
-      var p2 = { x: verts[i2] + (offsets ? offsets[i2] : 0), y: -(verts[i2 + 1] + (offsets ? offsets[i2 + 1] : 0)) };
-      // 源点用**图片像素**：顶点是中心坐标，加上半宽半高就是图片里的位置。
-      var s0 = { x: verts[i0] + halfW, y: verts[i0 + 1] + halfH };
-      var s1 = { x: verts[i1] + halfW, y: verts[i1 + 1] + halfH };
-      var s2 = { x: verts[i2] + halfW, y: verts[i2 + 1] + halfH };
+      var p0 = { x: verts[i0], y: verts[i0 + 1] };
+      var p1 = { x: verts[i1], y: verts[i1 + 1] };
+      var p2 = { x: verts[i2], y: verts[i2 + 1] };
+      // UV 决定固定的源像素；动画只能改目标顶点，不能跟着改纹理采样位置。
+      var s0 = { x: uvs[i0] * img.naturalWidth, y: uvs[i0 + 1] * img.naturalHeight };
+      var s1 = { x: uvs[i1] * img.naturalWidth, y: uvs[i1 + 1] * img.naturalHeight };
+      var s2 = { x: uvs[i2] * img.naturalWidth, y: uvs[i2 + 1] * img.naturalHeight };
       var m = affineFromTriangles(s0, s1, s2, p0, p1, p2);
       if (m === null) continue;
       // 三个顶点以重心为中心**外扩一点点**。
@@ -455,7 +450,6 @@ export function buildPreviewHtml(options: PreviewOptions): string {
       ctx.restore();
     }
     ctx.restore();
-    void uvs;
   }
 
   // ── Path 约束（M5）─────────────────────────────────────────────────
@@ -481,10 +475,16 @@ export function buildPreviewHtml(options: PreviewOptions): string {
 
   function samplePath(path, lengths, total, distance) {
     var count = path.points.length / 2;
-    var remaining = Math.max(0, Math.min(total, distance));
+    if (total <= 1e-6) return { x: path.points[0], y: path.points[1], angle: 0 };
+    var lastSegment = lengths.length - 1;
+    while (lastSegment >= 0 && lengths[lastSegment] <= 1e-6) lastSegment--;
+    // 与官方 PathConstraint 相同：闭合路径循环，开放路径沿首尾切线外推。
+    var remaining = path.closed && total > 1e-9 ? ((distance % total) + total) % total : distance;
     for (var i = 0; i < lengths.length; i++) {
       var length = lengths[i];
-      if (remaining <= length || i === lengths.length - 1) {
+      // 导出的三次曲线路径移除了相邻重复点；预览也跳过对应的零长度段。
+      if (length <= 1e-6) continue;
+      if (remaining <= length || i === lastSegment) {
         var t = length > 1e-9 ? remaining / length : 0;
         var j = (i + 1) % count;
         var x0 = path.points[i * 2], y0 = path.points[i * 2 + 1];
@@ -538,9 +538,8 @@ export function buildPreviewHtml(options: PreviewOptions): string {
         var bone = bones[chain[k]];
         if (!bone) continue;
         var at = samplePath(spec, lengths, total, k * spacing);
-        // 骨骼沿**局部 +y** 生长，朝向角 = 世界旋转 + 90°，所以反解减 π/2
-        // （与 IK 那条约定一致）。
-        placeBone(bone, at.x, at.y, at.angle - Math.PI / 2, spec.translateMix, spec.rotateMix);
+        // Spine 的骨尖沿局部 +x，路径切线角可以直接作为世界旋转。
+        placeBone(bone, at.x, at.y, at.angle, spec.translateMix, spec.rotateMix);
         // **放好一根就立刻刷新它的世界变换**：placeBone 是拿父级的当前世界位置
         // 反算 local 的，而链上下一根骨的父级正是刚放好的这根——不刷新的话它读到的
         // 还是旧位置，误差会沿着链累积（实测三根骨的末端偏了 39px）。
@@ -558,7 +557,7 @@ export function buildPreviewHtml(options: PreviewOptions): string {
       var att = skin[slot.name] && skin[slot.name][slot.attachment];
       var bone = bones[slot.bone];
       if (!att || !bone) return;
-      var rad = bone.worldRot + ((att.rotation || 0) * Math.PI / 180);
+      var rad = ((att.rotation || 0) * Math.PI / 180);
       var hw = att.width / 2, hh = att.height / 2;
       for (var sx = -1; sx <= 1; sx += 2) for (var sy = -1; sy <= 1; sy += 2) {
         var lx = att.x + (sx * hw * Math.cos(rad) - sy * hh * Math.sin(rad));
@@ -641,7 +640,7 @@ export function buildPreviewHtml(options: PreviewOptions): string {
         if (b.length > 0) {
           ctx.beginPath();
           ctx.moveTo(0, 0);
-          ctx.lineTo(0, b.length);
+          ctx.lineTo(b.length, 0);
           ctx.strokeStyle = 'rgba(80,230,140,.85)';
           ctx.lineWidth = 1.6 / view.scale;
           ctx.stroke();
@@ -802,6 +801,14 @@ export function buildPreviewHtml(options: PreviewOptions): string {
   // 否则「拖动目标点时手跟随」这条判据只能靠肉眼看截图。
   // 只暴露读接口，不提供任何写入口——验收用的东西不该能改状态。
   window.__gmmPreview = {
+    /** 当前 mesh 世界顶点，供验收比较官方运行时，不改变播放状态。 */
+    meshVertices: function (name) {
+      var slot = slots.find(function (item) { return item.name === name; });
+      var att = slot && skin[name] && skin[name][slot.attachment];
+      var bone = slot && bones[slot.bone];
+      if (!att || att.type !== 'mesh' || !bone) return null;
+      return meshWorldVertices(att, bone, deformOffsetsOf(name, att, animTime));
+    },
     bones: function () {
       var out = {};
       boneList.forEach(function (b) {
@@ -825,7 +832,7 @@ export function buildPreviewHtml(options: PreviewOptions): string {
         var chain = IKS[i].bones;
         var last = bones[chain[chain.length - 1]];
         if (!last) continue;
-        return { x: last.worldX - Math.sin(last.worldRot) * last.length, y: last.worldY + Math.cos(last.worldRot) * last.length };
+        return { x: last.worldX + Math.cos(last.worldRot) * last.length, y: last.worldY + Math.sin(last.worldRot) * last.length };
       }
       return null;
     }
