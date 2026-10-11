@@ -1143,8 +1143,6 @@
         "Visible",
       "锁定":
         "Locked",
-      "高度":
-        "Height",
       "不透明度%":
         "Opacity %",
       "加装饰层":
@@ -1258,7 +1256,88 @@
       "地图编辑器（实验性）":
         "Map editor (experimental)",
       "先选一块图当笔刷：点调色板里的图块，或点上面的族胶囊。":
-        "Pick a tile first: click a tile in the palette, or a family chip above."
+        "Pick a tile first: click a tile in the palette, or a family chip above.",
+
+      // ── 地图编辑器：名词速查 / 小字注释 / 删除入口 ──────────────────────
+      "名词速查：这些词是什么意思？": "Glossary: what do these words mean?",
+      "图集": "Tileset",
+      "一整套小图拼成的大图，和 Tiled 里的 tileset 是同一种东西。":
+        "One big image holding a whole set of small tiles — the same thing Tiled calls a tileset.",
+      "切分": "Slicing",
+      "按格子尺寸把大图切成一块块图块。改切分会重排图块序号，已有地图会自动跟着对齐。":
+        "Cutting the big image into tiles by cell size. Changing the slice renumbers the tiles, and existing maps are remapped automatically.",
+      "图块序号": "Tile index",
+      "全项目统一的编号（不是「第几行第几列」），地图里存的就是它。":
+        "A project-wide number (not a row/column) — it is what maps actually store.",
+      "地形族": "Terrain family",
+      "一类地貌：草地、土路、水……自动过渡时按族判断谁该朝谁长边。":
+        "A kind of terrain: grass, dirt road, water… auto-tiling uses families to decide who grows an edge into whom.",
+      "掩码": "Mask",
+      "一块图代表「哪几条边 / 角上有邻居」。自动过渡靠它挑出正确的那一块。":
+        "Which edges and corners of a tile have neighbours. Auto-tiling uses it to pick the right tile.",
+      "自动过渡": "Auto-tiling",
+      "铺图时按邻居自动换成带过渡边缘的图块。单块 / 16 掩码 / 47 掩码是三种精度。":
+        "While painting, tiles are swapped for edge-transition variants based on neighbours. Single / 16-mask / 47-mask are the three precisions.",
+      "数字大的族会朝数字小的邻居长过渡块（草地 < 土路 < 水）。":
+        "A family with a bigger number grows its transition into smaller-numbered neighbours (grass < dirt road < water).",
+      "变体种子": "Variant seed",
+      "同一样式下换一组随机选择，用来出另一版铺法；同种子 + 同布局可逐像素复现。":
+        "Swaps the random choices to produce another layout; the same seed and layout reproduce it pixel for pixel.",
+      "高度偏移": "Height offset",
+      "整层上下挪几个像素，用来做「贴在墙面上的装饰」那种层次感。":
+        "Shifts a whole layer up or down a few pixels, which is how decorations sit against a wall.",
+      "chunk": "Chunk",
+      "宿主按 32×32 一块算脏区，界面只画视口里的块，所以大地图也不卡。":
+        "The host tracks dirty regions in 32×32 blocks and the UI only draws visible ones, so big maps stay smooth.",
+      "验收预览图": "Review previews",
+      "把掩码覆盖率和地图各渲染一张 PNG，用来肉眼检查过渡是否自然、有没有缺口。":
+        "Renders the mask coverage and the map to PNG so you can eyeball whether transitions look natural and hole-free.",
+      "左键拖动＝按当前工具涂抹；Shift + 拖动（或中键拖动）＝平移画布；滚轮＝缩放；点「适应窗口」把整张地图缩回视野。":
+        "Drag with the left button to use the current tool; Shift+drag (or middle-drag) pans; the wheel zooms; \"Fit to window\" brings the whole map back into view.",
+      "点一下把这层设为「当前图层」，画笔只会画在它上面":
+        "Click to make this the active layer — the brush only paints on it",
+      "取消勾选＝这一层在画布上不显示（内容还在）":
+        "Uncheck to hide the layer on the canvas (its content is kept)",
+      "勾上＝这一层不能被画到（防止误涂）":
+        "Check to keep this layer from being painted on (protects against stray strokes)",
+      "上移一层（越靠上越晚画，也就盖住下面的）":
+        "Move up (later layers are drawn on top)",
+      "下移一层": "Move down",
+      "删掉这一层与它上面的内容": "Delete this layer and everything on it",
+      "高度偏移（像素）": "Height offset (px)",
+      "至少要留一张地图": "At least one map must remain",
+      "删掉当前这张地图与它上面的内容": "Delete this map and everything on it",
+      "已删除项目": "Project deleted",
+      "已删除地图": "Map deleted",
+      "确定删除地图「{n0}」？上面的内容会一起删掉，无法撤销。":
+        "Delete the map \"{n0}\"? Everything painted on it is removed too, and this cannot be undone.",
+      "格宽 / 格高 = 每块贴图的像素大小；图集四周或块之间有空隙时，把空隙填进边距 / 间距。下面那张网格就是切完的效果，点格子可以多选后归入地形族。":
+        "Cell width / height is the pixel size of one tile; if the atlas has padding around it or gaps between tiles, put those into the margins / spacing. The grid below is the result of the current slice — click tiles to multi-select them and assign a family.",
+      "过渡方案怎么选：边界横平竖直的（墙、路）用「四邻域 16 掩码」；要 45° 斜角与内角就选「八邻域 47 掩码」；完全不想要过渡边缘就选「单块」。族名只是给你自己看的标签，不影响出图。":
+        "Which scheme to pick: use \"16-mask (4-neighbour)\" for straight edges (walls, roads); pick \"47-mask (8-neighbour)\" when you want 45° corners and inner corners; choose \"single tile\" if you want no transition edges at all. Family names are just labels for you and do not affect the output.",
+      "数字越大越「强势」：它会朝数字小的邻居长过渡块":
+        "Bigger numbers win: this family grows its transition into smaller-numbered neighbours",
+      "这里看你给每个族配齐了没有：47 掩码方案要有 47 块不同拼接形状（16 掩码要 16 块）。缺的块运行时回退成最接近的一块，不会报错，但过渡会显得生硬。":
+        "This shows whether each family is complete: the 47-mask scheme needs 47 distinct edge/corner shapes (16 for the 16-mask scheme). Missing ones fall back to the closest shape at runtime — no error, but the transitions look harsher.",
+      "把掩码覆盖率与当前地图各渲染一张 PNG，用来肉眼检查过渡是否自然":
+        "Render the mask coverage and the current map to PNG so you can check the transitions by eye",
+      "地图与图层": "Maps and layers",
+      "上面一行是这张项目里的地图（点名字切换）；下面每一块是一个图层，画笔只会画在当时高亮的那一层上。「高度偏移」让整层上下挪几像素，「锁定」防止误涂。":
+        "The row above lists this project's maps (click a name to switch); each block below is a layer, and the brush only paints on the highlighted one. Height offset shifts a whole layer by a few pixels; Lock prevents stray strokes.",
+      "点一块图就把它当成笔刷；点族胶囊可以快速切到那个族的第一块。带淡蓝色底的是已经归入某个族的块。":
+        "Click a tile to use it as the brush; click a family chip to jump to that family's first tile. Tiles with a light blue background already belong to a family.",
+      "四种格式可以随便勾：合并 PNG / 分层 PNG 是给人看的图；自有 JSON 是给引擎读的完整数据（含图例）；Tiled 那两份是给 Tiled 地图编辑器打开的。右边的倍率只影响 PNG 的尺寸，不影响地图数据。":
+        "Tick any of the four formats: merged / layered PNG are images for humans; the own JSON is the complete data an engine reads (legend included); the two Tiled files are what the Tiled map editor opens. The scale on the right only affects PNG size, not the map data.",
+      "把所有图层合成一张图，用来快速看一眼整体效果":
+        "Flattens all layers into one image for a quick overall look",
+      "每个图层单独出一张 PNG，方便在别的软件里对位":
+        "One PNG per layer, handy for lining things up in another tool",
+      "本插件自己的地图格式：格子、图层、图例、族与掩码全在里面":
+        "This plugin's own map format: cells, layers, legend, families and masks all included",
+      "Tiled 工程文件：.tmj 是地图，.tsj 是图集定义，配套的图集 PNG 会一起复制":
+        "Tiled project files: .tmj is the map, .tsj the tileset definition, and the tileset PNG is copied alongside",
+      "PNG 的放大倍率：1× 就是原始像素（像素画选 1×），放大用于做宣传图":
+        "PNG scale: 1× is native pixels (pick 1× for pixel art); larger sizes are for promo images"
     };
 /* i18n-ignore-end */
 
@@ -2102,15 +2181,35 @@
 .SPR_mapCell-active{background:rgba(255,120,0,.6);outline:1px solid rgba(255,120,0,.9)}
 .SPR_mapCell-empty{background:rgba(150,150,150,.16)}
 .SPR_mapCellLabel{pointer-events:none;font-size:10px;color:var(--dsw-alias-label-secondary);opacity:0}
-.SPR_meStage{display:flex;flex-direction:column;gap:10px}
-.SPR_meCard{border:1px solid var(--dsw-alias-border-l2);border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:8px;background:var(--dsw-alias-bg-layer-3)}
-.SPR_meCard>h4{margin:0;font-size:13px}
+.SPR_meStage{display:flex;flex-direction:column;gap:14px}
+.SPR_meCard{border:1px solid var(--dsw-alias-border-l2);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:10px;background:var(--dsw-alias-bg-layer-3)}
+.SPR_meCard>h4{margin:0;font-size:13px;letter-spacing:.2px}
+/*
+ * 卡片标题下的小字说明（.SPR_meCardNote）。
+ *
+ * 地图编辑器里全是自造词（切分 / 掩码 / 族 / 优先级 / chunk），光有标题用户不知道
+ * 这一步在干什么。说明放标题**下面一行**、11px 灰字，不抢视线也不把面板塞满。
+ */
+.SPR_meCardNote{font-size:11px;line-height:1.6;color:var(--dsw-alias-label-tertiary);margin:-2px 0 0}
 .SPR_meCardHead{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.SPR_meHint{font-size:11px;color:var(--dsw-alias-label-tertiary);margin:0}
-.SPR_meWarn{font-size:11px;color:var(--dsw-alias-label-error, #d24);margin:0}
-.SPR_meWarnings{margin:0;padding-left:18px;font-size:11px;color:var(--dsw-alias-label-secondary)}
-.SPR_meSliceRow{display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end}
-.SPR_mePaletteWrap{display:flex;flex-direction:column;gap:6px}
+.SPR_meHint{font-size:11px;line-height:1.6;color:var(--dsw-alias-label-tertiary);margin:0}
+.SPR_meWarn{font-size:11px;line-height:1.6;color:var(--dsw-alias-label-error, #d24);margin:0}
+.SPR_meWarnings{margin:0;padding-left:18px;font-size:11px;line-height:1.7;color:var(--dsw-alias-label-secondary)}
+/* 切分参数：六个数挤一行太窄，改成自适应网格，一格一个字段 */
+.SPR_meSliceRow{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:10px 12px;align-items:end}
+/*
+ * 名词速查：原生 <details> 折起来，展开才占地方。
+ * 地图编辑器有一串自造词，首次上手没人知道「掩码」「族」「chunk」指什么。
+ */
+.SPR_meGlossary{border:1px dashed var(--dsw-alias-border-l2);border-radius:12px;padding:10px 14px;background:var(--dsw-alias-bg-layer-2, rgba(0,0,0,.02));margin-bottom:14px}
+.SPR_meGlossary>summary{font-size:12px;color:var(--dsw-alias-label-secondary);cursor:pointer;list-style:none}
+.SPR_meGlossary>summary::-webkit-details-marker{display:none}
+.SPR_meGlossary>summary::before{content:"▸ ";color:var(--dsw-alias-label-tertiary)}
+.SPR_meGlossary[open]>summary::before{content:"▾ "}
+.SPR_meGlossaryList{display:grid;grid-template-columns:max-content 1fr;gap:6px 12px;margin:10px 0 2px;font-size:11px}
+.SPR_meGlossaryList dt{color:var(--dsw-alias-label-primary);font-weight:600}
+.SPR_meGlossaryList dd{margin:0;color:var(--dsw-alias-label-tertiary);line-height:1.65}
+.SPR_mePaletteWrap{display:flex;flex-direction:column;gap:8px}
 /*
  * 盒子由 aspect-ratio + 最大宽度定死（见 mapPaletteBox），图与叠加层**共用同一个盒子**，
  * 图块的 left/top/width/height 一律写百分比 —— 图被缩放时叠加层跟着缩放。
@@ -2125,37 +2224,44 @@
 .SPR_mePaletteCell[data-selected="true"]{background:rgba(255,120,0,.45);outline:1px solid rgba(255,120,0,1)}
 .SPR_meGridV{position:absolute;top:0;bottom:0;width:1px;background:rgba(255,0,255,.5);pointer-events:none}
 .SPR_meGridH{position:absolute;left:0;right:0;height:1px;background:rgba(255,0,255,.5);pointer-events:none}
-.SPR_meFamilyRow{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
-.SPR_meFamilyChip{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--dsw-alias-border-l2);border-radius:999px;padding:2px 9px;font-size:12px;background:transparent;cursor:pointer}
+.SPR_meFamilyRow{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.SPR_meFamilyChip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--dsw-alias-border-l2);border-radius:999px;padding:4px 11px;font-size:12px;background:transparent;cursor:pointer}
 .SPR_meFamilyChip[data-ok="true"]{border-color:rgba(80,200,120,.8)}
 .SPR_meFamilyDot{width:9px;height:9px;border-radius:50%;display:inline-block}
 .SPR_meFamilyCount{font-size:10px;color:var(--dsw-alias-label-tertiary)}
-.SPR_meFamilyEdit{display:flex;flex-direction:column;gap:6px}
-.SPR_meFamilyEditRow{display:flex;gap:6px;align-items:flex-end;flex-wrap:wrap}
+.SPR_meFamilyEdit{display:flex;flex-direction:column;gap:8px}
+.SPR_meFamilyEditRow{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;padding:8px 10px;border-radius:10px;background:var(--dsw-alias-bg-layer-2, rgba(0,0,0,.02))}
 .SPR_meName{min-width:110px}
-.SPR_meCoverage{display:flex;flex-direction:column;gap:4px;font-size:12px}
-.SPR_meCoverageRow{display:flex;gap:10px;align-items:center}
+.SPR_meCoverage{display:flex;flex-direction:column;gap:6px;font-size:12px}
+.SPR_meCoverageRow{display:flex;gap:12px;align-items:center}
 .SPR_meCoverageRow[data-ok="true"] .SPR_meOk{color:#3fa85f}
 .SPR_meOk{color:#3fa85f}
 .SPR_meBad{color:#d24}
-.SPR_meShots{display:flex;gap:8px;flex-wrap:wrap}
-.SPR_meShot{max-width:220px;max-height:160px;image-rendering:pixelated;border:1px solid var(--dsw-alias-border-l2)}
-.SPR_meEditorWrap{display:flex;flex-direction:column;gap:8px}
-.SPR_meToolbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.SPR_meShots{display:flex;gap:10px;flex-wrap:wrap}
+.SPR_meShot{max-width:220px;max-height:160px;image-rendering:pixelated;border:1px solid var(--dsw-alias-border-l2);border-radius:8px}
+.SPR_meEditorWrap{display:flex;flex-direction:column;gap:10px}
+.SPR_meToolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .SPR_meToolLabel{font-size:11px;color:var(--dsw-alias-label-tertiary)}
 .SPR_meLayerName{font-size:12px}
 .SPR_meZoom{font-size:11px;color:var(--dsw-alias-label-tertiary)}
 .SPR_meCheck{display:inline-flex;align-items:center;gap:4px;font-size:11px}
-.SPR_meCanvas{width:100%;height:420px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-3);cursor:crosshair;touch-action:none}
-.SPR_meLayerList{display:flex;flex-direction:column;gap:6px}
-.SPR_meLayerRow{display:flex;gap:6px;align-items:flex-end;flex-wrap:wrap;padding:4px;border-radius:8px;border:1px dashed transparent}
-.SPR_meLayerRow[data-active="true"]{border-color:var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2, rgba(0,0,0,.03))}
-.SPR_meLayerPick{border:none;background:transparent;cursor:pointer;font-size:12px;padding:2px 4px;text-align:left}
-.SPR_meMapList{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
-.SPR_meMapChip{border:1px solid var(--dsw-alias-border-l2);border-radius:999px;padding:3px 10px;font-size:12px;background:transparent;cursor:pointer}
+.SPR_meCanvas{width:100%;height:420px;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;background:var(--dsw-alias-bg-layer-3);cursor:crosshair;touch-action:none}
+.SPR_meLayerList{display:flex;flex-direction:column;gap:8px}
+/*
+ * 图层行拆成两行：上行「名字 + 显示/锁定 + 排序/删除」，下行「高度 / 不透明度」。
+ * 挤成一行时窄面板里六个控件会换行到互相错位（真机反馈「过于紧凑」）。
+ */
+.SPR_meLayerRow{display:flex;flex-direction:column;gap:8px;padding:10px 12px;border-radius:10px;border:1px dashed transparent;background:var(--dsw-alias-bg-layer-2, rgba(0,0,0,.02))}
+.SPR_meLayerRow[data-active="true"]{border-color:var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1, rgba(0,0,0,.04))}
+.SPR_meLayerMain{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.SPR_meLayerFields{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:8px 12px;align-items:end}
+.SPR_meLayerPick{border:none;background:transparent;cursor:pointer;font-size:12px;font-weight:600;padding:2px 4px;text-align:left}
+.SPR_meLayerPick[data-on="true"]::after{content:" ●";color:var(--dsw-alias-state-business-primary, #3b82f6);font-size:10px}
+.SPR_meMapList{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.SPR_meMapChip{border:1px solid var(--dsw-alias-border-l2);border-radius:999px;padding:4px 12px;font-size:12px;background:transparent;cursor:pointer}
 .SPR_meMapChip[data-active="true"]{background:rgba(120,180,255,.22);border-color:rgba(120,180,255,.9)}
 .SPR_meBusy{font-size:11px;color:var(--dsw-alias-label-warning, #c80)}
-.SPR_meFileList{margin:0;padding-left:18px;font-size:11px;line-height:1.7}
+.SPR_meFileList{margin:0;padding-left:18px;font-size:12px;line-height:1.9}
 
 .SPR_mapCell:hover .SPR_mapCellLabel{opacity:1}
 .SPR_step-active{color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-state-business-primary)}
@@ -6515,6 +6621,45 @@
         await loadProject(project.id);
       };
 
+      /**
+       * 删除整个项目（目录一起删）。
+       *
+       * 删完必须自己挑下一个项目：`loadProject` 只认 id，删掉的 id 再去读是报错，
+       * 界面会卡在「读取失败」而不是干净地退到空态。
+       */
+      const deleteProject = async () => {
+        if (project === null || projectId === null) return;
+        // eslint-disable-next-line no-alert
+        if (typeof window !== "undefined" && !window.confirm(T("确定删除项目「{n0}」？项目目录会被整个移除，无法撤销。", { n0: project.name }))) return;
+        await withApi(async () => {
+          await api.deleteMapProject({ projectId });
+          const result = await api.listMapProjects();
+          const rest = result.projects || [];
+          setProjects(rest);
+          if (rest.length > 0) await loadProject(rest[0].id);
+          else {
+            setProjectId(null);
+            setView(null);
+          }
+        }, { notice: T("已删除项目") });
+      };
+
+      /**
+       * 删除当前地图。
+       *
+       * 宿主侧写死了「至少要留一张地图」（`deleteMapDocFor`），所以只剩一张时按钮直接禁用，
+       * 而不是点下去弹一句错误 —— 用户看不出「禁用」和「点了没反应」的区别（真机踩过）。
+       */
+      const deleteMap = async () => {
+        if (project === null || doc === null || doc === undefined || mapId === null) return;
+        if ((project.maps || []).length <= 1) return;
+        // eslint-disable-next-line no-alert
+        if (typeof window !== "undefined" && !window.confirm(T("确定删除地图「{n0}」？上面的内容会一起删掉，无法撤销。", { n0: doc.name }))) return;
+        const result = await withApi(() => api.deleteMapDoc({ projectId, mapId }), { notice: T("已删除地图") });
+        if (result === undefined) return;
+        await loadProject(projectId);
+      };
+
       const importFiles = async (files) => {
         if (files === undefined || files.length === 0 || projectId === null) return;
         setBusy(true);
@@ -6671,6 +6816,38 @@
       );
       const stageHintLine = h("p", { className: "SPR_hint" }, (MAP_STAGES.find((entry) => entry.key === stage) ?? MAP_STAGES[0]).hint);
 
+      /**
+       * 名词速查。
+       *
+       * 这条路上有一串自造 / 行话词（图集 / 切分 / 图块序号 / 地形族 / 掩码 / 自动过渡 /
+       * 优先级 / 种子 / chunk），光看界面没人知道它们指什么。折进原生 `<details>`：
+       * 想看的点开，不想看的常年只占一行 —— 比把说明铺满面板更不容易「过于紧凑」。
+       * 文案写在**函数体里**（模块顶层的 T() 会在插件 load 时求值，那时还没有 locale）。
+       */
+      const glossary = h(
+        "details",
+        { className: "SPR_meGlossary" },
+        h("summary", null, T("名词速查：这些词是什么意思？")),
+        h(
+          "dl",
+          { className: "SPR_meGlossaryList" },
+          [
+            [T("图集"), T("一整套小图拼成的大图，和 Tiled 里的 tileset 是同一种东西。")],
+            [T("切分"), T("按格子尺寸把大图切成一块块图块。改切分会重排图块序号，已有地图会自动跟着对齐。")],
+            [T("图块序号"), T("全项目统一的编号（不是「第几行第几列」），地图里存的就是它。")],
+            [T("地形族"), T("一类地貌：草地、土路、水……自动过渡时按族判断谁该朝谁长边。")],
+            [T("掩码"), T("一块图代表「哪几条边 / 角上有邻居」。自动过渡靠它挑出正确的那一块。")],
+            [T("自动过渡"), T("铺图时按邻居自动换成带过渡边缘的图块。单块 / 16 掩码 / 47 掩码是三种精度。")],
+            [T("优先级"), T("数字大的族会朝数字小的邻居长过渡块（草地 < 土路 < 水）。")],
+            [T("变体种子"), T("同一样式下换一组随机选择，用来出另一版铺法；同种子 + 同布局可逐像素复现。")],
+            [T("高度偏移"), T("整层上下挪几个像素，用来做「贴在墙面上的装饰」那种层次感。")],
+            [T("chunk"), T("宿主按 32×32 一块算脏区，界面只画视口里的块，所以大地图也不卡。")],
+            [T("验收预览图"), T("把掩码覆盖率和地图各渲染一张 PNG，用来肉眼检查过渡是否自然、有没有缺口。")]
+          ].map(([term, text]) => h(React.Fragment, { key: term }, h("dt", null, term), h("dd", null, text)))
+        )
+      );
+
+
       const tilesets = project.tilesets || [];
       const families = project.families || [];
       const maps = project.maps || [];
@@ -6801,6 +6978,7 @@
           onWheel,
           onContextMenu: (event) => event.preventDefault()
         }),
+        h("p", { className: "SPR_meHint" }, T("左键拖动＝按当前工具涂抹；Shift + 拖动（或中键拖动）＝平移画布；滚轮＝缩放；点「适应窗口」把整张地图缩回视野。")),
         planWarnings.length === 0 ? null : h("p", { className: "SPR_meWarn" }, planWarnings.join("；"))
       );
 
@@ -6815,47 +6993,63 @@
               className: "SPR_meLayerRow",
               "data-active": activeLayer !== undefined && activeLayer.id === layer.id ? "true" : undefined
             },
+            // 上行：选层 + 显隐/锁定 + 排序/删除（一眼看清「在改哪一层」）
             h(
-              "button",
-              { type: "button", className: "SPR_meLayerPick", onClick: () => setActiveLayerId(layer.id) },
-              layer.name
+              "div",
+              { className: "SPR_meLayerMain" },
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "SPR_meLayerPick",
+                  "data-on": activeLayer !== undefined && activeLayer.id === layer.id ? "true" : undefined,
+                  title: T("点一下把这层设为「当前图层」，画笔只会画在它上面"),
+                  onClick: () => setActiveLayerId(layer.id)
+                },
+                layer.name
+              ),
+              h(
+                "label",
+                { className: "SPR_meCheck", title: T("取消勾选＝这一层在画布上不显示（内容还在）") },
+                h("input", {
+                  type: "checkbox",
+                  checked: layer.visible,
+                  onChange: (event) => void saveDocStructure({ layers: [{ id: layer.id, visible: event.target.checked }] })
+                }),
+                T("显示")
+              ),
+              h(
+                "label",
+                { className: "SPR_meCheck", title: T("勾上＝这一层不能被画到（防止误涂）") },
+                h("input", {
+                  type: "checkbox",
+                  checked: layer.locked,
+                  onChange: (event) => void saveDocStructure({ layers: [{ id: layer.id, locked: event.target.checked }] })
+                }),
+                T("锁定")
+              ),
+              h(Btn, { onClick: () => void saveDocStructure({ moveLayer: { id: layer.id, toIndex: index - 1 } }), disabled: index === 0, title: T("上移一层（越靠上越晚画，也就盖住下面的）") }, "↑"),
+              h(Btn, { onClick: () => void saveDocStructure({ moveLayer: { id: layer.id, toIndex: index + 1 } }), disabled: index === doc.layers.length - 1, title: T("下移一层") }, "↓"),
+              h(Btn, { danger: true, title: T("删掉这一层与它上面的内容"), onClick: () => void saveDocStructure({ removeLayerId: layer.id }) }, T("删除"))
             ),
+            // 下行：两个数值字段单独一行，窄面板里不会和上面的按钮互相挤
             h(
-              "label",
-              { className: "SPR_meCheck" },
-              h("input", {
-                type: "checkbox",
-                checked: layer.visible,
-                onChange: (event) => void saveDocStructure({ layers: [{ id: layer.id, visible: event.target.checked }] })
+              "div",
+              { className: "SPR_meLayerFields" },
+              h(NumField, {
+                label: T("高度偏移（像素）"),
+                value: layer.heightOffset,
+                step: 0.5,
+                onChange: (value) => void saveDocStructure({ layers: [{ id: layer.id, heightOffset: value }] })
               }),
-              T("显示")
-            ),
-            h(
-              "label",
-              { className: "SPR_meCheck" },
-              h("input", {
-                type: "checkbox",
-                checked: layer.locked,
-                onChange: (event) => void saveDocStructure({ layers: [{ id: layer.id, locked: event.target.checked }] })
-              }),
-              T("锁定")
-            ),
-            h(NumField, {
-              label: T("高度"),
-              value: layer.heightOffset,
-              step: 0.5,
-              onChange: (value) => void saveDocStructure({ layers: [{ id: layer.id, heightOffset: value }] })
-            }),
-            h(NumField, {
-              label: T("不透明度%"),
-              value: Math.round(layer.opacity * 100),
-              min: 0,
-              max: 100,
-              onChange: (value) => void saveDocStructure({ layers: [{ id: layer.id, opacity: value / 100 }] })
-            }),
-            h(Btn, { onClick: () => void saveDocStructure({ moveLayer: { id: layer.id, toIndex: index - 1 } }), disabled: index === 0, title: T("上移") }, "↑"),
-            h(Btn, { onClick: () => void saveDocStructure({ moveLayer: { id: layer.id, toIndex: index + 1 } }), disabled: index === doc.layers.length - 1, title: T("下移") }, "↓"),
-            h(Btn, { danger: true, onClick: () => void saveDocStructure({ removeLayerId: layer.id }) }, T("删除"))
+              h(NumField, {
+                label: T("不透明度%"),
+                value: Math.round(layer.opacity * 100),
+                min: 0,
+                max: 100,
+                onChange: (value) => void saveDocStructure({ layers: [{ id: layer.id, opacity: value / 100 }] })
+              })
+            )
           )
         ),
         h(
@@ -6901,8 +7095,18 @@
           },
           T("新建地图")
         ),
-        h(Btn, { onClick: () => void withApi(() => api.duplicateMapDoc({ projectId, mapId })) }, T("复制当前地图")),
-        h(Btn, { danger: true, onClick: () => void withApi(() => api.deleteMapDoc({ projectId, mapId })) }, T("删除当前地图"))
+        h(Btn, { onClick: () => void withApi(async () => { await api.duplicateMapDoc({ projectId, mapId }); await loadProject(projectId); }) }, T("复制当前地图")),
+        h(
+          Btn,
+          {
+            danger: true,
+            // 宿主侧写死「至少要留一张地图」，只剩一张时直接禁用（点下去只弹错误＝像是坏了）
+            disabled: maps.length <= 1,
+            title: maps.length <= 1 ? T("至少要留一张地图") : T("删掉当前这张地图与它上面的内容"),
+            onClick: () => void deleteMap()
+          },
+          T("删除当前地图")
+        )
       );
 
       const stageAssets = h(
@@ -6948,6 +7152,7 @@
               h(Btn, { on: selectedTilesetId === tileset.id, onClick: () => setSelectedTilesetId(tileset.id) }, T("选为调色板")),
               h(Btn, { danger: true, onClick: () => void withApi(() => api.removeMapTileset({ projectId, tilesetId: tileset.id })) }, T("移除图集"))
             ),
+            h("p", { className: "SPR_meCardNote" }, T("格宽 / 格高 = 每块贴图的像素大小；图集四周或块之间有空隙时，把空隙填进边距 / 间距。下面那张网格就是切完的效果，点格子可以多选后归入地形族。")),
             h(
               "div",
               { className: "SPR_meSliceRow" },
@@ -7033,6 +7238,7 @@
           { className: "SPR_meCard" },
           h("h4", null, T("地形族与自动过渡")),
           h("p", { className: "SPR_meHint" }, T("优先级大的族会朝优先级小的邻居长过渡块（草地 < 土路 < 水）。缺掩码的地方会回退成最近的一块，并在下面标出来。")),
+          h("p", { className: "SPR_meCardNote" }, T("过渡方案怎么选：边界横平竖直的（墙、路）用「四邻域 16 掩码」；要 45° 斜角与内角就选「八邻域 47 掩码」；完全不想要过渡边缘就选「单块」。族名只是给你自己看的标签，不影响出图。")),
           h(
             "div",
             { className: "SPR_meFamilyEdit" },
@@ -7065,6 +7271,7 @@
                 h(NumField, {
                   label: T("优先级"),
                   value: family.priority,
+                  hint: T("数字越大越「强势」：它会朝数字小的邻居长过渡块"),
                   onChange: (value) => {
                     const next = (familyDraft === null ? families : familyDraft).slice();
                     next[index] = { ...next[index], priority: value };
@@ -7102,6 +7309,7 @@
           "div",
           { className: "SPR_meCard" },
           h("h4", null, T("掩码覆盖率")),
+          h("p", { className: "SPR_meCardNote" }, T("这里看你给每个族配齐了没有：47 掩码方案要有 47 块不同拼接形状（16 掩码要 16 块）。缺的块运行时回退成最接近的一块，不会报错，但过渡会显得生硬。")),
           coverage.length === 0
             ? h("p", { className: "SPR_meHint" }, T("还没有族。先加一个族，再把图块归进去。"))
             : h(
@@ -7129,7 +7337,7 @@
           h(
             "div",
             { className: "SPR_toolbar" },
-            h(Btn, { onClick: () => void runPreview(), busy: project.busy === true }, T("生成验收预览图")),
+            h(Btn, { onClick: () => void runPreview(), busy: project.busy === true, title: T("把掩码覆盖率与当前地图各渲染一张 PNG，用来肉眼检查过渡是否自然") }, T("生成验收预览图")),
             h(Btn, { onClick: () => void withApi(() => api.revealMapProject({ projectId })) }, T("在访达中打开项目目录"))
           )
         )
@@ -7141,7 +7349,8 @@
         h(
           "div",
           { className: "SPR_meCard" },
-          h("h4", null, T("地图")),
+          h("h4", null, T("地图与图层")),
+          h("p", { className: "SPR_meCardNote" }, T("上面一行是这张项目里的地图（点名字切换）；下面每一块是一个图层，画笔只会画在当时高亮的那一层上。「高度偏移」让整层上下挪几像素，「锁定」防止误涂。")),
           mapList,
           layerList
         ),
@@ -7149,6 +7358,7 @@
           "div",
           { className: "SPR_meCard" },
           h("h4", null, T("调色板")),
+          h("p", { className: "SPR_meCardNote" }, T("点一块图就把它当成笔刷；点族胶囊可以快速切到那个族的第一块。带淡蓝色底的是已经归入某个族的块。")),
           h(
             "select",
             {
@@ -7192,13 +7402,30 @@
           { className: "SPR_meCard" },
           h("h4", null, T("导出")),
           h("p", { className: "SPR_meHint" }, T("全部本地计算，不花钱。导出目录是自包含的：图集 PNG 会一起复制过去，Tiled 直接能打开。")),
+          h("p", { className: "SPR_meCardNote" }, T("四种格式可以随便勾：合并 PNG / 分层 PNG 是给人看的图；自有 JSON 是给引擎读的完整数据（含图例）；Tiled 那两份是给 Tiled 地图编辑器打开的。右边的倍率只影响 PNG 的尺寸，不影响地图数据。")),
           h(
             "div",
             { className: "SPR_meToolbar" },
-            [["pngMerged", T("合并 PNG（map.png）")], ["pngLayers", T("分层 PNG")], ["json", T("自有 JSON")], ["tiled", T("Tiled .tmj/.tsj")]].map(([key, label]) =>
+            [
+              ["pngMerged", T("合并 PNG（map.png）")],
+              ["pngLayers", T("分层 PNG")],
+              ["json", T("自有 JSON")],
+              ["tiled", T("Tiled .tmj/.tsj")]
+            ].map(([key, label]) =>
               h(
                 "label",
-                { key, className: "SPR_meCheck" },
+                {
+                  key,
+                  className: "SPR_meCheck",
+                  title:
+                    key === "pngMerged"
+                      ? T("把所有图层合成一张图，用来快速看一眼整体效果")
+                      : key === "pngLayers"
+                        ? T("每个图层单独出一张 PNG，方便在别的软件里对位")
+                        : key === "json"
+                          ? T("本插件自己的地图格式：格子、图层、图例、族与掩码全在里面")
+                          : T("Tiled 工程文件：.tmj 是地图，.tsj 是图集定义，配套的图集 PNG 会一起复制")
+                },
                 h("input", {
                   type: "checkbox",
                   checked: exportFormats[key] === true,
@@ -7209,7 +7436,12 @@
             ),
             h(
               "select",
-              { className: "SPR_select", value: String(exportScale), onChange: (event) => setExportScale(Number(event.target.value)) },
+              {
+                className: "SPR_select",
+                title: T("PNG 的放大倍率：1× 就是原始像素（像素画选 1×），放大用于做宣传图"),
+                value: String(exportScale),
+                onChange: (event) => setExportScale(Number(event.target.value))
+              },
               [1, 2, 3, 4].map((value) => h("option", { key: value, value: String(value) }, `${value}×`))
             ),
             h(Btn, { primary: true, onClick: () => void runExport(), busy: project.busy === true }, T("导出")),
@@ -7250,6 +7482,7 @@
           ),
           h(Btn, { onClick: createProject }, T("新建")),
           h(Btn, { onClick: () => void renameProject() }, T("重命名")),
+          h(Btn, { onClick: () => void deleteProject(), danger: true }, T("删除项目")),
           h(Btn, { onClick: () => void loadProject(projectId, mapId) }, T("刷新状态")),
           project.busy === true ? h("span", { className: "SPR_meBusy" }, T("任务进行中…")) : null
         ),
@@ -7263,6 +7496,7 @@
               { className: "SPR_meWarnings" },
               project.warnings.map((text, index) => h("li", { key: index }, text))
             ),
+        glossary,
         stage === "assets" ? stageAssets : stage === "rules" ? stageRules : stage === "paint" ? stagePaint : stageExport
       );
     }

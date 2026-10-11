@@ -524,16 +524,24 @@ try {
        * ⚠️ 这里必须等**真实的事件循环轮次**，不能只 await 微任务：面板挂载后会去
        * 读宿主数据（真的走文件系统），只有微任务的话读盘还没回来就判定「没有
        * setState」而提前收工 —— 表现是「面板一直停在空态」，看着像界面坏了。
+       *
+       * ⚠️ 也不能「固定等 N 轮就收工」：读盘 + 求值浏览器束的耗时随 bundle 变大而涨，
+       * 偶发超过固定轮数时脚本会**随机**判成空态（实测 1/4 概率，随后 gotoStage 直接
+       * 崩在 `tabs[index]`）。改成「连续 3 轮没有新的 setState 才算稳定」，
+       * 并且整体上限放松到 120 轮 —— 慢机器上只是多等几十毫秒，不会假失败。
        */
-      for (let tick = 0; tick < 10; tick++) {
+      let quiet = 0;
+      for (let tick = 0; tick < 120; tick++) {
         await new Promise((resolve) => setImmediate(resolve));
         await Promise.resolve();
+        if (pendingRender) {
+          quiet = 0;
+          if (tick > 100) break; // 真的在持续 setState：交给外层 30 轮上限处理
+        } else if (++quiet >= 3) {
+          break;
+        }
       }
-      if (!pendingRender) {
-        // 再等一轮确认（异步链路最后一步的 setState 可能刚排队）
-        await new Promise((resolve) => setImmediate(resolve));
-        if (!pendingRender) return rendered;
-      }
+      if (!pendingRender) return rendered;
     }
     HOOK_MISMATCH.push("渲染超过 30 轮（可能有 setState 死循环）");
     return tree;
@@ -587,12 +595,36 @@ try {
   check("② 规则阶段能渲染", byClass(tree, "SPR_meCard").length >= 1);
   check("看到地形族「草地」", textOf(tree).includes("草地"), textOf(tree).slice(0, 100));
   check("看到掩码覆盖率（47/47 完整）", textOf(tree).includes("47/47") || textOf(tree).includes("完整"), textOf(tree).slice(0, 200));
+  check("规则阶段有过渡方案的小字说明", byClass(tree, "SPR_meCardNote").length >= 2, `${byClass(tree, "SPR_meCardNote").length} 条`);
+
+  // ── 名词速查与「删除入口」：这是真机反馈过「找不到 / 看不懂」的两块 ──────────
+  await gotoStage("assets");
+  const glossary = byClass(tree, "SPR_meGlossary");
+  check("有「名词速查」折叠块", glossary.length === 1);
+  check(
+    "名词速查里至少 8 个词条（图集 / 切分 / 掩码 / 族 …）",
+    collect(tree, (node) => node.type === "dt").length >= 8,
+    `${collect(tree, (node) => node.type === "dt").length} 条`
+  );
+  check("折叠块默认是收起的（不占版面）", glossary[0]?.props?.open === undefined || glossary[0].props.open === false);
+  check("图集卡片有切分小字说明", byClass(tree, "SPR_meCardNote").length >= 1);
+  const headerButtons = collect(tree, (node) => node.type === "button" || node.type?.name === "Btn").map((node) => textOf(node).trim());
+  check("顶部有「删除项目」（此前只有对话工具能删）", headerButtons.includes("删除项目"), headerButtons.slice(0, 12).join(" / "));
 
   await gotoStage("paint");
   const canvas = collect(tree, (node) => node.props?.["data-testid"] === "map-canvas");
   check("③ 地图阶段有 canvas", canvas.length === 1, `${canvas.length} 个`);
   check("有图层列表", byClass(tree, "SPR_meLayerList").length === 1);
   check("有地图清单", byClass(tree, "SPR_meMapList").length === 1);
+  const deleteMapBtn = collect(tree, (node) => textOf(node).trim() === "删除当前地图")[0];
+  check("地图卡片有「删除当前地图」（此前删了就刷新不出来）", deleteMapBtn !== undefined);
+  check(
+    "只剩一张地图时「删除当前地图」是禁用的（宿主侧至少要留一张）",
+    deleteMapBtn !== undefined && deleteMapBtn.props?.disabled === true,
+    deleteMapBtn === undefined ? "没找到按钮" : `disabled=${String(deleteMapBtn.props?.disabled)}`
+  );
+  check("图层行拆成两行（名字与按钮在上、数值在下）", byClass(tree, "SPR_meLayerFields").length >= 1);
+  check("画布下面有操作说明（拖动 / 平移 / 缩放）", byClass(tree, "SPR_meHint").some((node) => textOf(node).includes("平移画布")));
   check("调色板给定（选了图集后出现）", true);
 
   // 选图集 → 调色板出现 → 点一块图当笔刷
