@@ -35,6 +35,11 @@ function section(title) {
 }
 
 const target = process.argv[2] ?? fileURLToPath(new URL("../lib/client.js", import.meta.url));
+// 模块个数与 key 从**宿主清单**派生：写死 5 的话，加模块时这里必然漏（这些断言
+// 原本就是硬编码的 `=== 5`，模块六接进来时当场变红）。
+const linksForModules = await import("../lib/links.js");
+const MODULE_COUNT = linksForModules.STUDIO_MODULES.length;
+const MODULE_KEYS = [...linksForModules.STUDIO_MODULES];
 
 // ── 假 React：createElement 产出纯对象，Hook 按槽位取值 ──────────────────
 const HOOK = { slots: [], cursor: 0, overflow: false };
@@ -1010,10 +1015,11 @@ section("功能管理（隐藏模块）");
   );
 
   // 收敛口径：只留已知模块，顺序固定 —— 与宿主 normalizeHiddenModules 同口径。
-  check("空数组 = 五个全可见", visibleModulesOf([]).length === 5, `${visibleModulesOf([]).length}`);
+  check(`空数组 = 全部 ${MODULE_COUNT} 个模块可见`, visibleModulesOf([]).length === MODULE_COUNT, `${visibleModulesOf([]).length}`);
   check(
-    "隐藏 rig / tile 后只剩三个",
-    JSON.stringify(visibleModulesOf(["rig", "tile"]).map((entry) => entry.key)) === JSON.stringify(["sprite", "image", "sequence"]),
+    "隐藏 rig / tile 后剩下的都还在（顺序固定）",
+    JSON.stringify(visibleModulesOf(["rig", "tile"]).map((entry) => entry.key)) ===
+      JSON.stringify(MODULE_KEYS.filter((key) => key !== "rig" && key !== "tile")),
     JSON.stringify(visibleModulesOf(["rig", "tile"]).map((entry) => entry.key))
   );
   check(
@@ -1024,24 +1030,25 @@ section("功能管理（隐藏模块）");
 
   const tabs = (tree) => byClass(tree, "SPR_module").map((node) => node.props?.["data-module"]);
   const all = renderStage(makeProject(), "images", makeTasks());
-  check("默认五个页签都在", tabs(all.tree).length === 5, tabs(all.tree).join("、"));
+  check(`默认 ${MODULE_COUNT} 个页签都在`, tabs(all.tree).length === MODULE_COUNT, tabs(all.tree).join("、"));
   check("默认没有「已隐藏」提示", byClass(all.tree, "SPR_modulesHiddenNote").length === 0);
 
   const some = renderStage(makeProject(), "images", makeTasks(), ["rig", "tile"]);
   check("隐藏后对应页签不再渲染", !tabs(some.tree).includes("rig") && !tabs(some.tree).includes("tile"), tabs(some.tree).join("、"));
-  check("其余页签保留", tabs(some.tree).join("、") === "sprite、image、sequence", tabs(some.tree).join("、"));
+  const visibleKeys = MODULE_KEYS.filter((key) => key !== "rig" && key !== "tile");
+  check(`其余页签保留（${visibleKeys.length} 个）`, tabs(some.tree).join("、") === visibleKeys.join("、"), tabs(some.tree).join("、"));
   check("出现「已隐藏 N 个功能」提示", byClass(some.tree, "SPR_modulesHiddenNote").length === 1);
 
   // 当前选中的模块被隐藏时，界面必须落到第一个可见模块，而不是渲染一个被隐藏的模块。
   const fallback = renderStage(makeProject(), "images", makeTasks(), ["sprite"]);
   check(
     "选中的模块被隐藏时落到第一个可见模块",
-    tabs(fallback.tree).join("、") === "image、sequence、rig、tile",
+    tabs(fallback.tree).join("、") === MODULE_KEYS.filter((key) => key !== "sprite").join("、"),
     tabs(fallback.tree).join("、")
   );
   check("被隐藏模块的界面不再渲染", byClass(fallback.tree, "SPR_moduleTitle").map(textOf).includes("图片生成"));
 
-  const none = renderStage(makeProject(), "images", makeTasks(), ["sprite", "image", "sequence", "rig", "tile"]);
+  const none = renderStage(makeProject(), "images", makeTasks(), MODULE_KEYS);
   check("全隐藏时一个页签都没有", tabs(none.tree).length === 0, tabs(none.tree).join("、"));
   check(
     "全隐藏时给出去哪打开的提示",
@@ -1086,7 +1093,7 @@ section("功能管理（隐藏模块）");
   const menu = byClass(opened, "SPR_railMenu");
   check("展开后出现菜单", menu.length === 1, `${menu.length} 个`);
   const items = byClass(opened, "SPR_railMenuItem");
-  check("菜单列出全部可见模块", items.length === 4, `${items.length} 个`);
+  check(`菜单列出全部可见模块（${MODULE_COUNT - 1} 个）`, items.length === MODULE_COUNT - 1, `${items.length} 个`);
   check(
     "被隐藏的模块不在菜单里",
     !items.some((node) => node.props?.["data-module"] === "rig"),
@@ -1108,7 +1115,7 @@ section("功能管理（隐藏模块）");
   check("点菜单项广播对应模块的意图", JSON.stringify(received.at(-1)) === JSON.stringify({ module: "sequence" }), JSON.stringify(received.at(-1)));
   unsubscribe();
 
-  const railAllHidden = renderRail(["sprite", "image", "sequence", "rig", "tile"], true);
+  const railAllHidden = renderRail(MODULE_KEYS, true);
   check("全隐藏时菜单给出提示而不是空菜单", byClass(railAllHidden, "SPR_railMenuEmpty").length === 1 && byClass(railAllHidden, "SPR_railMenuItem").length === 0);
 
   // ── 设置页的「功能管理」分组 ────────────────────────────────────────────
@@ -1163,11 +1170,11 @@ section("功能管理（隐藏模块）");
     const settings = ConfigSection({ api: configApi });
 
     const rows = collect(settings, (node) => typeof node.props?.["data-feature"] === "string");
-    check("设置页有五个功能开关", rows.length === 5, `${rows.length} 个`);
+    check(`设置页有 ${MODULE_COUNT} 个功能开关`, rows.length === MODULE_COUNT, `${rows.length} 个`);
     const rigRow = rows.find((node) => node.props["data-feature"] === "rig");
     check("被隐藏的那一行标成已隐藏", rigRow?.props?.["data-hidden"] === "true");
     const checkboxes = collect(settings, (node) => typeof node.props?.["data-testid"] === "string" && node.props["data-testid"].startsWith("cfg-feature-"));
-    check("每个开关都有可点的勾选框", checkboxes.length === 5, `${checkboxes.length} 个`);
+    check(`每个开关都有可点的勾选框（${MODULE_COUNT} 个）`, checkboxes.length === MODULE_COUNT, `${checkboxes.length} 个`);
     check(
       "勾选框与隐藏状态一致（rig 未勾）",
       checkboxes.find((node) => node.props["data-testid"] === "cfg-feature-rig")?.props?.checked === false &&

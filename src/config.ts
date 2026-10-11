@@ -188,7 +188,7 @@ export interface Config {
    * 拒绝对它的任何调用（`game_material_call` / `status` / `review` … 一律报错）。
    * 只挡界面不挡工具等于没挡——模型照样能调 `runTileItems` 真实计费。
    *
-   * 空数组（默认）= 五个模块全部可见。全隐藏是允许的：面板会显示一句空态。
+   * 空数组（默认）= 六个模块全部可见。全隐藏是允许的：面板会显示一句空态。
    */
   hiddenModules: string[];
 

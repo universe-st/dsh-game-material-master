@@ -927,6 +927,8 @@ export interface MapViewTileset {
   slice: MapSlice;
   tileCount: number;
   preview: ReturnType<typeof tilesetPreview>;
+  /** 宿主给的切分建议：界面只显示，不自己推「哪些尺寸能整除」。 */
+  suggestions: ReturnType<typeof suggestGrids>;
 }
 
 export interface MapDocView {
@@ -940,6 +942,14 @@ export interface MapDocView {
   /** 每层已填格子数（**不发数据本体**：512×512×4 层的 JSON 有几 MB）。 */
   filled: Record<string, number>;
   bounds: PlanBounds;
+  /**
+   * 宿主算好的布局常量（步长 / 菱形中心）。
+   *
+   * ⚠️ 界面**不要**自己从 grid 推这些值：canvas 命中测试要用它，
+   * 而复刻一份布局推导正是旧模块「保存后整体错位」的来源。
+   * 这里宿主算一次，界面照用；`verify-map-client.mjs` 拿 `mapgeom` 的真实现做黄金对照。
+   */
+  layout: ReturnType<typeof layoutOf>;
   canUndo: boolean;
   canRedo: boolean;
   rev: number;
@@ -955,12 +965,26 @@ export interface MapProjectView {
   legend: PlanLegendEntry[];
   families: MapFamily[];
   coverage: FamilyCoverage[];
+  /**
+   * 自动过渡的掩码全集（按方案）。
+   *
+   * 界面要按顺序给图块分配掩码（「一键配齐 47 块」），但**不能自己算**那 47 个
+   * 规范掩码 —— 那是 `mapauto.canonicalBlobMask` 的产物，复刻一份就是两套口径。
+   */
+  autotileMasks: Record<string, number[]>;
   maps: Array<{ id: string; name: string; cols: number; rows: number; layers: number; filled: number }>;
   doc?: MapDocView;
   stages: Record<MapStage, MapStageState>;
   reviewMode?: "auto" | "manual";
   duplicates: Array<{ tilesetId: string; tileIds: string[] }>;
+  /** 验收预览图的相对路径（界面拼 assetBase）。 */
+  previews: string[];
+  /** 上一次导出的产物（相对路径 + 目录基址），导出阶段直接列出来给用户点。 */
+  exportBase: string;
+  exportFiles: string[];
   job: MapJob | undefined;
+  /** 有作业在跑（`game_material_wait` 与界面进度条都读它）。 */
+  busy: boolean;
   assetBase: string;
   progress: { tilesets: number; tiles: number; families: number; maps: number; painted: number };
   logs: JobLogEntry[];
@@ -987,7 +1011,8 @@ export async function mapView(project: MapProject, options: { mapId?: string } =
       imageHeight: tileset.imageHeight,
       slice: tileset.slice,
       tileCount: tileset.tiles.length,
-      preview
+      preview,
+      suggestions: suggestGrids(tileset.imageWidth, tileset.imageHeight)
     };
   });
   const maps = [] as MapProjectView["maps"];
@@ -1000,6 +1025,7 @@ export async function mapView(project: MapProject, options: { mapId?: string } =
     maps.push({ id: doc.id, name: doc.name, cols: doc.cols, rows: doc.rows, layers: doc.layers.length, filled });
   }
   const activeId = options.mapId ?? project.activeMapId ?? project.mapIds[0];
+  const listing = activeId === undefined ? undefined : await readExportListing(project.id, activeId);
   const active = activeId === undefined ? undefined : await readMapDoc(project.id, activeId);
   const historyInfo = active === undefined ? { canUndo: false, canRedo: false } : historyState(project.id, active.id);
   return {
@@ -1012,6 +1038,7 @@ export async function mapView(project: MapProject, options: { mapId?: string } =
     legend: flat.map((tile) => ({ index: tile.index, tilesetId: tile.tilesetId, rect: tile.rect })),
     families: project.families,
     coverage: familyCoverage(project),
+    autotileMasks: { single: [0], corner16: expectedMasks("corner16"), blob47: expectedMasks("blob47") },
     maps,
     doc: active === undefined
       ? undefined
@@ -1025,6 +1052,7 @@ export async function mapView(project: MapProject, options: { mapId?: string } =
           layers: active.layers,
           filled: Object.fromEntries(active.layers.map((layer) => [layer.id, filledCount(active, layer.id)])),
           bounds: planBounds(renderContext(project), active),
+          layout: layoutOf(project.grid, active.cols, active.rows),
           canUndo: historyInfo.canUndo,
           canRedo: historyInfo.canRedo,
           rev: docRevision(project.id, active.id)
@@ -1032,7 +1060,11 @@ export async function mapView(project: MapProject, options: { mapId?: string } =
     stages: project.stages,
     reviewMode: project.reviewMode,
     duplicates: duplicateRects(project.tilesets).map((item) => ({ tilesetId: item.tilesetId, tileIds: item.tileIds })),
+    previews: (await readPreviewFiles(project.id)).map((name) => `preview/${name}`),
+    exportBase: listing === undefined ? "" : listing.base,
+    exportFiles: listing?.files ?? [],
     job: currentMapJob(project.id),
+    busy: mapBusy(project.id),
     assetBase: base,
     progress: { tilesets: project.tilesets.length, tiles: flat.length, families: project.families.length, maps: project.mapIds.length, painted },
     logs: project.logs.slice(-40),
@@ -1329,3 +1361,88 @@ export async function readPreviewFiles(projectId: string): Promise<string[]> {
   }
 }
 
+
+// ── 对话调用面用的快照（绝对 URL）─────────────────────────────────────────
+
+export interface MapSnapshot extends Omit<MapProjectView, "tilesets" | "assetBase"> {
+  /** 给**模型**用的绝对 URL 基址（界面用的是相对路径）。 */
+  assetBase: string;
+  tilesets: Array<Omit<MapViewTileset, "url"> & { url: string }>;
+  /** 验收预览图的绝对 URL。 */
+  previewUrls: string[];
+  /** 上一次导出的产物（相对 `export/<地图>` 的路径 → 绝对 URL）。 */
+  exportBaseUrl: string;
+  exportFiles: string[];
+  exportWarnings: string[];
+  /** 该做哪一步。 */
+  nextActions: { step: string; why: string }[];
+}
+
+function absoluteAssetUrl(projectId: string, origin: string, relative: string): string {
+  return `${origin}/dsh-game-material-master/map-assets/${projectId}/${relative}`;
+}
+
+export async function readExportListing(projectId: string, mapId: string): Promise<{ base: string; files: string[]; warnings: string[] } | undefined> {
+  const doc = await readMapDoc(projectId, mapId);
+  if (doc === undefined) return undefined;
+  const dirName = safeFileName(doc.name, doc.id);
+  const manifest = await readJson<ExportManifest>(join(mapProjectDir(projectId), "export", dirName, "manifest.json"));
+  if (manifest === undefined) return undefined;
+  return {
+    base: `export/${dirName}/`,
+    files: manifest.files.map((file) => file.path),
+    warnings: manifest.warnings ?? []
+  };
+}
+
+/**
+ * 工具用的快照：把界面里的**相对**资源路径全部换成可点的**绝对** URL
+ * （模型要直接贴给用户），并附上「下一步该做什么」。
+ */
+export async function mapSnapshot(project: MapProject, origin: string, options: { mapId?: string } = {}): Promise<MapSnapshot> {
+  const view = await mapView(project, options);
+  const previews = await readPreviewFiles(project.id);
+  const mapId = options.mapId ?? project.activeMapId ?? project.mapIds[0];
+  const listing = mapId === undefined ? undefined : await readExportListing(project.id, mapId);
+  const nextActions: MapSnapshot["nextActions"] = [];
+  if (view.tilesets.length === 0) {
+    nextActions.push({ step: "assets", why: "还没导入图集：importMapTileset({projectId, name, data}) 传图片 base64，或让用户在界面上传。" });
+  } else if (view.families.length === 0) {
+    nextActions.push({ step: "rules", why: "还没有地形族：saveMapFamilies({projectId, families}) 定义族与自动过渡方案，否则画出来是手工拼块。" });
+  }
+  for (const row of view.coverage) {
+    if (row.autotile !== "single" && row.missing.length > 0) {
+      nextActions.push({ step: "rules", why: `族「${row.name}」缺 ${row.missing.length} 个掩码（${row.assigned}/${row.expected}），缺的地方会回退成最近的块。` });
+    }
+  }
+  if (view.progress.painted === 0) {
+    nextActions.push({ step: "paint", why: "地图还是空的：applyMapOps({projectId, mapId, ops}) 可以直接画（agent 也能画）。" });
+  } else if (listing === undefined) {
+    nextActions.push({ step: "export", why: "还没导出过：runMapExport({projectId, mapId}) 出 PNG + map.json + Tiled .tmj/.tsj。" });
+  }
+  if (nextActions.length === 0) nextActions.push({ step: "done", why: "图集、规则、地图、导出都有产物了。可以继续改地图，或 runMapPreview 重新出验收图。" });
+  return {
+    ...view,
+    assetBase: `${origin}/dsh-game-material-master/map-assets/${project.id}/`,
+    tilesets: view.tilesets.map((tileset) => ({ ...tileset, url: absoluteAssetUrl(project.id, origin, tileset.file) })),
+    previewUrls: previews.map((name) => absoluteAssetUrl(project.id, origin, `preview/${name}`)),
+    exportBaseUrl: listing === undefined ? "" : absoluteAssetUrl(project.id, origin, listing.base),
+    exportFiles: listing?.files ?? [],
+    exportWarnings: listing?.warnings ?? [],
+    nextActions
+  };
+}
+
+/** 保存网格设置：收敛 + 校验（比例不对要抛可执行的错误，不能静默改成别的值）。 */
+export function saveGrid(input: unknown): MapGrid {
+  const grid = normalizeGrid(input);
+  assertGrid(grid);
+  return grid;
+}
+
+/** 读项目，读不到就抛（服务层到处要用）。 */
+export async function readMapProjectOrThrow(projectId: string): Promise<MapProject> {
+  return readProjectOrThrow(projectId);
+}
+
+export { MAX_MAP_DIM };

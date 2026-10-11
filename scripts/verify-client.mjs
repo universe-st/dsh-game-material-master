@@ -575,7 +575,15 @@ function checkRigContracts(text, label) {
     "共用一个标志会让一个模块的「不再提示」静默吞掉另一个模块的说明"
   );
   check(`${label}：实验性弹窗用 position:fixed`, /\.SPR_gateMask\{[^}]*position:fixed/.test(text));
-  check(`${label}：深链接允许全部五个模块`, text.includes('new Set(["sprite", "image", "sequence", "rig", "tile"])'));
+  {
+    // 模块集合从宿主清单派生：写死个数的话，加一个模块这里必然漏（历史教训）
+    const linksSource = readFileSync(fileURLToPath(new URL("../src/links.ts", import.meta.url)), "utf8");
+    const hostKeys = ((linksSource.match(/STUDIO_MODULES = \[([^\]]+)\]/) ?? [])[1] ?? "")
+      .match(/"(\w+)"/g)
+      ?.map((piece) => piece.replaceAll('"', "")) ?? [];
+    const wanted = hostKeys.map((key) => `"${key}"`).join(", ");
+    check(`${label}：深链接允许全部 ${hostKeys.length} 个模块`, text.includes(`new Set([${wanted}])`), wanted);
+  }
   for (const method of [
     "listRigJobs",
     "createRigJob",

@@ -66,7 +66,7 @@ async function main() {
   const invocations = captured.manifest?.invocations ?? [];
   // 方法数是**清单完整性**的锚点：新增 / 删除远程方法时必须同步改这个数字。
   // 它拦住的是「加了方法却忘了写进 METHODS」这类静默不一致。
-  check("manifest 方法数为 110（新增远程方法时同步改这个数）", invocations.length === 110, `实际 ${invocations.length}`);
+  check("manifest 方法数为 132（新增远程方法时同步改这个数）", invocations.length === 132, `实际 ${invocations.length}`);
   const ids = new Set(invocations.map((i) => i.id));
   check("方法 id 唯一", ids.size === invocations.length);
   check("所有方法都声明在 gameStudio 服务下", invocations.every((i) => i.service === "gameStudio" && i.namespace === "gameStudio"));
@@ -187,7 +187,7 @@ async function main() {
   check("默认抽帧工作尺寸 768", initial.workingLongEdge === 768, String(initial.workingLongEdge));
   check("默认开启背景空间分割", initial.bgTolerance === 90, String(initial.bgTolerance));
   check("初始未配置 Key", initial.arkApiKeySet === false && initial.minimaxApiKeySet === false);
-  // 功能管理：默认五个模块全可见；写进去的非法 key 要被丢掉、顺序要固定
+  // 功能管理：默认全部模块可见；写进去的非法 key 要被丢掉、顺序要固定
   // （顺序固定是为了让「同一组勾选」永远序列化成同一份 JSON）。
   check("默认没有任何被隐藏的功能", JSON.stringify(initial.hiddenModules) === JSON.stringify([]), JSON.stringify(initial.hiddenModules));
   const hiddenSaved = await studio.saveConfig({ hiddenModules: ["tile", "nope", "sprite", "tile"] });

@@ -555,13 +555,21 @@ async function main() {
   await studio.saveConfig({ hiddenModules: [] });
   const restored = await run("game_material_call", { method: "listTileProjects" });
   check("取消隐藏后立刻恢复可调用", restored.ok === true, JSON.stringify(restored).slice(0, 60));
-  check("恢复后 status 重新给出全部链接", Object.keys((await run("game_material_status", {})).links ?? {}).length === 5);
+  check(
+    "恢复后 status 重新给出全部链接",
+    Object.keys((await run("game_material_status", {})).links ?? {}).length === links.STUDIO_MODULES.length,
+    `${Object.keys((await run("game_material_status", {})).links ?? {}).length}`
+  );
 
   // ── 7. 深链接：宿主与浏览器半区必须用同一套常量 ─────────────────────────
   console.log("\n7) 深链接契约");
   check("查询参数名一致", links.OPEN_QUERY_KEY === "dsh-gmm", links.OPEN_QUERY_KEY);
   check("面板 id 与客户端一致", links.PANEL_KEY === "gameStudio", links.PANEL_KEY);
-  check("模块名与界面一致", links.STUDIO_MODULES.join(",") === "sprite,image,sequence,rig,tile", links.STUDIO_MODULES.join(","));
+  check(
+    "模块名与界面一致（按 STUDIO_MODULES 派生，不写死个数）",
+    links.STUDIO_MODULES.join(",") === "sprite,image,sequence,rig,tile,map",
+    links.STUDIO_MODULES.join(",")
+  );
 
   const link = links.buildOpenLink({ module: "sprite", projectId, stage: "videos" }, "http://127.0.0.1:43120");
   check(

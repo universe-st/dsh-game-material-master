@@ -1048,7 +1048,7 @@
         "Hide the features you do not use. A hidden feature disappears from the workbench tabs and the sidebar menu, and the agent cannot call it either (its tools fail loudly). You can turn it back on at any time, and existing project data is never deleted.",
       "已隐藏": "Hidden",
       "显示中": "Visible",
-      "当前五个功能全部可见。": "All five features are currently visible.",
+      "当前功能全部可见。": "All features are currently visible.",
       "已隐藏 {n0} 个功能：{n1}。隐藏的模块在对话里同样不可调用。":
         "{n0} feature(s) hidden: {n1}. Hidden modules cannot be called from chat either.",
       "已隐藏 {n0} 个功能（设置 → 游戏素材大师 → 功能管理）":
@@ -1056,7 +1056,189 @@
       "所有功能都已被隐藏，请到「设置 → 游戏素材大师 → 功能管理」里打开至少一个。":
         "Every feature is hidden. Turn at least one back on in \"Settings → Game Material Master → Feature management\".",
       "所有功能都已被隐藏。请到「设置 → 游戏素材大师 → 功能管理」里打开至少一个。":
-        "Every feature is hidden. Turn at least one back on in \"Settings → Game Material Master → Feature management\"."
+        "Every feature is hidden. Turn at least one back on in \"Settings → Game Material Master → Feature management\".",
+
+      // ── 地图编辑器（模块六）────────────────────────────────────────────
+      "地图编辑器":
+        "Map editor",
+      "导入自己的 tileset → 自动过渡 → 多层拼图 → 导出 Tiled":
+        "Import your own tileset → auto-tiling → multi-layer assembly → export to Tiled",
+      "① 图集":
+        "① Tilesets",
+      "导入你自己的 tileset 图，按网格或矩形切分，再把图块归入地形族":
+        "Import your own tileset image, slice it by grid or rectangles, then assign tiles to terrain families",
+      "② 规则":
+        "② Rules",
+      "定义地形族与自动过渡（单块 / 16 掩码 / 47 掩码），缺的块会标出来":
+        "Define terrain families and auto-tiling (single / 16-mask / 47-mask); missing pieces are flagged",
+      "③ 地图":
+        "③ Maps",
+      "多张地图、多图层、每层高度偏移；画布上直接刷，撤销重做都在宿主":
+        "Several maps and layers with per-layer height offset; paint straight on the canvas — undo/redo lives in the host",
+      "PNG 分层与合并 + 自有 JSON + Tiled .tmj/.tsj，全部本地免费":
+        "Layered and merged PNG + own JSON + Tiled .tmj/.tsj, all local and free",
+      "单块（不自动过渡）":
+        "Single tile (no auto-tiling)",
+      "四邻域 16 掩码":
+        "4-neighbour, 16 masks",
+      "八邻域 47 掩码（blob）":
+        "8-neighbour, 47 masks (blob)",
+      "画笔":
+        "Brush",
+      "橡皮":
+        "Eraser",
+      "填充":
+        "Fill",
+      "矩形":
+        "Rectangle",
+      "吸管":
+        "Picker",
+      "按住拖动画线（B）":
+        "Hold and drag to draw a line (B)",
+      "擦成空（E）":
+        "Erase to empty (E)",
+      "同色连通区一次填满（G）":
+        "Flood-fill the connected area (G)",
+      "拖出矩形，按住「矩形填充」为实心（R）":
+        "Drag a rectangle; tick \"Rectangle fill\" for a solid one (R)",
+      "吸取格子上的图块（I）":
+        "Pick the tile under the cursor (I)",
+      "我的地图":
+        "My map",
+      "读文件失败":
+        "Failed to read the file",
+      "已导入 {n0}":
+        "Imported {n0}",
+      "已按顺序给前 {n0} 块分配掩码":
+        "Assigned masks to the first {n0} tiles in order",
+      "还没有地图项目。":
+        "No map project yet.",
+      "新建地图项目":
+        "New map project",
+      "选择已有项目…":
+        "Choose an existing project…",
+      "未分组":
+        "Ungrouped",
+      "点一块图作为笔刷（序号 {n0}）。带底色的是已归族的块。":
+        "Click a tile to use it as the brush (index {n0}). Tinted tiles belong to a family.",
+      "{n0} / {n1} 个掩码已配":
+        "{n0} / {n1} masks assigned",
+      "工具":
+        "Tool",
+      "撤销/重做":
+        "Undo / redo",
+      "适应窗口":
+        "Fit",
+      "当前图层":
+        "Active layer",
+      "矩形填充":
+        "Rectangle fill",
+      "显示":
+        "Visible",
+      "锁定":
+        "Locked",
+      "高度":
+        "Height",
+      "不透明度%":
+        "Opacity %",
+      "加装饰层":
+        "Add decor layer",
+      "加建筑层":
+        "Add building layer",
+      "覆盖":
+        "Overlay",
+      "加覆盖层":
+        "Add overlay layer",
+      "新地图名字":
+        "New map name",
+      "新地图":
+        "New map",
+      "新建地图":
+        "New map",
+      "复制当前地图":
+        "Duplicate map",
+      "删除当前地图":
+        "Delete map",
+      "导入图集":
+        "Import tileset",
+      "导入你自己的 tileset 图（PNG / JPEG / WebP）。原图会原样保存，切分参数随便改都能重切。":
+        "Import your own tileset image (PNG / JPEG / WebP). The original is kept as-is, so you can re-slice it with any settings.",
+      "正在导入…":
+        "Importing…",
+      "块":
+        "tiles",
+      "选为调色板":
+        "Use as palette",
+      "移除图集":
+        "Remove tileset",
+      "格宽":
+        "Tile width",
+      "格高":
+        "Tile height",
+      "左边距":
+        "Left margin",
+      "上边距":
+        "Top margin",
+      "横向间距":
+        "H spacing",
+      "纵向间距":
+        "V spacing",
+      "应用切分":
+        "Apply slicing",
+      "切分建议：{n0}":
+        "Slicing suggestions: {n0}",
+      "没有能整除的常见尺寸，请手动填":
+        "no common size divides evenly — please fill it in manually",
+      "选中 {n0} 块":
+        "{n0} selected",
+      "归入「{n0}」":
+        "Assign to \"{n0}\"",
+      "清空分组":
+        "Clear family",
+      "给「{n0}」按顺序分配掩码":
+        "Assign masks to \"{n0}\" in order",
+      "地形族与自动过渡":
+        "Terrain families and auto-tiling",
+      "优先级大的族会朝优先级小的邻居长过渡块（草地 < 土路 < 水）。缺掩码的地方会回退成最近的一块，并在下面标出来。":
+        "A family with higher priority grows transition tiles toward lower-priority neighbours (grass < dirt < water). Missing masks fall back to the nearest one and are listed below.",
+      "优先级":
+        "Priority",
+      "新族":
+        "New family",
+      "加一个族":
+        "Add a family",
+      "保存族":
+        "Save families",
+      "掩码覆盖率":
+        "Mask coverage",
+      "还没有族。先加一个族，再把图块归进去。":
+        "No family yet. Add one, then assign tiles to it.",
+      "完整":
+        "Complete",
+      "缺 {n0} 块":
+        "{n0} missing",
+      "生成验收预览图":
+        "Generate review previews",
+      "调色板":
+        "Palette",
+      "选择图集…":
+        "Choose a tileset…",
+      "全部本地计算，不花钱。导出目录是自包含的：图集 PNG 会一起复制过去，Tiled 直接能打开。":
+        "Everything is computed locally and free. The export folder is self-contained: tileset PNGs are copied alongside so Tiled can open it directly.",
+      "合并 PNG（map.png）":
+        "Merged PNG (map.png)",
+      "分层 PNG":
+        "Layered PNG",
+      "自有 JSON":
+        "Own JSON",
+      "Tiled .tmj/.tsj":
+        "Tiled .tmj/.tsj",
+      "在访达中打开":
+        "Open in Finder",
+      "还没有导出过。":
+        "Nothing exported yet.",
+      "任务进行中…":
+        "A job is running…"
     };
 /* i18n-ignore-end */
 
@@ -1078,6 +1260,16 @@
       },
       () => {
         TILE_STAGES = make_TILE_STAGES();
+      },
+      () => {
+        MAP_STAGES = make_MAP_STAGES();
+      },
+      () => {
+        MAP_AUTOTILE_SCHEMES = make_MAP_AUTOTILE_SCHEMES();
+      },
+      () => {
+        MAP_TOOL_LABELS = make_MAP_TOOL_LABELS();
+        MAP_TOOL_HINTS = make_MAP_TOOL_HINTS();
       },
       () => {
         STAGES = make_STAGES();
@@ -1341,7 +1533,30 @@
       ["saveTileMapCells", true],
       ["runTileExport", true],
       ["cancelTileJob", true],
-      ["revealTileProject", true]
+      ["revealTileProject", true],
+      // 地图编辑器（模块六）。同样：第二个字段是「收不收 payload」。
+      ["listMapProjects", false],
+      ["createMapProject", true],
+      ["getMapProject", true],
+      ["saveMapProject", true],
+      ["deleteMapProject", true],
+      ["importMapTileset", true],
+      ["saveMapTileset", true],
+      ["removeMapTileset", true],
+      ["saveMapFamilies", true],
+      ["createMapDoc", true],
+      ["saveMapDoc", true],
+      ["deleteMapDoc", true],
+      ["duplicateMapDoc", true],
+      ["applyMapOps", true],
+      ["mapUndo", true],
+      ["mapRedo", true],
+      ["mapPlan", true],
+      ["runMapPreview", true],
+      ["runMapExport", true],
+      ["cancelMapJob", true],
+      ["setMapApproved", true],
+      ["revealMapProject", true]
     ];
 
     const CONTRIBUTION = {
@@ -1473,10 +1688,49 @@
       { key: "image", title: T("图片生成"), hint: T("按提示词出图，可带参考图，支持抠绿幕导出 PNG") },
       { key: "sequence", title: T("序列帧生成"), hint: T("图/视频参考生成视频 → 抽帧 → 抠像 → 合成与播放预览") },
       { key: "rig", title: T("骨骼动画生成"), hint: T("拆件 → 装配定位 → 推骨骼与动画 → 打包 Spine 图集"), experimental: true },
-      { key: "tile", title: T("45°地图地块生成"), hint: T("45° 等距地块 → 拼成地图：几何交给代码，内容交给 AI"), experimental: true }
+      { key: "tile", title: T("45°地图地块生成"), hint: T("45° 等距地块 → 拼成地图：几何交给代码，内容交给 AI"), experimental: true },
+      { key: "map", title: T("地图编辑器"), hint: T("导入自己的 tileset → 自动过渡 → 多层拼图 → 导出 Tiled"), experimental: true }
     ];
     }
     let MODULES = make_MODULES();
+
+
+    /** 地图编辑器（模块六）的四个阶段（对齐宿主 src/links.ts 的 MAP_STAGES）。 */
+    function make_MAP_STAGES() {
+      return [
+      { key: "assets", title: T("① 图集"), hint: T("导入你自己的 tileset 图，按网格或矩形切分，再把图块归入地形族") },
+      { key: "rules", title: T("② 规则"), hint: T("定义地形族与自动过渡（单块 / 16 掩码 / 47 掩码），缺的块会标出来") },
+      { key: "paint", title: T("③ 地图"), hint: T("多张地图、多图层、每层高度偏移；画布上直接刷，撤销重做都在宿主") },
+      { key: "export", title: T("④ 导出"), hint: T("PNG 分层与合并 + 自有 JSON + Tiled .tmj/.tsj，全部本地免费") }
+    ];
+    }
+    let MAP_STAGES = make_MAP_STAGES();
+
+    /** 三种自动过渡方案（对齐宿主 src/mapauto.ts 的 AUTOTILE_SCHEMES）。 */
+    function make_MAP_AUTOTILE_SCHEMES() {
+      return [
+      { key: "single", title: T("单块（不自动过渡）") },
+      { key: "corner16", title: T("四邻域 16 掩码") },
+      { key: "blob47", title: T("八邻域 47 掩码（blob）") }
+    ];
+    }
+    let MAP_AUTOTILE_SCHEMES = make_MAP_AUTOTILE_SCHEMES();
+
+    /** 编辑器工具（纯界面概念，宿主不认识）。 */
+    function make_MAP_TOOL_LABELS() {
+      return { paint: T("画笔"), erase: T("橡皮"), fill: T("填充"), rect: T("矩形"), pick: T("吸管") };
+    }
+    function make_MAP_TOOL_HINTS() {
+      return {
+        paint: T("按住拖动画线（B）"),
+        erase: T("擦成空（E）"),
+        fill: T("同色连通区一次填满（G）"),
+        rect: T("拖出矩形，按住「矩形填充」为实心（R）"),
+        pick: T("吸取格子上的图块（I）")
+      };
+    }
+    let MAP_TOOL_LABELS = make_MAP_TOOL_LABELS();
+    let MAP_TOOL_HINTS = make_MAP_TOOL_HINTS();
 
     /** 地图地块的四个阶段（对齐宿主 src/links.ts 的 TILE_STAGES）。 */
     function make_TILE_STAGES() {
@@ -1579,7 +1833,7 @@
     // http(s) 链接加 target="_blank"，不拦就会真的新开一个标签页。
     // 只按 `dsh-gmm` 参数识别自己的链接，其它链接（含站外的）一律放行。
     const OPEN_QUERY_KEY = "dsh-gmm";
-    const OPEN_MODULES = new Set(["sprite", "image", "sequence", "rig", "tile"]);
+    const OPEN_MODULES = new Set(["sprite", "image", "sequence", "rig", "tile", "map"]);
     /** 意图订阅者：各模块组件都挂着，谁在挂载谁就被通知。 */
     const intentListeners = new Set<any>();
     /** 最近一次意图。晚挂载的组件（切模块后才渲染）订阅时立刻拿到它。 */
@@ -1814,6 +2068,54 @@
 .SPR_mapCell-active{background:rgba(255,120,0,.6);outline:1px solid rgba(255,120,0,.9)}
 .SPR_mapCell-empty{background:rgba(150,150,150,.16)}
 .SPR_mapCellLabel{pointer-events:none;font-size:10px;color:var(--dsw-alias-label-secondary);opacity:0}
+.SPR_meStage{display:flex;flex-direction:column;gap:10px}
+.SPR_meCard{border:1px solid var(--dsw-alias-border-l2);border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:8px;background:var(--dsw-alias-bg-layer-3)}
+.SPR_meCard>h4{margin:0;font-size:13px}
+.SPR_meCardHead{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.SPR_meHint{font-size:11px;color:var(--dsw-alias-label-tertiary);margin:0}
+.SPR_meWarn{font-size:11px;color:var(--dsw-alias-label-error, #d24);margin:0}
+.SPR_meWarnings{margin:0;padding-left:18px;font-size:11px;color:var(--dsw-alias-label-secondary)}
+.SPR_meSliceRow{display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end}
+.SPR_mePaletteWrap{display:flex;flex-direction:column;gap:6px}
+.SPR_mePalette{position:relative;align-self:flex-start;line-height:0;background:repeating-conic-gradient(#0000 0% 25%,#00000010 0% 50%) 50%/12px 12px;border:1px solid var(--dsw-alias-border-l2)}
+.SPR_mePaletteImg{image-rendering:pixelated;max-width:100%;display:block}
+.SPR_mePaletteCell{position:absolute;padding:0;margin:0;border:none;background:transparent;cursor:pointer}
+.SPR_mePaletteCell:hover{background:rgba(255,196,0,.35);outline:1px solid rgba(255,196,0,.9)}
+.SPR_mePaletteCell[data-selected="true"]{background:rgba(255,120,0,.45);outline:1px solid rgba(255,120,0,1)}
+.SPR_meGridV{position:absolute;top:0;bottom:0;width:1px;background:rgba(255,0,255,.5);pointer-events:none}
+.SPR_meGridH{position:absolute;left:0;right:0;height:1px;background:rgba(255,0,255,.5);pointer-events:none}
+.SPR_meFamilyRow{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.SPR_meFamilyChip{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--dsw-alias-border-l2);border-radius:999px;padding:2px 9px;font-size:12px;background:transparent;cursor:pointer}
+.SPR_meFamilyChip[data-ok="true"]{border-color:rgba(80,200,120,.8)}
+.SPR_meFamilyDot{width:9px;height:9px;border-radius:50%;display:inline-block}
+.SPR_meFamilyCount{font-size:10px;color:var(--dsw-alias-label-tertiary)}
+.SPR_meFamilyEdit{display:flex;flex-direction:column;gap:6px}
+.SPR_meFamilyEditRow{display:flex;gap:6px;align-items:flex-end;flex-wrap:wrap}
+.SPR_meName{min-width:110px}
+.SPR_meCoverage{display:flex;flex-direction:column;gap:4px;font-size:12px}
+.SPR_meCoverageRow{display:flex;gap:10px;align-items:center}
+.SPR_meCoverageRow[data-ok="true"] .SPR_meOk{color:#3fa85f}
+.SPR_meOk{color:#3fa85f}
+.SPR_meBad{color:#d24}
+.SPR_meShots{display:flex;gap:8px;flex-wrap:wrap}
+.SPR_meShot{max-width:220px;max-height:160px;image-rendering:pixelated;border:1px solid var(--dsw-alias-border-l2)}
+.SPR_meEditorWrap{display:flex;flex-direction:column;gap:8px}
+.SPR_meToolbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.SPR_meToolLabel{font-size:11px;color:var(--dsw-alias-label-tertiary)}
+.SPR_meLayerName{font-size:12px}
+.SPR_meZoom{font-size:11px;color:var(--dsw-alias-label-tertiary)}
+.SPR_meCheck{display:inline-flex;align-items:center;gap:4px;font-size:11px}
+.SPR_meCanvas{width:100%;height:420px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-3);cursor:crosshair;touch-action:none}
+.SPR_meLayerList{display:flex;flex-direction:column;gap:6px}
+.SPR_meLayerRow{display:flex;gap:6px;align-items:flex-end;flex-wrap:wrap;padding:4px;border-radius:8px;border:1px dashed transparent}
+.SPR_meLayerRow[data-active="true"]{border-color:var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2, rgba(0,0,0,.03))}
+.SPR_meLayerPick{border:none;background:transparent;cursor:pointer;font-size:12px;padding:2px 4px;text-align:left}
+.SPR_meMapList{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.SPR_meMapChip{border:1px solid var(--dsw-alias-border-l2);border-radius:999px;padding:3px 10px;font-size:12px;background:transparent;cursor:pointer}
+.SPR_meMapChip[data-active="true"]{background:rgba(120,180,255,.22);border-color:rgba(120,180,255,.9)}
+.SPR_meBusy{font-size:11px;color:var(--dsw-alias-label-warning, #c80)}
+.SPR_meFileList{margin:0;padding-left:18px;font-size:11px;line-height:1.7}
+
 .SPR_mapCell:hover .SPR_mapCellLabel{opacity:1}
 .SPR_step-active{color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-state-business-primary)}
 .SPR_step-done .SPR_stepMark{color:var(--dsw-alias-state-success-primary,#2e7d32)}
@@ -3414,9 +3716,11 @@
               ? h(SequenceModule, { api })
               : activeModule === "tile"
                 ? h(TileModule, { api })
-                : activeModule === "rig"
-                  ? h(RigModule, { api })
-                  : null
+                : activeModule === "map"
+                  ? h(MapModule, { api })
+                  : activeModule === "rig"
+                    ? h(RigModule, { api })
+                    : null
       );
     }
 
@@ -5438,6 +5742,1299 @@
           )
         ),
         items.length === 0 ? h(Btn, { onClick: onCreate, primary: true }, T("新建")) : null
+      );
+    }
+
+    // ── 模块六 · 地图编辑器（导入 tileset）────────────────────────────────
+    //
+    // 与模块五的根本区别：**宿主是唯一渲染器**。
+    // 界面拿到的不是坐标公式，而是一份绘制计划（每项 = 用哪块图、画在哪个像素），
+    // canvas 只负责把计划执行出来；导出 PNG 执行的是同一份计划。于是
+    // 「预览 = 导出」是构造出来的，而不是靠调试去对齐两套坐标口径。
+    //
+    // 界面里**唯一**复刻的宿主逻辑是命中测试（`MAP_pointToCell` 等三个函数），
+    // 那是鼠标点击必需的；宿主真实现见 `src/mapgeom.ts`，
+    // `scripts/verify-map-client.mjs` 拿它做黄金对照逐点比对。
+    //
+    // ⚠️ 变体挑选 / 自动过渡 / 层高换算 / 裁剪偏移**都不在这里**：那些全在宿主。
+    // 一旦在界面里再写一遍，就回到了旧模块那条「预览与出图两套口径」的老路。
+
+    /** chunk 边长（对齐宿主 `mapgeom.MAP_CHUNK_SIZE`）。 */
+    const MAP_CHUNK = 32;
+
+    /** 像素 → 格子。**与宿主 `mapgeom.pointToCell` 同构**。 */
+    function MAP_pointToCell(layout, x, y) {
+      if (layout.grid.kind === "square") {
+        const c = Math.floor(x / layout.grid.tileWidth);
+        const r = Math.floor(y / layout.grid.tileHeight);
+        return { r, c, inMap: r >= 0 && c >= 0 && r < layout.rows && c < layout.cols };
+      }
+      const u = (x - layout.centerX) / layout.stepX;
+      const v = (y - layout.centerY) / layout.stepY;
+      const c = Math.round((v + u) / 2);
+      const r = Math.round((v - u) / 2);
+      return { r, c, inMap: r >= 0 && c >= 0 && r < layout.rows && c < layout.cols };
+    }
+
+    /** 格子锚点（贴图锚点落地的点）。**与宿主 `mapgeom.cellAnchor` 同构**。 */
+    function MAP_cellAnchor(layout, r, c) {
+      if (layout.grid.kind === "square") {
+        return { x: c * layout.grid.tileWidth + layout.grid.tileWidth / 2, y: (r + 1) * layout.grid.tileHeight };
+      }
+      return {
+        x: layout.centerX + (c - r) * layout.stepX,
+        y: layout.centerY + (c + r) * layout.stepY + layout.grid.tileHeight / 2
+      };
+    }
+
+    function MAP_cellTopLeft(layout, r, c, width, height, anchorX = 0.5, anchorY = 1) {
+      const anchor = MAP_cellAnchor(layout, r, c);
+      return { x: anchor.x - width * anchorX, y: anchor.y - height * anchorY };
+    }
+
+    /**
+     * 两格之间的直线（拖动补间不能漏格）。
+     * **与宿主 `mapdoc.lineCells` 同构**，黄金对照同样覆盖它。
+     */
+    function MAP_lineCells(r0, c0, r1, c1) {
+      const out = [];
+      let r = Math.round(r0);
+      let c = Math.round(c0);
+      const rEnd = Math.round(r1);
+      const cEnd = Math.round(c1);
+      const dr = Math.abs(rEnd - r);
+      const dc = Math.abs(cEnd - c);
+      const sr = r < rEnd ? 1 : -1;
+      const sc = c < cEnd ? 1 : -1;
+      let err = dr - dc;
+      for (;;) {
+        out.push({ r, c });
+        if (r === rEnd && c === cEnd) break;
+        const e2 = 2 * err;
+        if (e2 > -dc) {
+          err -= dc;
+          r += sr;
+        }
+        if (e2 < dr) {
+          err += dr;
+          c += sc;
+        }
+        if (out.length > 20000) break;
+      }
+      return out;
+    }
+
+    function MAP_chunkOf(r, c) {
+      return { cx: Math.floor(c / MAP_CHUNK), cy: Math.floor(r / MAP_CHUNK) };
+    }
+
+    function MAP_chunkKey(chunk) {
+      return `${chunk.cx},${chunk.cy}`;
+    }
+
+    /** 视口（地图像素坐标）覆盖到哪些 chunk。 */
+    function MAP_visibleChunks(layout, view) {
+      const corners = [
+        [view.x, view.y],
+        [view.x + view.w, view.y],
+        [view.x, view.y + view.h],
+        [view.x + view.w, view.y + view.h]
+      ].map(([x, y]) => MAP_pointToCell(layout, x, y));
+      const rMin = Math.max(0, Math.min.apply(null, corners.map((hit) => hit.r)) - MAP_CHUNK);
+      const rMax = Math.min(layout.rows - 1, Math.max.apply(null, corners.map((hit) => hit.r)) + MAP_CHUNK);
+      const cMin = Math.max(0, Math.min.apply(null, corners.map((hit) => hit.c)) - MAP_CHUNK);
+      const cMax = Math.min(layout.cols - 1, Math.max.apply(null, corners.map((hit) => hit.c)) + MAP_CHUNK);
+      const keys = [];
+      for (let cy = Math.floor(rMin / MAP_CHUNK); cy <= Math.floor(rMax / MAP_CHUNK); cy++) {
+        for (let cx = Math.floor(cMin / MAP_CHUNK); cx <= Math.floor(cMax / MAP_CHUNK); cx++) keys.push(`${cx},${cy}`);
+      }
+      return keys;
+    }
+
+    /** 图块序号 → { 图集, 源矩形 }（宿主给的 legend）。 */
+    function MAP_legendMap(view) {
+      const map = new Map();
+      for (const entry of view.legend || []) map.set(entry.index, entry);
+      return map;
+    }
+
+    /** 把宿主回传的 chunk 补丁写进缓存。 */
+    function MAP_mergePatches(chunks, patches) {
+      const next = new Map(chunks);
+      for (const patch of patches || []) next.set(patch.key, patch.ops || []);
+      return next;
+    }
+
+    function MapModule(props) {
+      useLocaleTick();
+      const api = props.api;
+      const [projects, setProjects] = React.useState([]);
+      const [projectId, setProjectId] = React.useState(null);
+      const [view, setView] = React.useState(null);
+      const [stage, setStage] = React.useState("assets");
+      const [notice, setNotice] = React.useState(null);
+      const [busy, setBusy] = React.useState(false);
+      const [activeLayerId, setActiveLayerId] = React.useState(null);
+      const [brush, setBrush] = React.useState(null);
+      const [tool, setTool] = React.useState("paint");
+      const [zoom, setZoom] = React.useState(1);
+      const [pan, setPan] = React.useState({ x: 0, y: 0 });
+      const [zoomMode, setZoomMode] = React.useState("fit");
+      const [chunks, setChunks] = React.useState(new Map());
+      const [selectedTilesetId, setSelectedTilesetId] = React.useState(null);
+      const [selectedTileIds, setSelectedTileIds] = React.useState([]);
+      /** 图集切分草稿（每张图集一份）。 */
+      const [sliceDraft, setSliceDraft] = React.useState({});
+      /** 族草稿（整份）。 */
+      const [familyDraft, setFamilyDraft] = React.useState(null);
+      /** 导出选项。 */
+      const [exportScale, setExportScale] = React.useState(1);
+      const [exportFormats, setExportFormats] = React.useState({ pngMerged: true, pngLayers: true, json: true, tiled: true });
+      const [newMapName, setNewMapName] = React.useState("");
+      const imageRefs = React.useRef({});
+      const canvasRef = React.useRef(null);
+      const wrapRef = React.useRef(null);
+      const strokeRef = React.useRef(null);
+      const flushTimer = React.useRef(null);
+      const pendingOps = React.useRef([]);
+      const [viewport, setViewport] = React.useState({ w: 640, h: 420 });
+      const [ghost, setGhost] = React.useState(null);
+      const [imagesReady, setImagesReady] = React.useState(0);
+      const [planWarnings, setPlanWarnings] = React.useState([]);
+      const intent = useStudioIntent();
+
+      const project = React.useMemo(() => (view === null ? null : view), [view]);
+      const doc = project === null ? null : project.doc;
+      const layout = doc === null || doc === undefined ? null : doc.layout;
+      const layerOf = (id) => (doc === null ? undefined : (doc.layers || []).find((layer) => layer.id === id));
+      const activeLayer = activeLayerId !== null && layerOf(activeLayerId) !== undefined ? layerOf(activeLayerId) : doc === null ? undefined : (doc.layers || [])[0];
+      const legend = React.useMemo(() => (project === null ? new Map() : MAP_legendMap(project)), [project]);
+      const assetBase = project === null ? "" : project.assetBase;
+
+      const withApi = React.useCallback(
+        async (fn, options) => {
+          if (api === undefined) {
+            setNotice({ kind: "error", text: T("远程服务尚未挂载完成，请稍候再试") });
+            return undefined;
+          }
+          try {
+            const value = await fn();
+            if (options !== undefined && options.notice !== undefined) setNotice({ kind: "info", text: options.notice });
+            return value;
+          } catch (error) {
+            setNotice({ kind: "error", text: msg(error) });
+            return undefined;
+          }
+        },
+        [api]
+      );
+
+      const loadProject = React.useCallback(
+        async (id, mapId) => {
+          if (api === undefined || id === null) return;
+          try {
+            const next = await api.getMapProject(mapId === undefined ? { projectId: id } : { projectId: id, mapId });
+            setView(next);
+            setChunks(new Map());
+            setProjectId(next.id);
+            const layers = (next.doc && next.doc.layers) || [];
+            setActiveLayerId(layers.length > 0 ? layers[0].id : null);
+          } catch (error) {
+            setNotice({ kind: "error", text: msg(error) });
+          }
+        },
+        [api]
+      );
+
+      const loadList = React.useCallback(async () => {
+        if (api === undefined) return;
+        try {
+          const result = await api.listMapProjects();
+          setProjects(result.projects || []);
+          if (projectId === null && result.projects && result.projects.length > 0) await loadProject(result.projects[0].id);
+        } catch (error) {
+          setNotice({ kind: "error", text: msg(error) });
+        }
+      }, [api, projectId, loadProject]);
+
+      React.useEffect(() => {
+        void loadList();
+      }, [loadList]);
+
+      // 深链接：`?dsh-gmm=1&module=map&job=<项目 id>&stage=paint`
+      // （项目 id 走 jobId 字段，与 tile 同一套约定，见宿主 links.ts 的 OpenIntent）
+      React.useEffect(() => {
+        if (intent === null || intent.module !== "map") return;
+        if (typeof intent.stage === "string" && MAP_STAGES.some((entry) => entry.key === intent.stage)) setStage(intent.stage);
+        if (typeof intent.jobId === "string" && intent.jobId !== "") void loadProject(intent.jobId);
+      }, [intent, loadProject]);
+
+      const mapId = doc === null || doc === undefined ? null : doc.id;
+
+      // ── 计划 chunk 的按需拉取 ────────────────────────────────────────────
+      const requestChunks = React.useCallback(
+        async (keys) => {
+          if (api === undefined || projectId === null || mapId === null) return;
+          const missing = keys.filter((key) => !chunks.has(key));
+          if (missing.length === 0) return;
+          try {
+            const plan = await api.mapPlan({ projectId, mapId, chunks: missing });
+            setChunks((prev) => {
+              const next = new Map(prev);
+              for (const chunk of plan.chunks || []) next.set(chunk.key, chunk.ops || []);
+              for (const key of missing) if (!next.has(key)) next.set(key, []);
+              return next;
+            });
+            setPlanWarnings(plan.warnings || []);
+          } catch (error) {
+            setNotice({ kind: "error", text: msg(error) });
+          }
+        },
+        [api, projectId, mapId, chunks]
+      );
+
+      // ── 画布：视口渲染（大地图也不卡）─────────────────────────────────────
+      const draw = React.useCallback(() => {
+        const canvas = canvasRef.current;
+        if (canvas === null || canvas === undefined || layout === null || doc === null || doc === undefined) return;
+        const ctx = canvas.getContext("2d");
+        if (ctx === null || ctx === undefined) return;
+        const width = Math.max(1, Math.round(viewport.w));
+        const height = Math.max(1, Math.round(viewport.h));
+        if (canvas.width !== width) canvas.width = width;
+        if (canvas.height !== height) canvas.height = height;
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.clearRect(0, 0, width, height);
+        ctx.imageSmoothingEnabled = false;
+        ctx.setTransform(zoom, 0, 0, zoom, -pan.x * zoom, -pan.y * zoom);
+        const rectOf = (index) => legend.get(index);
+        /**
+         * 帧统计。
+         *
+         * `window.__mapDebug = true` 时把「这一帧为什么画/没画出东西」记在
+         * `window.__mapDrawStats` 上 —— 自检与真机验收都靠它定位
+         * 「画布是空的」这类问题（是没拉到计划、还是缺图源、还是坐标算飞了）。
+         * 默认关掉，正常使用不产生任何额外开销。
+         */
+        const debug = (window as any).__mapDebug === true;
+        const stats = debug ? { keys: [], cached: 0, drawn: 0, noLegend: 0, noImage: 0, first: null } : null;
+        for (const key of MAP_visibleChunks(layout, { x: pan.x, y: pan.y, w: width / zoom, h: height / zoom })) {
+          if (stats !== null) stats.keys.push(key);
+          const ops = chunks.get(key);
+          if (ops === undefined) continue;
+          if (stats !== null) stats.cached += ops.length;
+          for (const op of ops) {
+            const entry = rectOf(op.t);
+            if (entry === undefined) {
+              if (stats !== null) stats.noLegend++;
+              continue;
+            }
+            const image = imageRefs.current[entry.tilesetId];
+            if (image === undefined || image === null) {
+              if (stats !== null) stats.noImage++;
+              continue;
+            }
+            if (stats !== null) {
+              stats.drawn++;
+              if (stats.first === null) stats.first = { t: op.t, x: op.x, y: op.y, ts: entry.tilesetId };
+            }
+            ctx.globalAlpha = op.a === undefined ? 1 : op.a;
+            ctx.drawImage(image, entry.rect.x, entry.rect.y, entry.rect.width, entry.rect.height, op.x, op.y, entry.rect.width, entry.rect.height);
+          }
+        }
+        if (stats !== null) {
+          (window as any).__mapDrawStats = stats;
+        }
+        ctx.globalAlpha = 1;
+        if (ghost !== null && ghost.length > 0) {
+          ctx.fillStyle = ghost.ok === false ? "rgba(240,80,80,0.35)" : "rgba(80,220,120,0.32)";
+          for (const cell of ghost.cells) {
+            if (layout.grid.kind === "square") {
+              const topLeft = MAP_cellTopLeft(layout, cell.r, cell.c, layout.grid.tileWidth, layout.grid.tileHeight);
+              ctx.fillRect(topLeft.x, topLeft.y, layout.grid.tileWidth, layout.grid.tileHeight);
+              continue;
+            }
+            const center = MAP_cellAnchor(layout, cell.r, cell.c);
+            const halfW = layout.grid.tileWidth / 2;
+            const halfH = layout.grid.tileHeight / 2;
+            ctx.beginPath();
+            ctx.moveTo(center.x, center.y - layout.grid.tileHeight);
+            ctx.lineTo(center.x + halfW, center.y - halfH);
+            ctx.lineTo(center.x, center.y);
+            ctx.lineTo(center.x - halfW, center.y - halfH);
+            ctx.closePath();
+            ctx.fill();
+          }
+        }
+      }, [layout, doc, viewport, zoom, pan, chunks, legend, ghost]);
+
+      React.useEffect(() => {
+        draw();
+      }, [draw, imagesReady]);
+
+      // 视口变化 / 平移缩放后按需补齐 chunk
+      React.useEffect(() => {
+        if (layout === null) return;
+        const keys = MAP_visibleChunks(layout, { x: pan.x, y: pan.y, w: viewport.w / zoom, h: viewport.h / zoom });
+        void requestChunks(keys);
+      }, [layout, pan, viewport, zoom, requestChunks]);
+
+      // 容器尺寸变化 → 视口跟着变（否则右下角永远画不到）
+      React.useEffect(() => {
+        const element = wrapRef.current;
+        if (element === null || element === undefined) return;
+        const measure = () => {
+          const rect = element.getBoundingClientRect();
+          setViewport({ w: Math.max(160, Math.round(rect.width)), h: 420 });
+        };
+        measure();
+        if (typeof ResizeObserver !== "function") return;
+        const observer = new ResizeObserver(measure);
+        observer.observe(element);
+        return () => observer.disconnect();
+      }, [projectId, stage]);
+
+      // 「适应窗口」缩放：整张地图塞进画布
+      React.useEffect(() => {
+        if (zoomMode !== "fit" || doc === null || doc === undefined) return;
+        const bounds = doc.bounds;
+        if (bounds === undefined || bounds.width <= 0) return;
+        const scale = Math.min(1, Math.min(viewport.w / bounds.width, viewport.h / bounds.height));
+        setZoom(scale > 0 ? scale : 1);
+        setPan({ x: bounds.originX, y: bounds.originY });
+      }, [zoomMode, doc, viewport]);
+
+      // ── 编辑：op 批量提交 ────────────────────────────────────────────────
+      const flushOps = React.useCallback(async () => {
+        if (flushTimer.current !== null) {
+          clearTimeout(flushTimer.current);
+          flushTimer.current = null;
+        }
+        const ops = pendingOps.current;
+        if (ops.length === 0 || api === undefined || projectId === null || mapId === null) return;
+        pendingOps.current = [];
+        try {
+          const result = await api.applyMapOps({ projectId, mapId, ops });
+          setChunks((prev) => MAP_mergePatches(prev, result.patches));
+          setView((prev) => (prev === null ? prev : { ...prev, doc: { ...prev.doc, canUndo: result.canUndo, canRedo: result.canRedo } }));
+          if (result.skipped !== undefined && result.skipped.length > 0) {
+            setNotice({ kind: "error", text: result.skipped.slice(0, 2).join("；") });
+          }
+        } catch (error) {
+          setNotice({ kind: "error", text: msg(error) });
+        }
+      }, [api, projectId, mapId]);
+
+      const queueOps = React.useCallback(
+        (ops, immediate) => {
+          pendingOps.current = pendingOps.current.concat(ops);
+          if (immediate === true) {
+            void flushOps();
+            return;
+          }
+          if (flushTimer.current !== null) return;
+          flushTimer.current = setTimeout(() => {
+            flushTimer.current = null;
+            void flushOps();
+          }, 60);
+        },
+        [flushOps]
+      );
+
+      const cellFromEvent = React.useCallback(
+        (event) => {
+          const canvas = canvasRef.current;
+          if (canvas === null || layout === null) return null;
+          const rect = canvas.getBoundingClientRect();
+          const x = (event.clientX - rect.left) / zoom + pan.x;
+          const y = (event.clientY - rect.top) / zoom + pan.y;
+          const hit = MAP_pointToCell(layout, x, y);
+          return hit.inMap ? hit : null;
+        },
+        [layout, zoom, pan]
+      );
+
+      const strokePaint = (from, to) => {
+        if (activeLayer === undefined || brush === null) return;
+        const cells = from === null ? [to] : MAP_lineCells(from.r, from.c, to.r, to.c);
+        queueOps([
+          {
+            kind: "paint",
+            layerId: activeLayer.id,
+            cells: cells.map((cell) => ({ r: cell.r, c: cell.c, tile: tool === "erase" ? 0 : brush.tile }))
+          }
+        ]);
+      };
+
+      const onPointerDown = (event) => {
+        if (layout === null || doc === null || doc === undefined) return;
+        const hit = cellFromEvent(event);
+        if (hit === null) return;
+        if (event.button === 1 || event.shiftKey === true) {
+          strokeRef.current = { mode: "pan", clientX: event.clientX, clientY: event.clientY, pan: { ...pan } };
+          return;
+        }
+        if (tool === "fill") {
+          if (activeLayer === undefined || brush === null) return;
+          queueOps([{ kind: "fill", layerId: activeLayer.id, r: hit.r, c: hit.c, tile: brush.tile }], true);
+          return;
+        }
+        if (tool === "rect") {
+          strokeRef.current = { mode: "rect", from: hit };
+          setGhost({ cells: [hit], ok: true });
+          return;
+        }
+        if (tool === "pick") {
+          const chunk = MAP_chunkOf(hit.r, hit.c);
+          const ops = chunks.get(MAP_chunkKey(chunk)) || [];
+          const found = ops.find((op) => op.r === hit.r && op.c === hit.c);
+          if (found !== undefined) setBrush({ tile: found.t });
+          return;
+        }
+        strokeRef.current = { mode: "paint", from: hit };
+        strokePaint(null, hit);
+        setGhost({ cells: [hit], ok: true });
+      };
+
+      const onPointerMove = (event) => {
+        if (layout === null) return;
+        const hit = cellFromEvent(event);
+        const stroke = strokeRef.current;
+        if (stroke !== null && stroke !== undefined && stroke.mode === "pan") {
+          setPan({ x: stroke.pan.x - (event.clientX - stroke.clientX) / zoom, y: stroke.pan.y - (event.clientY - stroke.clientY) / zoom });
+          return;
+        }
+        if (stroke !== null && stroke !== undefined && stroke.mode === "rect" && hit !== null) {
+          const r0 = Math.min(stroke.from.r, hit.r);
+          const r1 = Math.max(stroke.from.r, hit.r);
+          const c0 = Math.min(stroke.from.c, hit.c);
+          const c1 = Math.max(stroke.from.c, hit.c);
+          const cells = [];
+          for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) cells.push({ r, c });
+          setGhost({ cells, ok: true });
+          return;
+        }
+        if (hit === null) {
+          setGhost(null);
+          return;
+        }
+        if (stroke !== null && stroke !== undefined && stroke.mode === "paint") {
+          strokePaint(stroke.from, hit);
+          stroke.from = hit;
+        }
+        setGhost({ cells: [hit], ok: true });
+      };
+
+      const onPointerUp = () => {
+        const stroke = strokeRef.current;
+        strokeRef.current = null;
+        if (stroke !== null && stroke !== undefined && stroke.mode === "rect" && ghost !== null && brush !== null && activeLayer !== undefined) {
+          const cells = ghost.cells;
+          if (cells.length > 0) {
+            const r0 = Math.min.apply(null, cells.map((cell) => cell.r));
+            const r1 = Math.max.apply(null, cells.map((cell) => cell.r));
+            const c0 = Math.min.apply(null, cells.map((cell) => cell.c));
+            const c1 = Math.max.apply(null, cells.map((cell) => cell.c));
+            if (tool === "rect" && ghost.filled === true) {
+              queueOps([{ kind: "rect", layerId: activeLayer.id, r0, c0, r1, c1, tile: brush.tile, filled: true }], true);
+            } else {
+              queueOps([{ kind: "rect", layerId: activeLayer.id, r0, c0, r1, c1, tile: brush.tile, filled: false }], true);
+            }
+          }
+        }
+        void flushOps();
+      };
+
+      const onWheel = (event) => {
+        if (event.ctrlKey !== true && event.metaKey !== true && event.altKey !== true) return;
+        event.preventDefault();
+        const factor = event.deltaY < 0 ? 1.2 : 1 / 1.2;
+        const next = Math.min(8, Math.max(0.12, zoom * factor));
+        const canvas = canvasRef.current;
+        if (canvas !== null) {
+          const rect = canvas.getBoundingClientRect();
+          const mapX = (event.clientX - rect.left) / zoom + pan.x;
+          const mapY = (event.clientY - rect.top) / zoom + pan.y;
+          setPan({ x: mapX - (event.clientX - rect.left) / next, y: mapY - (event.clientY - rect.top) / next });
+        }
+        setZoom(next);
+        setZoomMode("free");
+      };
+
+      // 键盘：撤销 / 重做 / 工具切换（挂在 window 上，切走模块时解绑）
+      React.useEffect(() => {
+        const onKey = (event) => {
+          if (event.target !== null && event.target !== undefined && /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName || "")) return;
+          const meta = event.metaKey === true || event.ctrlKey === true;
+          if (meta && (event.key === "z" || event.key === "Z")) {
+            event.preventDefault();
+            void (event.shiftKey === true ? doRedo() : doUndo());
+            return;
+          }
+          if (meta && (event.key === "y" || event.key === "Y")) {
+            event.preventDefault();
+            void doRedo();
+            return;
+          }
+          if (meta) return;
+          if (event.key === "b") setTool("paint");
+          else if (event.key === "e") setTool("erase");
+          else if (event.key === "g") setTool("fill");
+          else if (event.key === "r") setTool("rect");
+          else if (event.key === "i") setTool("pick");
+        };
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+      });
+
+      const doUndo = async () => {
+        if (api === undefined || projectId === null || mapId === null) return;
+        const result = await withApi(() => api.mapUndo({ projectId, mapId }));
+        if (result === undefined) return;
+        setChunks((prev) => MAP_mergePatches(prev, result.patches));
+        setView((prev) => (prev === null ? prev : { ...prev, doc: { ...prev.doc, canUndo: result.canUndo, canRedo: result.canRedo } }));
+      };
+
+      const doRedo = async () => {
+        if (api === undefined || projectId === null || mapId === null) return;
+        const result = await withApi(() => api.mapRedo({ projectId, mapId }));
+        if (result === undefined) return;
+        setChunks((prev) => MAP_mergePatches(prev, result.patches));
+        setView((prev) => (prev === null ? prev : { ...prev, doc: { ...prev.doc, canUndo: result.canUndo, canRedo: result.canRedo } }));
+      };
+
+      const createProject = () =>
+        withApi(async () => {
+          const name = T("我的地图");
+          const created = await api.createMapProject({ name, grid: { kind: "square", tileWidth: 32, tileHeight: 32, heightStep: 16 } });
+          setProjects((prev) => [{ id: created.id, name: created.name, updatedAt: created.updatedAt }, ...prev]);
+          await loadProject(created.id);
+          setStage("assets");
+        });
+
+      const importFiles = async (files) => {
+        if (files === undefined || files.length === 0 || projectId === null) return;
+        setBusy(true);
+        try {
+          for (const file of files) {
+            const base64 = await new Promise((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
+              reader.onerror = () => reject(new Error(T("读文件失败")));
+              reader.readAsDataURL(file);
+            });
+            await withApi(() => api.importMapTileset({ projectId, name: file.name, data: base64 }), {
+              notice: T("已导入 {n0}", { n0: file.name })
+            });
+          }
+          await loadProject(projectId, mapId);
+        } finally {
+          setBusy(false);
+        }
+      };
+
+      const saveSlice = async (tilesetId) => {
+        const draft = sliceDraft[tilesetId];
+        if (draft === undefined) return;
+        const result = await withApi(() =>
+          api.saveMapTileset({
+            projectId,
+            tilesetId,
+            slice: {
+              mode: draft.mode,
+              tileWidth: draft.tileWidth,
+              tileHeight: draft.tileHeight,
+              offsetX: draft.offsetX,
+              offsetY: draft.offsetY,
+              spacingX: draft.spacingX,
+              spacingY: draft.spacingY
+            }
+          })
+        );
+        if (result !== undefined) {
+          if (result.warnings !== undefined && result.warnings.length > 0) setNotice({ kind: "error", text: result.warnings.join("；") });
+          await loadProject(projectId, mapId);
+        }
+      };
+
+      const patchTiles = async (tilesetId, patches) => {
+        const result = await withApi(() => api.saveMapTileset({ projectId, tilesetId, tiles: patches }));
+        if (result !== undefined) await loadProject(projectId, mapId);
+      };
+
+      const assignMasksInOrder = async (familyId, scheme) => {
+        if (selectedTilesetId === null) return;
+        const tileset = project.tilesets.find((entry) => entry.id === selectedTilesetId);
+        if (tileset === undefined) return;
+        const masks = (project.autotileMasks && project.autotileMasks[scheme]) || [0];
+        const patches = tileset.preview.tiles.slice(0, masks.length).map((tile, index) => ({ id: tile.id, familyId, mask: masks[index], weight: 1 }));
+        await patchTiles(selectedTilesetId, patches);
+        setNotice({ kind: "info", text: T("已按顺序给前 {n0} 块分配掩码", { n0: String(patches.length) }) });
+      };
+
+      const saveFamilies = async () => {
+        if (familyDraft === null) return;
+        const result = await withApi(() => api.saveMapFamilies({ projectId, families: familyDraft }));
+        if (result !== undefined) {
+          if (result.warnings !== undefined && result.warnings.length > 0) setNotice({ kind: "error", text: result.warnings.join("；") });
+          await loadProject(projectId, mapId);
+        }
+      };
+
+      const saveDocStructure = async (patch) => {
+        const result = await withApi(() => api.saveMapDoc({ projectId, mapId, ...patch }));
+        if (result !== undefined) {
+          if (result.warnings !== undefined && result.warnings.length > 0) setNotice({ kind: "info", text: result.warnings.join("；") });
+          await loadProject(projectId, mapId);
+        }
+      };
+
+      const switchMap = async (nextMapId) => {
+        await loadProject(projectId, nextMapId);
+      };
+
+      const runPreview = async () => {
+        const started = await withApi(() => api.runMapPreview({ projectId, mapId }));
+        if (started !== undefined && started.started === true) await loadProject(projectId, mapId);
+      };
+
+      const runExport = async () => {
+        const started = await withApi(() => api.runMapExport({ projectId, mapId, scale: exportScale, formats: exportFormats }));
+        if (started !== undefined && started.started === true) await loadProject(projectId, mapId);
+      };
+
+      // ⚠️ 所有 Hook 必须在上面；下面才开始早退（React #310，整个面板白屏）
+      if (project === null) {
+        return h(
+          "div",
+          { className: "SPR_moduleBody" },
+          h("div", { className: "SPR_empty" }, T("还没有地图项目。")),
+          h(
+            "div",
+            { className: "SPR_toolbar" },
+            h(Btn, { onClick: createProject, primary: true }, T("新建地图项目")),
+            projects.length > 0
+              ? h(
+                  "select",
+                  {
+                    className: "SPR_select",
+                    value: "",
+                    onChange: (event) => {
+                      if (event.target.value !== "") void loadProject(event.target.value);
+                    }
+                  },
+                  h("option", { value: "" }, T("选择已有项目…")),
+                  projects.map((entry) => h("option", { key: entry.id, value: entry.id }, entry.name))
+                )
+              : null
+          ),
+          notice === null ? null : h("div", { className: `SPR_notice SPR_notice-${notice.kind}` }, notice.text)
+        );
+      }
+
+      const stageTabs = h(
+        "div",
+        { className: "SPR_stages" },
+        MAP_STAGES.map((entry) =>
+          h(
+            "button",
+            {
+              key: entry.key,
+              type: "button",
+              className: "SPR_stageTab",
+              "data-active": stage === entry.key ? "true" : undefined,
+              onClick: () => setStage(entry.key)
+            },
+            h("span", { className: "SPR_stageTitle" }, entry.title),
+            h("span", { className: "SPR_stageHint" }, entry.hint)
+          )
+        )
+      );
+
+      const tilesets = project.tilesets || [];
+      const families = project.families || [];
+      const maps = project.maps || [];
+      const coverage = project.coverage || [];
+
+      const palette = (() => {
+        if (selectedTilesetId === null) return null;
+        const tileset = tilesets.find((entry) => entry.id === selectedTilesetId);
+        if (tileset === undefined) return null;
+        return h(
+          "div",
+          { className: "SPR_mePaletteWrap" },
+          h(
+            "div",
+            { className: "SPR_mePalette" },
+            h("img", { className: "SPR_mePaletteImg", src: `${assetBase}${tileset.file}`, alt: tileset.name }),
+            tileset.preview.tiles.map((tile) =>
+              h("button", {
+                key: tile.id,
+                type: "button",
+                className: "SPR_mePaletteCell",
+                style: {
+                  left: `${tile.rect.x}px`,
+                  top: `${tile.rect.y}px`,
+                  width: `${tile.rect.width}px`,
+                  height: `${tile.rect.height}px`,
+                  background: tile.familyId === undefined ? "transparent" : "rgba(120,200,255,0.16)"
+                },
+                title: `${tile.name} · ${tile.familyId === undefined ? T("未分组") : tile.familyId}${tile.mask === undefined ? "" : ` · mask ${tile.mask}`}`,
+                onClick: () => {
+                  setBrush({ tile: tile.index });
+                  setSelectedTileIds([tile.id]);
+                }
+              })
+            )
+          ),
+          h("p", { className: "SPR_meHint" }, T("点一块图作为笔刷（序号 {n0}）。带底色的是已归族的块。", { n0: brush === null ? "-" : String(brush.tile) }))
+        );
+      })();
+
+      const familyRow = h(
+        "div",
+        { className: "SPR_meFamilyRow" },
+        families.map((family) => {
+          const first = tilesets
+            .flatMap((tileset) => tileset.preview.tiles)
+            .find((tile) => tile.familyId === family.id);
+          const row = coverage.find((entry) => entry.familyId === family.id);
+          return h(
+            "button",
+            {
+              key: family.id,
+              type: "button",
+              className: "SPR_meFamilyChip",
+              "data-ok": row !== undefined && row.missing.length === 0 ? "true" : undefined,
+              title: row === undefined ? "" : T("{n0} / {n1} 个掩码已配", { n0: String(row.assigned), n1: String(row.expected) }),
+              onClick: () => {
+                if (first !== undefined) setBrush({ tile: first.index });
+                if (first !== undefined) setSelectedTilesetId(tilesetOfTile(first.index));
+              }
+            },
+            h("span", { className: "SPR_meFamilyDot", style: { background: family.color || "#888" } }),
+            family.name,
+            row === undefined || row.autotile === "single"
+              ? null
+              : h("span", { className: "SPR_meFamilyCount" }, `${row.assigned}/${row.expected}`)
+          );
+        })
+      );
+
+      function tilesetOfTile(index) {
+        for (const tileset of tilesets) {
+          const start = tileset.preview.tiles.length > 0 ? tileset.preview.tiles[0].index : 0;
+          if (index >= start && index < start + tileset.preview.tiles.length) return tileset.id;
+        }
+        return null;
+      }
+
+      const editor = h(
+        "div",
+        { className: "SPR_meEditorWrap", ref: wrapRef },
+        h(
+          "div",
+          { className: "SPR_meToolbar" },
+          h("span", { className: "SPR_meToolLabel" }, T("工具")),
+          ["paint", "erase", "fill", "rect", "pick"].map((key) =>
+            h(
+              Btn,
+              { key, on: tool === key, onClick: () => setTool(key), title: MAP_TOOL_HINTS[key] },
+              MAP_TOOL_LABELS[key]
+            )
+          ),
+          h("span", { className: "SPR_meToolLabel" }, T("撤销/重做")),
+          h(Btn, { onClick: () => void doUndo(), disabled: doc.canUndo !== true }, T("撤销")),
+          h(Btn, { onClick: () => void doRedo(), disabled: doc.canRedo !== true }, T("重做")),
+          h("span", { className: "SPR_meToolLabel" }, T("缩放")),
+          h(Btn, { onClick: () => { setZoomMode("fit"); } , on: zoomMode === "fit" }, T("适应窗口")),
+          h(Btn, { onClick: () => { setZoomMode("free"); setZoom(1); } }, "100%"),
+          h("span", { className: "SPR_meZoom" }, `${Math.round(zoom * 100)}%`)
+        ),
+        activeLayer === undefined
+          ? null
+          : h(
+              "div",
+              { className: "SPR_meToolbar" },
+              h("span", { className: "SPR_meToolLabel" }, T("当前图层")),
+              h("span", { className: "SPR_meLayerName" }, activeLayer.name),
+              h(
+                "label",
+                { className: "SPR_meCheck" },
+                h("input", {
+                  type: "checkbox",
+                  checked: ghost !== null && ghost.filled === true,
+                  onChange: (event) => setGhost((prev) => (prev === null ? prev : { ...prev, filled: event.target.checked }))
+                }),
+                T("矩形填充")
+              )
+            ),
+        h("canvas", {
+          ref: canvasRef,
+          className: "SPR_meCanvas",
+          "data-testid": "map-canvas",
+          onPointerDown,
+          onPointerMove,
+          onPointerUp,
+          onPointerLeave: () => { setGhost(null); onPointerUp(); },
+          onWheel,
+          onContextMenu: (event) => event.preventDefault()
+        }),
+        planWarnings.length === 0 ? null : h("p", { className: "SPR_meWarn" }, planWarnings.join("；"))
+      );
+
+      const layerList = h(
+        "div",
+        { className: "SPR_meLayerList" },
+        (doc.layers || []).map((layer, index) =>
+          h(
+            "div",
+            {
+              key: layer.id,
+              className: "SPR_meLayerRow",
+              "data-active": activeLayer !== undefined && activeLayer.id === layer.id ? "true" : undefined
+            },
+            h(
+              "button",
+              { type: "button", className: "SPR_meLayerPick", onClick: () => setActiveLayerId(layer.id) },
+              layer.name
+            ),
+            h(
+              "label",
+              { className: "SPR_meCheck" },
+              h("input", {
+                type: "checkbox",
+                checked: layer.visible,
+                onChange: (event) => void saveDocStructure({ layers: [{ id: layer.id, visible: event.target.checked }] })
+              }),
+              T("显示")
+            ),
+            h(
+              "label",
+              { className: "SPR_meCheck" },
+              h("input", {
+                type: "checkbox",
+                checked: layer.locked,
+                onChange: (event) => void saveDocStructure({ layers: [{ id: layer.id, locked: event.target.checked }] })
+              }),
+              T("锁定")
+            ),
+            h(NumField, {
+              label: T("高度"),
+              value: layer.heightOffset,
+              step: 0.5,
+              onChange: (value) => void saveDocStructure({ layers: [{ id: layer.id, heightOffset: value }] })
+            }),
+            h(NumField, {
+              label: T("不透明度%"),
+              value: Math.round(layer.opacity * 100),
+              min: 0,
+              max: 100,
+              onChange: (value) => void saveDocStructure({ layers: [{ id: layer.id, opacity: value / 100 }] })
+            }),
+            h(Btn, { onClick: () => void saveDocStructure({ moveLayer: { id: layer.id, toIndex: index - 1 } }), disabled: index === 0, title: T("上移") }, "↑"),
+            h(Btn, { onClick: () => void saveDocStructure({ moveLayer: { id: layer.id, toIndex: index + 1 } }), disabled: index === doc.layers.length - 1, title: T("下移") }, "↓"),
+            h(Btn, { danger: true, onClick: () => void saveDocStructure({ removeLayerId: layer.id }) }, T("删除"))
+          )
+        ),
+        h(
+          "div",
+          { className: "SPR_toolbar" },
+          h(Btn, { onClick: () => void saveDocStructure({ addLayer: { kind: "decor", name: T("装饰") } }) }, T("加装饰层")),
+          h(Btn, { onClick: () => void saveDocStructure({ addLayer: { kind: "object", name: T("建筑") } }) }, T("加建筑层")),
+          h(Btn, { onClick: () => void saveDocStructure({ addLayer: { kind: "overlay", name: T("覆盖") } }) }, T("加覆盖层"))
+        )
+      );
+
+      const mapList = h(
+        "div",
+        { className: "SPR_meMapList" },
+        maps.map((entry) =>
+          h(
+            "button",
+            {
+              key: entry.id,
+              type: "button",
+              className: "SPR_meMapChip",
+              "data-active": mapId === entry.id ? "true" : undefined,
+              onClick: () => void switchMap(entry.id)
+            },
+            `${entry.name} · ${entry.cols}×${entry.rows}`
+          )
+        ),
+        h("input", {
+          className: "SPR_input",
+          placeholder: T("新地图名字"),
+          value: newMapName,
+          onChange: (event) => setNewMapName(event.target.value)
+        }),
+        h(
+          Btn,
+          {
+            onClick: () =>
+              void withApi(async () => {
+                const created = await api.createMapDoc({ projectId, name: newMapName === "" ? T("新地图") : newMapName, cols: 32, rows: 32 });
+                setNewMapName("");
+                await loadProject(projectId, created.doc.id);
+              })
+          },
+          T("新建地图")
+        ),
+        h(Btn, { onClick: () => void withApi(() => api.duplicateMapDoc({ projectId, mapId })) }, T("复制当前地图")),
+        h(Btn, { danger: true, onClick: () => void withApi(() => api.deleteMapDoc({ projectId, mapId })) }, T("删除当前地图"))
+      );
+
+      const stageAssets = h(
+        "div",
+        { className: "SPR_meStage" },
+        h(
+          "div",
+          { className: "SPR_meCard" },
+          h("h4", null, T("导入图集")),
+          h("p", { className: "SPR_meHint" }, T("导入你自己的 tileset 图（PNG / JPEG / WebP）。原图会原样保存，切分参数随便改都能重切。")),
+          h("input", {
+            type: "file",
+            accept: "image/*",
+            multiple: true,
+            "data-testid": "map-tileset-input",
+            disabled: busy,
+            onChange: (event) => {
+              const files = event.target.files;
+              void importFiles(files === null ? [] : Array.from(files));
+              event.target.value = "";
+            }
+          }),
+          busy ? h("p", { className: "SPR_meHint" }, T("正在导入…")) : null
+        ),
+        tilesets.map((tileset) => {
+          const draft = sliceDraft[tileset.id] || {
+            mode: tileset.slice.mode,
+            tileWidth: tileset.slice.tileWidth,
+            tileHeight: tileset.slice.tileHeight,
+            offsetX: tileset.slice.offsetX,
+            offsetY: tileset.slice.offsetY,
+            spacingX: tileset.slice.spacingX,
+            spacingY: tileset.slice.spacingY
+          };
+          const setDraft = (patch) => setSliceDraft((prev) => ({ ...prev, [tileset.id]: { ...draft, ...patch } }));
+          return h(
+            "div",
+            { key: tileset.id, className: "SPR_meCard", "data-tileset": tileset.id },
+            h(
+              "div",
+              { className: "SPR_meCardHead" },
+              h("h4", null, `${tileset.name} · ${tileset.imageWidth}×${tileset.imageHeight} · ${tileset.tileCount} ${T("块")}`),
+              h(Btn, { on: selectedTilesetId === tileset.id, onClick: () => setSelectedTilesetId(tileset.id) }, T("选为调色板")),
+              h(Btn, { danger: true, onClick: () => void withApi(() => api.removeMapTileset({ projectId, tilesetId: tileset.id })) }, T("移除图集"))
+            ),
+            h(
+              "div",
+              { className: "SPR_meSliceRow" },
+              h(NumField, { label: T("格宽"), value: draft.tileWidth, min: 1, max: 1024, onChange: (value) => setDraft({ tileWidth: value }) }),
+              h(NumField, { label: T("格高"), value: draft.tileHeight, min: 1, max: 1024, onChange: (value) => setDraft({ tileHeight: value }) }),
+              h(NumField, { label: T("左边距"), value: draft.offsetX, min: 0, max: 512, onChange: (value) => setDraft({ offsetX: value }) }),
+              h(NumField, { label: T("上边距"), value: draft.offsetY, min: 0, max: 512, onChange: (value) => setDraft({ offsetY: value }) }),
+              h(NumField, { label: T("横向间距"), value: draft.spacingX, min: 0, max: 64, onChange: (value) => setDraft({ spacingX: value }) }),
+              h(NumField, { label: T("纵向间距"), value: draft.spacingY, min: 0, max: 64, onChange: (value) => setDraft({ spacingY: value }) }),
+              h(Btn, { primary: true, onClick: () => void saveSlice(tileset.id) }, T("应用切分"))
+            ),
+            h("p", { className: "SPR_meHint" }, T("切分建议：{n0}", {
+              n0: (tileset.suggestions || []).slice(0, 4).map((item) => item.label).join("；") || T("没有能整除的常见尺寸，请手动填")
+            })),
+            h(
+              "div",
+              { className: "SPR_mePalette" },
+              h("img", { className: "SPR_mePaletteImg", src: `${assetBase}${tileset.file}`, alt: tileset.name }),
+              tileset.preview.gridLinesX.map((x, index) => h("div", { key: `x${index}`, className: "SPR_meGridV", style: { left: `${x}px` } })),
+              tileset.preview.gridLinesY.map((y, index) => h("div", { key: `y${index}`, className: "SPR_meGridH", style: { top: `${y}px` } })),
+              tileset.preview.tiles.map((tile) =>
+                h("button", {
+                  key: tile.id,
+                  type: "button",
+                  className: "SPR_mePaletteCell",
+                  "data-selected": selectedTileIds.includes(tile.id) ? "true" : undefined,
+                  style: { left: `${tile.rect.x}px`, top: `${tile.rect.y}px`, width: `${tile.rect.width}px`, height: `${tile.rect.height}px` },
+                  title: `${tile.name}${tile.familyId === undefined ? "" : ` · ${tile.familyId}`}${tile.mask === undefined ? "" : ` · mask ${tile.mask}`}`,
+                  onClick: () => setSelectedTileIds((prev) => (prev.includes(tile.id) ? prev.filter((id) => id !== tile.id) : prev.concat(tile.id)))
+                })
+              )
+            ),
+            tileset.preview.warnings.length === 0 ? null : h("p", { className: "SPR_meWarn" }, tileset.preview.warnings.join("；")),
+            h(
+              "div",
+              { className: "SPR_toolbar" },
+              h("span", { className: "SPR_meHint" }, T("选中 {n0} 块", { n0: String(selectedTileIds.length) })),
+              families.length === 0
+                ? null
+                : families.map((family) =>
+                    h(
+                      Btn,
+                      {
+                        key: family.id,
+                        onClick: () => void patchTiles(tileset.id, selectedTileIds.map((id) => ({ id, familyId: family.id }))),
+                        disabled: selectedTileIds.length === 0
+                      },
+                      T("归入「{n0}」", { n0: family.name })
+                    )
+                  ),
+              h(Btn, { onClick: () => void patchTiles(tileset.id, selectedTileIds.map((id) => ({ id, familyId: undefined, mask: undefined }))), disabled: selectedTileIds.length === 0 }, T("清空分组"))
+            ),
+            families.length === 0
+              ? null
+              : h(
+                  "div",
+                  { className: "SPR_toolbar" },
+                  families.map((family) =>
+                    h(
+                      Btn,
+                      {
+                        key: family.id,
+                        onClick: () => void assignMasksInOrder(family.id, family.autotile)
+                      },
+                      T("给「{n0}」按顺序分配掩码", { n0: family.name })
+                    )
+                  )
+                )
+          );
+        })
+      );
+
+      const stageRules = h(
+        "div",
+        { className: "SPR_meStage" },
+        h(
+          "div",
+          { className: "SPR_meCard" },
+          h("h4", null, T("地形族与自动过渡")),
+          h("p", { className: "SPR_meHint" }, T("优先级大的族会朝优先级小的邻居长过渡块（草地 < 土路 < 水）。缺掩码的地方会回退成最近的一块，并在下面标出来。")),
+          h(
+            "div",
+            { className: "SPR_meFamilyEdit" },
+            (familyDraft === null ? families : familyDraft).map((family, index) =>
+              h(
+                "div",
+                { key: family.id || `f${index}`, className: "SPR_meFamilyEditRow" },
+                h("input", {
+                  className: "SPR_input SPR_meName",
+                  value: family.name,
+                  onChange: (event) => {
+                    const next = (familyDraft === null ? families : familyDraft).slice();
+                    next[index] = { ...next[index], name: event.target.value };
+                    setFamilyDraft(next);
+                  }
+                }),
+                h(
+                  "select",
+                  {
+                    className: "SPR_select",
+                    value: family.autotile,
+                    onChange: (event) => {
+                      const next = (familyDraft === null ? families : familyDraft).slice();
+                      next[index] = { ...next[index], autotile: event.target.value };
+                      setFamilyDraft(next);
+                    }
+                  },
+                  MAP_AUTOTILE_SCHEMES.map((scheme) => h("option", { key: scheme.key, value: scheme.key }, scheme.title))
+                ),
+                h(NumField, {
+                  label: T("优先级"),
+                  value: family.priority,
+                  onChange: (value) => {
+                    const next = (familyDraft === null ? families : familyDraft).slice();
+                    next[index] = { ...next[index], priority: value };
+                    setFamilyDraft(next);
+                  }
+                }),
+                h(Btn, {
+                  danger: true,
+                  onClick: () => {
+                    const next = (familyDraft === null ? families : familyDraft).filter((entry) => entry.id !== family.id);
+                    setFamilyDraft(next);
+                  }
+                }, T("移除"))
+              )
+            )
+          ),
+          h(
+            "div",
+            { className: "SPR_toolbar" },
+            h(
+              Btn,
+              {
+                onClick: () => {
+                  const next = (familyDraft === null ? families : familyDraft).slice();
+                  next.push({ id: `f${Date.now().toString(36)}`, name: T("新族"), autotile: "blob47", priority: next.length, color: "#3f9b2f" });
+                  setFamilyDraft(next);
+                }
+              },
+              T("加一个族")
+            ),
+            h(Btn, { primary: true, onClick: () => void saveFamilies(), disabled: familyDraft === null }, T("保存族"))
+          )
+        ),
+        h(
+          "div",
+          { className: "SPR_meCard" },
+          h("h4", null, T("掩码覆盖率")),
+          coverage.length === 0
+            ? h("p", { className: "SPR_meHint" }, T("还没有族。先加一个族，再把图块归进去。"))
+            : h(
+                "div",
+                { className: "SPR_meCoverage" },
+                coverage.map((row) =>
+                  h(
+                    "div",
+                    { key: row.familyId, className: "SPR_meCoverageRow", "data-ok": row.missing.length === 0 ? "true" : undefined },
+                    h("span", { className: "SPR_meName" }, row.name),
+                    h("span", null, `${row.assigned}/${row.expected}`),
+                    row.missing.length === 0 ? h("span", { className: "SPR_meOk" }, T("完整")) : h("span", { className: "SPR_meBad" }, T("缺 {n0} 块", { n0: String(row.missing.length) }))
+                  )
+                )
+              ),
+          project.previews.length === 0
+            ? null
+            : h(
+                "div",
+                { className: "SPR_meShots" },
+                project.previews.map((relative) =>
+                  h("a", { key: relative, href: `${assetBase}${relative}`, target: "_blank", rel: "noreferrer" }, h("img", { className: "SPR_meShot", src: `${assetBase}${relative}`, alt: relative }))
+                )
+              ),
+          h(
+            "div",
+            { className: "SPR_toolbar" },
+            h(Btn, { onClick: () => void runPreview(), busy: project.busy === true }, T("生成验收预览图")),
+            h(Btn, { onClick: () => void withApi(() => api.revealMapProject({ projectId })) }, T("在访达中打开项目目录"))
+          )
+        )
+      );
+
+      const stagePaint = h(
+        "div",
+        { className: "SPR_meStage" },
+        h(
+          "div",
+          { className: "SPR_meCard" },
+          h("h4", null, T("地图")),
+          mapList,
+          layerList
+        ),
+        h(
+          "div",
+          { className: "SPR_meCard" },
+          h("h4", null, T("调色板")),
+          h(
+            "select",
+            {
+              className: "SPR_select",
+              value: selectedTilesetId === null ? "" : selectedTilesetId,
+              onChange: (event) => setSelectedTilesetId(event.target.value === "" ? null : event.target.value)
+            },
+            h("option", { value: "" }, T("选择图集…")),
+            tilesets.map((tileset) => h("option", { key: tileset.id, value: tileset.id }, tileset.name))
+          ),
+          familyRow,
+          palette
+        ),
+        // 隐藏的图源：canvas 用它们当 drawImage 的源（避免 new Image 与克隆两份缓存）
+        h(
+          "div",
+          { style: { display: "none" } },
+          tilesets.map((tileset) =>
+            h("img", {
+              key: tileset.id,
+              // `data-tileset` 是画布归因用的：canvas 那边只拿到图源对象，
+              // 自检要靠这个属性把「这次 drawImage 用的是哪张图集」对上 host 的 legend
+              "data-tileset": tileset.id,
+              ref: (node) => {
+                imageRefs.current[tileset.id] = node;
+              },
+              src: `${assetBase}${tileset.file}`,
+              alt: "",
+              onLoad: () => setImagesReady((value) => value + 1)
+            })
+          )
+        ),
+        editor
+      );
+
+      const stageExport = h(
+        "div",
+        { className: "SPR_meStage" },
+        h(
+          "div",
+          { className: "SPR_meCard" },
+          h("h4", null, T("导出")),
+          h("p", { className: "SPR_meHint" }, T("全部本地计算，不花钱。导出目录是自包含的：图集 PNG 会一起复制过去，Tiled 直接能打开。")),
+          h(
+            "div",
+            { className: "SPR_meToolbar" },
+            [["pngMerged", T("合并 PNG（map.png）")], ["pngLayers", T("分层 PNG")], ["json", T("自有 JSON")], ["tiled", T("Tiled .tmj/.tsj")]].map(([key, label]) =>
+              h(
+                "label",
+                { key, className: "SPR_meCheck" },
+                h("input", {
+                  type: "checkbox",
+                  checked: exportFormats[key] === true,
+                  onChange: (event) => setExportFormats((prev) => ({ ...prev, [key]: event.target.checked }))
+                }),
+                label
+              )
+            ),
+            h(
+              "select",
+              { className: "SPR_select", value: String(exportScale), onChange: (event) => setExportScale(Number(event.target.value)) },
+              [1, 2, 3, 4].map((value) => h("option", { key: value, value: String(value) }, `${value}×`))
+            ),
+            h(Btn, { primary: true, onClick: () => void runExport(), busy: project.busy === true }, T("导出")),
+            h(Btn, { onClick: () => void withApi(() => api.revealMapProject({ projectId })) }, T("在访达中打开"))
+          ),
+          project.exportFiles.length === 0
+            ? h("p", { className: "SPR_meHint" }, T("还没有导出过。"))
+            : h(
+                "ul",
+                { className: "SPR_meFileList" },
+                project.exportFiles.map((file) =>
+                  h(
+                    "li",
+                    { key: file },
+                    h("a", { href: `${assetBase}${project.exportBase}${file}`, target: "_blank", rel: "noreferrer" }, file)
+                  )
+                )
+              )
+        )
+      );
+
+      return h(
+        "div",
+        { className: "SPR_moduleBody", "data-module": "map" },
+        h(
+          "div",
+          { className: "SPR_toolbar" },
+          h("strong", null, project.name),
+          h(
+            "select",
+            {
+              className: "SPR_select",
+              value: projectId,
+              onChange: (event) => void loadProject(event.target.value)
+            },
+            projects.map((entry) => h("option", { key: entry.id, value: entry.id }, entry.name))
+          ),
+          h(Btn, { onClick: createProject }, T("新建")),
+          h(Btn, { onClick: () => void loadProject(projectId, mapId) }, T("刷新状态")),
+          project.busy === true ? h("span", { className: "SPR_meBusy" }, T("任务进行中…")) : null
+        ),
+        stageTabs,
+        notice === null ? null : h("div", { className: `SPR_notice SPR_notice-${notice.kind}` }, notice.text),
+        project.warnings.length === 0
+          ? null
+          : h(
+              "ul",
+              { className: "SPR_meWarnings" },
+              project.warnings.map((text, index) => h("li", { key: index }, text))
+            ),
+        stage === "assets" ? stageAssets : stage === "rules" ? stageRules : stage === "paint" ? stagePaint : stageExport
       );
     }
 
@@ -12311,7 +13908,7 @@
             })
           ),
           hiddenNow.length === 0
-            ? h("p", { className: "SPR_hint" }, T("当前五个功能全部可见。"))
+            ? h("p", { className: "SPR_hint" }, T("当前功能全部可见。"))
             : h(
                 "p",
                 { className: "SPR_hint" },
@@ -12498,7 +14095,31 @@
         saveTileMapCells: (payload) => call("saveTileMapCells", payload),
         runTileExport: (payload) => call("runTileExport", payload),
         cancelTileJob: (payload) => call("cancelTileJob", payload),
-        revealTileProject: (payload) => call("revealTileProject", payload)
+        revealTileProject: (payload) => call("revealTileProject", payload),
+
+        // 地图编辑器（模块六）：全本地，没有一步收费
+        listMapProjects: () => call("listMapProjects"),
+        createMapProject: (payload) => call("createMapProject", { lang: activeLang(), ...payload }),
+        getMapProject: (payload) => call("getMapProject", { lang: activeLang(), ...payload }),
+        saveMapProject: (payload) => call("saveMapProject", payload),
+        deleteMapProject: (payload) => call("deleteMapProject", payload),
+        importMapTileset: (payload) => call("importMapTileset", payload),
+        saveMapTileset: (payload) => call("saveMapTileset", payload),
+        removeMapTileset: (payload) => call("removeMapTileset", payload),
+        saveMapFamilies: (payload) => call("saveMapFamilies", payload),
+        createMapDoc: (payload) => call("createMapDoc", payload),
+        saveMapDoc: (payload) => call("saveMapDoc", payload),
+        deleteMapDoc: (payload) => call("deleteMapDoc", payload),
+        duplicateMapDoc: (payload) => call("duplicateMapDoc", payload),
+        applyMapOps: (payload) => call("applyMapOps", payload),
+        mapUndo: (payload) => call("mapUndo", payload),
+        mapRedo: (payload) => call("mapRedo", payload),
+        mapPlan: (payload) => call("mapPlan", payload),
+        runMapPreview: (payload) => call("runMapPreview", payload),
+        runMapExport: (payload) => call("runMapExport", payload),
+        cancelMapJob: (payload) => call("cancelMapJob", payload),
+        setMapApproved: (payload) => call("setMapApproved", payload),
+        revealMapProject: (payload) => call("revealMapProject", payload)
       };
 
       // ── 深链接：会话里的链接点一下切到本插件页面 ─────────────────────
@@ -12565,7 +14186,14 @@
     bundleModule.exports.GAME_STUDIO_PANEL_ID = GAME_STUDIO_PANEL_ID;
     // 仅测试用把手：三个模块组件在工厂闭包里，脚本要能拿出来单独渲染
     // （见 scripts/verify-feedback.mjs）。运行时没有任何调用点。
-    bundleModule.exports.__test = { StudioPanel, TileModule, ImageModule, SequenceModule, RigSemanticsPanel, usePendingTasks, LoadingOverlay, MediaBox, BusyBtn, BusyBadge, NumField, ZoomableImage, CSS, subscribeIntent, parseIntents, openStudioIntent, OPEN_QUERY_KEY, StudioGlyph, StudioGlyphIcon, publishHiddenModules, useHiddenModules, visibleModulesOf, normalizeHiddenKeys, ConfigSection };
+    /**
+     * 给自检用的把手。
+     *
+     * `MAP_*` 那几个是**只读的坐标函数**：`verify-map-client.mjs` 拿宿主
+     * `mapgeom` / `mapdoc` 的真实现做黄金对照逐点比对 —— 界面复刻的那部分几何
+     * 必须有守门的，否则「预览与导出错位」会以静默的方式回来。
+     */
+    bundleModule.exports.__test = { StudioPanel, TileModule, ImageModule, SequenceModule, RigSemanticsPanel, MapModule, MAP_pointToCell, MAP_cellAnchor, MAP_cellTopLeft, MAP_lineCells, MAP_visibleChunks, MAP_chunkKey, usePendingTasks, LoadingOverlay, MediaBox, BusyBtn, BusyBadge, NumField, ZoomableImage, CSS, subscribeIntent, parseIntents, openStudioIntent, OPEN_QUERY_KEY, StudioGlyph, StudioGlyphIcon, publishHiddenModules, useHiddenModules, visibleModulesOf, normalizeHiddenKeys, ConfigSection };
     return bundleModule.exports;
   }
 });

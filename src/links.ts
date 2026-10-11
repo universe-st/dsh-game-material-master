@@ -31,8 +31,8 @@ export const OPEN_QUERY_KEY = "dsh-gmm";
 /** 工作台在 `main` 槽里的 key，也是侧栏 `sidebar.panellist` 的 id。 */
 export const PANEL_KEY = "gameStudio";
 
-/** 五个模块的 key。 */
-export const STUDIO_MODULES = ["sprite", "image", "sequence", "rig", "tile"] as const;
+/** 六个模块的 key。 */
+export const STUDIO_MODULES = ["sprite", "image", "sequence", "rig", "tile", "map"] as const;
 export type StudioModule = (typeof STUDIO_MODULES)[number];
 
 /** 八方向图的四个阶段。 */
@@ -47,14 +47,22 @@ export const SPRITE_STAGES = ["images", "videos", "frames", "sheet"] as const;
  */
 export const TILE_STAGES = ["generate", "review", "map", "export"] as const;
 
+/**
+ * 地图编辑器（模块六）的四个阶段。
+ *
+ * 与模块五（AI 生成地块）不同，这条链路**全本地**：导入图集 → 定过渡规则 →
+ * 画地图 → 导出。所以阶段名是素材 / 规则 / 地图 / 导出。
+ */
+export const MAP_STAGES = ["assets", "rules", "paint", "export"] as const;
+
 /** 一次「打开界面」的意图。字段全部可选：缺省表示保持界面当前状态。 */
 export interface OpenIntent {
   module?: StudioModule;
   /** 模块一的项目 id（p…）。 */
   projectId?: string;
-  /** 模块二 / 三 / 四 / 五的任务 id（i… / s… / r… / t…）。 */
+  /** 模块二 / 三 / 四 / 五 / 六的任务 id（i… / s… / r… / t… / m…）。 */
   jobId?: string;
-  /** 阶段：八方向图 images/videos/frames/sheet；地图地块 template/generate/review/map。 */
+  /** 阶段：八方向图 images/videos/frames/sheet；地图地块 generate/review/map/export；地图编辑器 assets/rules/paint/export。 */
   stage?: string;
   /** 需要刻意高亮的方位（八方向图）。 */
   direction?: string;
