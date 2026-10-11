@@ -50,6 +50,9 @@ and move on automatically, or stop at every step and wait for your go-ahead.
 > it directly). Both square top-down and 2:1 isometric grids are supported, and **not a single model call is
 > made — so nothing is billed**.
 
+> 🏷️ **Creating anything in any of the six modules asks for a name first**: the field is pre-filled with the
+> default (just press Enter to keep it), and cancelling creates nothing. Map projects can also be renamed later.
+
 > ⚠️ **Module ④ "Rigged animation" is still experimental and not yet finished**: the quality of part extraction
 > depends on the image model, automatic assembly and bone inference frequently need manual correction on real
 > character art (agent visual priors or manual dragging), and the exported Spine / DragonBones output has not

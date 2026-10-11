@@ -102,6 +102,7 @@
       "已创建新项目": "New project created",
       "确定删除项目「{n0}」？项目目录会被整个移除，无法撤销。": "Delete project \"{n0}\"? The whole project directory is removed, and this cannot be undone.",
       "新的项目名": "New project name",
+      "新项目的名字": "Name for the new project",
       "读取文件失败": "Failed to read file",
       "已上传源图：{n0}": "Source image uploaded: {n0}",
       "提示词已保存": "Prompt saved",
@@ -758,6 +759,10 @@
       "已新建骨骼动画任务": "Skeletal animation job created",
       "删除任务「{n0}」？产物文件会一并删除。": "Delete job \"{n0}\"? Its output files will be deleted as well.",
       "新的任务名": "New job name",
+      "新图片任务的名字": "Name for the new image job",
+      "新序列帧任务的名字": "Name for the new sequence job",
+      "新骨骼动画任务的名字": "Name for the new skeletal animation job",
+      "新地图项目的名字": "Name for the new map project",
       "已重命名": "Renamed",
       "已上传参考图：{n0}": "Reference image uploaded: {n0}",
       "已上传 {n0} 个部件（文件名即部件名）": "Uploaded {n0} parts (the file name is used as the part name)",
@@ -2106,8 +2111,15 @@
 .SPR_meWarnings{margin:0;padding-left:18px;font-size:11px;color:var(--dsw-alias-label-secondary)}
 .SPR_meSliceRow{display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end}
 .SPR_mePaletteWrap{display:flex;flex-direction:column;gap:6px}
-.SPR_mePalette{position:relative;align-self:flex-start;line-height:0;background:repeating-conic-gradient(#0000 0% 25%,#00000010 0% 50%) 50%/12px 12px;border:1px solid var(--dsw-alias-border-l2)}
-.SPR_mePaletteImg{image-rendering:pixelated;max-width:100%;display:block}
+/*
+ * 盒子由 aspect-ratio + 最大宽度定死（见 mapPaletteBox），图与叠加层**共用同一个盒子**，
+ * 图块的 left/top/width/height 一律写百分比 —— 图被缩放时叠加层跟着缩放。
+ * ⚠️ 别再改回「图片原图像素」定位：.SPR_mePaletteImg 会被面板宽度压小，
+ * 而 px 定位不跟着缩，2048px 的图集缩到 893px 后格子仍画在 0..2048 的原坐标，
+ * 于是高亮框与可见图块错位、面板被撑到 2049px 高（真机：上传 2048×2048 后「显示就坏了」）。
+ */
+.SPR_mePalette{position:relative;align-self:flex-start;line-height:0;overflow:hidden;background:repeating-conic-gradient(#0000 0% 25%,#00000010 0% 50%) 50%/12px 12px;border:1px solid var(--dsw-alias-border-l2)}
+.SPR_mePaletteImg{image-rendering:pixelated;width:100%;height:100%;display:block}
 .SPR_mePaletteCell{position:absolute;padding:0;margin:0;border:none;background:transparent;cursor:pointer}
 .SPR_mePaletteCell:hover{background:rgba(255,196,0,.35);outline:1px solid rgba(255,196,0,.9)}
 .SPR_mePaletteCell[data-selected="true"]{background:rgba(255,120,0,.45);outline:1px solid rgba(255,120,0,1)}
@@ -2457,6 +2469,46 @@
       if (error instanceof Error) return error.message;
       if (error !== null && typeof error === "object" && typeof (error as any).message === "string") return (error as any).message;
       return String(error);
+    }
+
+    /**
+     * 新建项目 / 任务时问一个名字（与「重命名」同一套 `window.prompt` 交互）。
+     *
+     * 返回值语义是**三态**，调用方必须照着写：
+     *   · `null`      —— 用户点了取消 → **不要创建**（点了取消却多出一个项目，会被当成 bug）
+     *   · 空串/全空白 —— 用 `fallback`（默认名）
+     *   · 其余        —— 用户输入的名字（已 trim）
+     * 没有 `window.prompt` 的宿主退回默认名，不阻断创建。
+     */
+    function askNewName(title, fallback) {
+      if (typeof window === "undefined" || typeof window.prompt !== "function") return fallback;
+      const value = window.prompt(title, fallback);
+      if (value === null) return null;
+      const trimmed = String(value).trim();
+      return trimmed === "" ? fallback : trimmed;
+    }
+
+    /** 图集预览（调色板 / 切分预览）里图片的最长边上限。 */
+    const MAP_PALETTE_MAX = 420;
+
+    /**
+     * 图集预览的盒子尺寸。
+     *
+     * 只约束**宽度**、高度交给 `aspect-ratio` 推：max-width 由「最长边不超过
+     * MAP_PALETTE_MAX」反推得到，所以宽高两边都守得住，且**永远不会破坏宽高比**。
+     * 给盒子直接写 `max-height` 就会：宽度仍是 100% 时被 max-height 一夹，比例塌掉，
+     * 百分比定位的图块又和图片错位（正是下面 `.SPR_mePalette` 注释里那个真机 bug）。
+     */
+    function mapPaletteBox(imageWidth, imageHeight) {
+      const width = imageWidth > 0 ? imageWidth : 1;
+      const height = imageHeight > 0 ? imageHeight : 1;
+      const maxWidth = Math.max(1, Math.round((MAP_PALETTE_MAX * width) / Math.max(width, height)));
+      return { width: "100%", maxWidth: `${maxWidth}px`, aspectRatio: `${width} / ${height}` };
+    }
+
+    /** 原图像素 → 盒子百分比：叠加层必须按百分比写，才会跟着被缩放的图片一起缩。 */
+    function mapPct(value, total) {
+      return total > 0 ? `${(value / total) * 100}%` : "0%";
     }
 
     function statusKind(node) {
@@ -3383,15 +3435,18 @@
         [api, projectId, loadProject]
       );
 
-      const createProject = () =>
-        withApi(
+      const createProject = async () => {
+        const name = askNewName(T("新项目的名字"), T("角色 {n0}", { n0: new Date().toLocaleString("zh-CN", { hour12: false }) }));
+        if (name === null) return;
+        await withApi(
           async () => {
-            const created = await api.createProject({ name: T("角色 {n0}", { n0: new Date().toLocaleString("zh-CN", { hour12: false }) }) });
+            const created = await api.createProject({ name });
             await refreshProjects();
             setProjectId(created.projectId);
           },
           { notice: T("已创建新项目") }
         );
+      };
 
       const deleteCurrent = async () => {
         if (project === null) return;
@@ -6023,6 +6078,25 @@
 
       const mapId = doc === null || doc === undefined ? null : doc.id;
 
+      /**
+       * 作业进行中就轮询。
+       *
+       * 验收预览 / 导出是宿主上的异步作业（`runMapPreview` / `runMapExport` 只回
+       * `started`），提交完那次重读拿到的还是「进行中」，此后**再没有人刷新**：
+       * 表现是顶部「任务进行中…」一直挂着、导出文件列表永远是空的。
+       * 真机实测：文件其实早就写到磁盘了，点一下「刷新状态」才全部出现。
+       * 模块⑤与②③④都有这个轮询，这里补上（`busy` 转 false 时 effect 自己收尾）。
+       */
+      const projectBusy = view !== null && view.busy === true;
+      React.useEffect(() => {
+        if (projectBusy !== true || projectId === null) return;
+        const timer = setInterval(() => {
+          void loadProject(projectId, mapId);
+        }, 1500);
+        return () => clearInterval(timer);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+      }, [projectBusy, projectId, mapId, loadProject]);
+
       // ── 计划 chunk 的按需拉取 ────────────────────────────────────────────
       const requestChunks = React.useCallback(
         async (keys) => {
@@ -6044,6 +6118,21 @@
         },
         [api, projectId, mapId, chunks]
       );
+
+      /**
+       * 自动选中第一张图集。
+       *
+       * `selectedTilesetId` 默认是 `null`，而「③ 地图」的调色板与图集卡片上的
+       * 「给『族』按顺序分配掩码」都依赖它 —— 不自动选，用户点分配掩码会**静默没反应**
+       * （真机实测：上传图集 → 加族 → 点分配掩码，覆盖率一直是 0/47，界面连报错都没有）。
+       * 依赖写成 id 串：只在图集增删时重挑，用户手动把调色板选回「选择图集…」不会被反复覆盖。
+       */
+      const tilesetIds = (view === null ? [] : view.tilesets).map((entry) => entry.id).join(",");
+      React.useEffect(() => {
+        const list = view === null ? [] : view.tilesets;
+        setSelectedTilesetId((prev) => (prev !== null && list.some((entry) => entry.id === prev) ? prev : list.length > 0 ? list[0].id : null));
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+      }, [tilesetIds]);
 
       // ── 画布：视口渲染（大地图也不卡）─────────────────────────────────────
       const draw = React.useCallback(() => {
@@ -6404,14 +6493,27 @@
         setView((prev) => (prev === null ? prev : { ...prev, doc: { ...prev.doc, canUndo: result.canUndo, canRedo: result.canRedo } }));
       };
 
-      const createProject = () =>
-        withApi(async () => {
-          const name = T("我的地图");
+      const createProject = async () => {
+        const name = askNewName(T("新地图项目的名字"), T("我的地图"));
+        if (name === null) return;
+        await withApi(async () => {
           const created = await api.createMapProject({ name, grid: { kind: "square", tileWidth: 32, tileHeight: 32, heightStep: 16 } });
           setProjects((prev) => [{ id: created.id, name: created.name, updatedAt: created.updatedAt }, ...prev]);
           await loadProject(created.id);
           setStage("assets");
         });
+      };
+
+      const renameProject = async () => {
+        if (project === null) return;
+        // eslint-disable-next-line no-alert
+        const next = typeof window === "undefined" ? null : window.prompt(T("新的项目名"), project.name);
+        if (next === null || next.trim() === "") return;
+        const result = await withApi(() => api.saveMapProject({ projectId: project.id, name: next.trim() }), { notice: T("已重命名") });
+        if (result === undefined) return;
+        await loadList();
+        await loadProject(project.id);
+      };
 
       const importFiles = async (files) => {
         if (files === undefined || files.length === 0 || projectId === null) return;
@@ -6583,7 +6685,7 @@
           { className: "SPR_mePaletteWrap" },
           h(
             "div",
-            { className: "SPR_mePalette" },
+            { className: "SPR_mePalette", style: mapPaletteBox(tileset.imageWidth, tileset.imageHeight) },
             h("img", { className: "SPR_mePaletteImg", src: `${assetBase}${tileset.file}`, alt: tileset.name }),
             tileset.preview.tiles.map((tile) =>
               h("button", {
@@ -6591,10 +6693,10 @@
                 type: "button",
                 className: "SPR_mePaletteCell",
                 style: {
-                  left: `${tile.rect.x}px`,
-                  top: `${tile.rect.y}px`,
-                  width: `${tile.rect.width}px`,
-                  height: `${tile.rect.height}px`,
+                  left: mapPct(tile.rect.x, tileset.imageWidth),
+                  top: mapPct(tile.rect.y, tileset.imageHeight),
+                  width: mapPct(tile.rect.width, tileset.imageWidth),
+                  height: mapPct(tile.rect.height, tileset.imageHeight),
                   background: tile.familyId === undefined ? "transparent" : "rgba(120,200,255,0.16)"
                 },
                 title: `${tile.name} · ${tile.familyId === undefined ? T("未分组") : tile.familyId}${tile.mask === undefined ? "" : ` · mask ${tile.mask}`}`,
@@ -6862,17 +6964,22 @@
             })),
             h(
               "div",
-              { className: "SPR_mePalette" },
+              { className: "SPR_mePalette", style: mapPaletteBox(tileset.imageWidth, tileset.imageHeight) },
               h("img", { className: "SPR_mePaletteImg", src: `${assetBase}${tileset.file}`, alt: tileset.name }),
-              tileset.preview.gridLinesX.map((x, index) => h("div", { key: `x${index}`, className: "SPR_meGridV", style: { left: `${x}px` } })),
-              tileset.preview.gridLinesY.map((y, index) => h("div", { key: `y${index}`, className: "SPR_meGridH", style: { top: `${y}px` } })),
+              tileset.preview.gridLinesX.map((x, index) => h("div", { key: `x${index}`, className: "SPR_meGridV", style: { left: mapPct(x, tileset.imageWidth) } })),
+              tileset.preview.gridLinesY.map((y, index) => h("div", { key: `y${index}`, className: "SPR_meGridH", style: { top: mapPct(y, tileset.imageHeight) } })),
               tileset.preview.tiles.map((tile) =>
                 h("button", {
                   key: tile.id,
                   type: "button",
                   className: "SPR_mePaletteCell",
                   "data-selected": selectedTileIds.includes(tile.id) ? "true" : undefined,
-                  style: { left: `${tile.rect.x}px`, top: `${tile.rect.y}px`, width: `${tile.rect.width}px`, height: `${tile.rect.height}px` },
+                  style: {
+                    left: mapPct(tile.rect.x, tileset.imageWidth),
+                    top: mapPct(tile.rect.y, tileset.imageHeight),
+                    width: mapPct(tile.rect.width, tileset.imageWidth),
+                    height: mapPct(tile.rect.height, tileset.imageHeight)
+                  },
                   title: `${tile.name}${tile.familyId === undefined ? "" : ` · ${tile.familyId}`}${tile.mask === undefined ? "" : ` · mask ${tile.mask}`}`,
                   onClick: () => setSelectedTileIds((prev) => (prev.includes(tile.id) ? prev.filter((id) => id !== tile.id) : prev.concat(tile.id)))
                 })
@@ -7142,6 +7249,7 @@
             projects.map((entry) => h("option", { key: entry.id, value: entry.id }, entry.name))
           ),
           h(Btn, { onClick: createProject }, T("新建")),
+          h(Btn, { onClick: () => void renameProject() }, T("重命名")),
           h(Btn, { onClick: () => void loadProject(projectId, mapId) }, T("刷新状态")),
           project.busy === true ? h("span", { className: "SPR_meBusy" }, T("任务进行中…")) : null
         ),
@@ -9199,12 +9307,15 @@
         return tasks.run(feedback.key, feedback.label, invoke);
       };
 
-      const create = () =>
-        run(async () => {
-          const created = await api.createImageJob({ name: T("图片 {n0}", { n0: new Date().toLocaleString("zh-CN", { hour12: false }) }) });
+      const create = async () => {
+        const name = askNewName(T("新图片任务的名字"), T("图片 {n0}", { n0: new Date().toLocaleString("zh-CN", { hour12: false }) }));
+        if (name === null) return;
+        await run(async () => {
+          const created = await api.createImageJob({ name });
           await refresh();
           setJobId(created.jobId);
         }, T("已新建图片任务"), { key: K_IMG_CREATE, label: T("正在新建任务…") });
+      };
 
       const saveJob = (patch) => run(() => api.saveImageJob({ jobId: job.id, ...patch }), T("已保存"));
 
@@ -9625,12 +9736,15 @@
         return value;
       };
 
-      const create = () =>
-        run(async () => {
-          const created = await api.createSequenceJob({ name: T("序列帧 {n0}", { n0: new Date().toLocaleString("zh-CN", { hour12: false }) }) });
+      const create = async () => {
+        const name = askNewName(T("新序列帧任务的名字"), T("序列帧 {n0}", { n0: new Date().toLocaleString("zh-CN", { hour12: false }) }));
+        if (name === null) return;
+        await run(async () => {
+          const created = await api.createSequenceJob({ name });
           await refresh();
           setJobId(created.jobId);
         }, T("已新建序列帧任务"), { key: K_SEQ_CREATE, label: T("正在新建任务…") });
+      };
 
       const saveJob = (patch) => run(() => api.saveSequenceJob({ jobId: job.id, ...patch }), undefined);
 
@@ -13021,10 +13135,12 @@
         return tasks.run(feedback, label, invoke);
       };
 
-      const createJob = () =>
-        run(
+      const createJob = async () => {
+        const name = askNewName(T("新骨骼动画任务的名字"), T("新骨骼动画任务"));
+        if (name === null) return;
+        await run(
           async () => {
-            const created = await api.createRigJob({ name: T("新骨骼动画任务") });
+            const created = await api.createRigJob({ name });
             await refresh();
             setJobId(created.jobId);
             setStage("parts");
@@ -13033,6 +13149,7 @@
           T("已新建骨骼动画任务"),
           K_RIG_CREATE
         );
+      };
 
       const deleteJob = async () => {
         if (job === null) return;
