@@ -70,7 +70,7 @@ node scripts/verify-tile-client.mjs    # 地图地块界面真渲染（200 项�
 node scripts/verify-map.mjs            # 地图编辑器几何 / 自动过渡 / 切分内核（100 项，含 4 条反向验证）
 node scripts/verify-map-pipeline.mjs   # 地图编辑器数据层与流水线（128 项，含导出的 .tmj/.tsj 逐字段校验）
 node scripts/verify-map-gateway.mjs    # 地图编辑器走真实网关（81 项，含资源路由 403 / 目录穿越 / 并发提交）
-node scripts/verify-map-client.mjs     # 地图编辑器界面真渲染 + 黄金对照（79 项：坐标函数与宿主逐点一致、drawImage 序列 == 宿主计划、实验性弹窗、名词速查 / 删除入口 / 小字注释）
+node scripts/verify-map-client.mjs     # 地图编辑器界面真渲染 + 黄金对照（89 项：坐标函数与宿主逐点一致、drawImage 序列 == 宿主计划、实验性弹窗、名词速查 / 删除入口 / 小字与悬停解释 / 空态四步引导）
 ```
 
 `scripts/find-missing-i18n.mjs` 不是断言脚本，是**工具**：列出所有还没进词条表的
@@ -133,7 +133,7 @@ Conventional Commits，中文描述：`feat(rig): …` / `docs: …` / `fix(spri
 > 支持正方形俯视与 2:1 等距两种格网。架构上立了四条规矩：客户端只执行宿主下发的绘制计划
 > （预览 = 导出）、画布渲染（chunk 化 + 视口裁剪）、宿主是唯一写者（op + 脏 chunk 补丁 +
 > 逆操作撤销栈）、派生数据不落盘。`tilemedia.ts` 改名 `bitmap.ts`（全插件共用）。
-> 新增 4 个自检脚本（388 项）+ `e2e-map.mjs`；既有脚本里「五个模块」的硬编码改为按
+> 新增 4 个自检脚本（398 项）+ `e2e-map.mjs`；既有脚本里「五个模块」的硬编码改为按
 > `STUDIO_MODULES` 派生。模块五（地图地块）保留不废弃。
 
 发布时按下面的流程走，并**把这段挪进上面的「已发布版本」表**（补上 UTC 时间）。

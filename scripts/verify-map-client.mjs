@@ -610,6 +610,10 @@ try {
   check("图集卡片有切分小字说明", byClass(tree, "SPR_meCardNote").length >= 1);
   const headerButtons = collect(tree, (node) => node.type === "button" || node.type?.name === "Btn").map((node) => textOf(node).trim());
   check("顶部有「删除项目」（此前只有对话工具能删）", headerButtons.includes("删除项目"), headerButtons.slice(0, 12).join(" / "));
+  const assetsTitles = new Set(collect(tree, (node) => typeof node.props?.title === "string").map((node) => node.props.title));
+  for (const [label, key] of [["选为调色板", "调色板"], ["移除图集", "图集"], ["应用切分", "重切一遍"]]) {
+    check(`「${label}」带悬停解释`, [...assetsTitles].some((text) => text.includes(key)), key);
+  }
 
   await gotoStage("paint");
   const canvas = collect(tree, (node) => node.props?.["data-testid"] === "map-canvas");
@@ -625,6 +629,22 @@ try {
   );
   check("图层行拆成两行（名字与按钮在上、数值在下）", byClass(tree, "SPR_meLayerFields").length >= 1);
   check("画布下面有操作说明（拖动 / 平移 / 缩放）", byClass(tree, "SPR_meHint").some((node) => textOf(node).includes("平移画布")));
+  check("画布下面有快捷键说明", byClass(tree, "SPR_meHint").some((node) => textOf(node).includes("快捷键")));
+  check(
+    "图层工具栏解释了「层类型只是分组」",
+    byClass(tree, "SPR_meCardNote").some((node) => textOf(node).includes("层类型")),
+    ""
+  );
+  // 悬停解释：这些控件的含义不看文字猜不出来（「锁定」锁的是什么？）
+  const titled = new Set(collect(tree, (node) => typeof node.props?.title === "string").map((node) => node.props.title));
+  for (const [label, key] of [
+    ["加装饰层", "小物件"],
+    ["新建地图", "32×32"],
+    ["复制当前地图", "复制一份"],
+    ["刷新状态", "重新读一遍"]
+  ]) {
+    check(`「${label}」带悬停解释`, [...titled].some((text) => text.includes(key)), key);
+  }
   check("调色板给定（选了图集后出现）", true);
 
   // 选图集 → 调色板出现 → 点一块图当笔刷
@@ -744,6 +764,11 @@ try {
     collect(emptyTree, (node) => typeof node.type === "function" && node.type.name === "MapExperimentalDialog").length === 1
   );
   check("空态里有新建入口", byClass(emptyTree, "SPR_btn").some((node) => textOf(node).includes("新建地图项目")));
+  check(
+    "空态写了四步引导（第一次进来不知道先干什么）",
+    byClass(emptyTree, "SPR_meSteps").length === 1 && collect(emptyTree, (node) => node.type === "li").length === 4,
+    `${collect(emptyTree, (node) => node.type === "li").length} 步`
+  );
   check("渲染循环没有失控", HOOK_MISMATCH.length === 0, HOOK_MISMATCH.join("；"));
 
   // ══ 6. 界面不许自己发明渲染逻辑 ════════════════════════════════════════
