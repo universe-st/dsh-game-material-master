@@ -568,14 +568,16 @@ try {
     check("弹窗有关闭按钮，点了会回调 onClose", gate.closers.length > 0 && gate.closed === true, `${gate.closers.length} 个按钮 closed=${gate.closed}`);
   }
   check("有地图项目被选中", textOf(tree).includes("客户端自检"), textOf(tree).slice(0, 80));
-  check("四个阶段页签都在", byClass(tree, "SPR_stageTab").length === 4, `${byClass(tree, "SPR_stageTab").length} 个`);
+  check("四个阶段页签都在（用模块五同款 .SPR_step 样式）", byClass(tree, "SPR_step").length === 4, `${byClass(tree, "SPR_step").length} 个`);
+  check("阶段条不是自造类名", byClass(tree, "SPR_stageTab").length === 0 && byClass(tree, "SPR_stages").length === 0);
+  check("阶段说明不在阶段条里（用 title + 内容区一行 hint）", byClass(tree, "SPR_hint").length >= 1);
   check("① 图集阶段能看到导入入口", collect(tree, (node) => node.props?.["data-testid"] === "map-tileset-input").length === 1);
   check("切分参数输入都在（格宽/格高/边距/间距）", byClass(tree, "SPR_meSliceRow").length >= 1);
   check("警告列表（或为空）不崩", Array.isArray(byClass(tree, "SPR_meWarnings")));
 
   /** 点某个阶段页签。 */
   async function gotoStage(key) {
-    const tabs = byClass(tree, "SPR_stageTab");
+    const tabs = byClass(tree, "SPR_step");
     const index = ["assets", "rules", "paint", "export"].indexOf(key);
     tabs[index].props.onClick();
     tree = await renderTree(() => MapModule({ api }));
@@ -726,6 +728,66 @@ try {
   check("模块六里没有自动过渡的归约逻辑", !/canonicalBlobMask|BLOB47_MASKS\s*=/.test(mapSource));
   check("模块六里没有自己算裁剪包围盒", !/measureAssemblyBounds|trimTransparent/.test(mapSource));
   check("模块六里没有自造坐标变换（只允许那四个 MAP_ 函数）", !/layoutOf|tileOriginAt\(/.test(mapSource));
+
+  /**
+   * ⚠️ 用到的每个 `SPR_` 类都必须真的有 CSS 规则，或者本来就是个纯文本容器。
+   *
+   * 这条是**真机打脸**换来的：模块六一度用了自造的 `SPR_stages` / `SPR_stageTab` /
+   * `SPR_stageTitle`（一个 CSS 规则都没有 → 阶段条塌成几个 58px 小按钮、文字全叠住），
+   * 还复用了**已存在**的 `SPR_stageHint`（那是「绝对定位铺满容器」的蒙层样式）——
+   * 结果所有阶段说明叠在面板正中间，整个面板看着就是坏的。
+   * 自检当时全绿：它只断言「元素在不在」，从来没人问过「这个类有没有样式」。
+   */
+  // 注释里会写到这些坑（「别再用 SPR_stageHint」），所以先把注释去掉再扫
+  const mapCode = mapSource
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^[ \t]*\/\/.*$/gm, "");
+  const styled = new Set();
+  for (const match of clientSource.matchAll(/\.(SPR_[A-Za-z0-9_-]+)/g)) styled.add(match[1]);
+  // 这几个在本插件里一直是无样式容器（老模块也在用），单独列出来免得误报
+  const intentionallyUnstyled = new Set(["SPR_moduleBody", "SPR_notice", "SPR_select"]);
+  const usedClasses = new Set();
+  for (const match of mapCode.matchAll(/SPR_[A-Za-z0-9_-]+/g)) {
+    // `SPR_step-${status}` / `SPR_notice-${kind}` 这种是模板片段，不是真类名
+    if (match[0].endsWith("-")) continue;
+    usedClasses.add(match[0]);
+  }
+  const unstyled = [...usedClasses].filter((name) => !styled.has(name) && !intentionallyUnstyled.has(name)).sort();
+  check(
+    `模块六用到的 ${usedClasses.size} 个类都有 CSS 规则（或本来无样式）`,
+    unstyled.length === 0,
+    unstyled.length === 0 ? "" : `没有样式：${unstyled.join("、")}`
+  );
+  check(
+    "模块六没有复用八方向图那个蒙层样式 SPR_stageHint",
+    !mapCode.includes("SPR_stageHint"),
+    "复用它会把阶段说明绝对定位铺满容器，整个面板看着是坏的"
+  );
+  /**
+   * ⚠️ 橡皮**不需要**笔刷。这条是真机踩出来的：判断写成 `brush === null` 直接返回，
+   * 于是刚进面板还没选过图时，橡皮拖半天一点反应都没有、也不报错。
+   */
+  check(
+    "橡皮的可用性判断不依赖笔刷",
+    /needsBrush\s*=\s*\(name\)\s*=>/.test(mapSource) && /tool === "erase" \? 0 : \(brush === null \? 0 : brush\.tile\)/.test(mapSource),
+    "橡皮应该只要求「有图层」，不要求先选笔刷"
+  );
+  /**
+   * ⚠️ 一次拖拽 = **一步**撤销。拖动时 op 是每 ~60ms 批量提交的，不带笔画 id
+   * 就会被拆成好几条历史（真机实测：擦一条线要按 4 次撤销才回去）。
+   */
+  check(
+    "拖拽带笔画 id（一次拖拽合并成一步撤销）",
+    /stroke: ops\[0\]\?\.stroke/.test(mapSource) && /currentStroke\.current \?\? stroke/.test(mapSource),
+    "少了它，一笔拖拽会变成好几步撤销"
+  );
+  check("wire 的 applyMapOps schema 声明了 stroke（不声明会被静默丢掉）", readFileSync(fileURLToPath(new URL("../src/wire.ts", import.meta.url)), "utf8").includes("stroke: z.string().optional()"));
+
+  check(
+    "阶段条用的是模块五同款 .SPR_step（有现成样式）",
+    mapCode.includes('className: "SPR_steps"') && mapCode.includes("SPR_step-active"),
+    "自造类名不会有 CSS"
+  );
 } finally {
   if (projectId !== "") await mapgen.deleteMapProject(projectId).catch(() => undefined);
   await rm(HOME, { recursive: true, force: true }).catch(() => undefined);

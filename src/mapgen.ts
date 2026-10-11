@@ -298,9 +298,22 @@ export async function summarizeMapProject(project: MapProject): Promise<MapProje
 }
 
 export async function deleteMapProject(id: string): Promise<void> {
-  docCache.clear();
+  /**
+   * ⚠️ 先把**还没落盘的防抖定时器**停掉。
+   *
+   * 不停的话，用户删完项目、目录已经移走，定时器几秒后照样 fire → 往不存在的
+   * 目录里 rename，抛 ENOENT。那是**未处理的 promise 拒绝**（自检里直接把整个
+   * 脚本打挂，真机上只是控制台一声闷响，但会污染日志）。
+   */
   const prefix = `${id}/`;
+  for (const [key, state] of [...docWrites.entries()]) {
+    if (!key.startsWith(prefix)) continue;
+    if (state.timer !== null) clearTimeout(state.timer);
+    docWrites.delete(key);
+  }
+  for (const key of [...docCache.keys()]) if (key.startsWith(prefix)) docCache.delete(key);
   for (const key of [...history.keys()]) if (key.startsWith(prefix)) history.delete(key);
+  for (const key of [...revisions.keys()]) if (key.startsWith(prefix)) revisions.delete(key);
   await rm(mapProjectDir(id), { recursive: true, force: true });
 }
 
@@ -358,7 +371,7 @@ function scheduleDocWrite(projectId: string, doc: MapDoc): void {
   const elapsed = now - state.lastWrite;
   if (elapsed >= WRITE_MAX_LATENCY_MS) {
     state.lastWrite = now;
-    void writeMapDoc(projectId, doc);
+    void writeMapDoc(projectId, doc).catch(() => undefined);
     return;
   }
   state.pending = true;
@@ -367,7 +380,7 @@ function scheduleDocWrite(projectId: string, doc: MapDoc): void {
     state.timer = null;
     state.lastWrite = Date.now();
     state.pending = false;
-    void writeMapDoc(projectId, doc);
+    void writeMapDoc(projectId, doc).catch(() => undefined);
   }, Math.max(WRITE_IDLE_MS, WRITE_MAX_LATENCY_MS - elapsed));
   if (typeof state.timer.unref === "function") state.timer.unref();
 }
@@ -411,6 +424,14 @@ interface HistoryEntry {
   redo: MapOp[];
   /** 结构操作：整份快照（图层增删 / 改尺寸这类没法用 op 表达的）。 */
   snapshot?: { before: MapDoc; after: MapDoc };
+  /**
+   * 这一条属于哪一笔操作（一次拖拽 / 一次填充）。
+   *
+   * ⚠️ 拖动时 op 是每 ~60ms 批量提交的，如果每次都压一条历史，**一次拖拽会变成
+   * 好几步撤销**（真机实测：擦一条线要按 4 次撤销才回到原样）。同一个 `stroke`
+   * 的后续提交直接**并进上一条**，撤销粒度才等于「一笔」。
+   */
+  stroke?: string;
 }
 
 interface HistoryState {
@@ -429,12 +450,27 @@ function estimateEntryBytes(entry: HistoryEntry, doc: MapDoc): number {
 }
 
 function pushHistory(projectId: string, mapId: string, entry: HistoryEntry, doc: MapDoc): void {
+  const stroke = entry.stroke;
   const key = docKey(projectId, mapId);
   const state = history.get(key) ?? { entries: [], index: -1, bytes: 0 };
   // 撤销之后又画了新东西：把「未来」截断
   if (state.index < state.entries.length - 1) {
     for (const dropped of state.entries.slice(state.index + 1)) state.bytes -= estimateEntryBytes(dropped, doc);
     state.entries = state.entries.slice(0, state.index + 1);
+  }
+  const previous = state.entries[state.index];
+  if (
+    entry.snapshot === undefined &&
+    stroke !== undefined &&
+    previous !== undefined &&
+    previous.snapshot === undefined &&
+    previous.stroke === stroke
+  ) {
+    // 同一笔的后续提交：并进上一条（撤销粒度 = 一笔，而不是一次 flush）
+    previous.undo = [...entry.undo, ...previous.undo];
+    previous.redo = [...previous.redo, ...entry.redo];
+    state.bytes += estimateEntryBytes(entry, doc);
+    return;
   }
   state.entries.push(entry);
   state.bytes += estimateEntryBytes(entry, doc);
@@ -500,7 +536,7 @@ export function docRevision(projectId: string, mapId: string): number {
  * 返回**脏 chunk 的计划补丁**：界面拿它替换自己缓存的 chunk 即可，不需要
  * 自己算「这一笔影响了哪几格的过渡块」—— 那是宿主的知识。
  */
-export async function applyMapOps(projectId: string, mapId: string, ops: readonly unknown[]): Promise<ApplyOpsResult> {
+export async function applyMapOps(projectId: string, mapId: string, ops: readonly unknown[], stroke?: string): Promise<ApplyOpsResult> {
   const project = await readMapProject(projectId);
   if (project === undefined) throw new Error(`项目不存在：${projectId}`);
   const doc = await readMapDoc(projectId, mapId);
@@ -511,7 +547,7 @@ export async function applyMapOps(projectId: string, mapId: string, ops: readonl
   const dirtyChunks = dirtyChunksFor(changedCells, doc.cols, doc.rows);
   if (result.changed.length > 0) {
     revisions.set(key, (revisions.get(key) ?? 0) + 1);
-    pushHistory(projectId, mapId, { undo: result.undo, redo: ops as MapOp[] }, doc);
+    pushHistory(projectId, mapId, { undo: result.undo, redo: ops as MapOp[], stroke }, doc);
     scheduleDocWrite(projectId, doc);
   }
   const context = renderContext(project);

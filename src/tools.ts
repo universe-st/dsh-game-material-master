@@ -593,6 +593,20 @@ function intentFromCall(method: string, payload: Record<string, any>): OpenInten
   const projectId = asString(payload.projectId);
   const jobId = asString(payload.jobId);
   const stage = typeof payload.stage === "string" ? payload.stage : undefined;
+  /**
+   * ⚠️ **先按方法名认模块，再看字段名。**
+   *
+   * 以前是先判 `payload.projectId` 非空就当八方向图 —— 于是模块二/三/四/五/六里
+   * 凡是入参叫 `projectId` 的方法（`runTileMap`、`getMapProject`、`saveMapDoc`…）
+   * 返回的 openUrl 全都指向 `module=sprite&project=<别人的 id>`，用户点进去落在
+   * 八方向图页面上，看着就是「链接是坏的」。字段名靠不住，方法归属才是真源
+   * （`METHOD_MODULE`），非 sprite 模块的 id 一律放 `jobId`（宿主 `intentOf` 的约定）。
+   */
+  const owner = METHOD_MODULE[method];
+  if (owner !== undefined && owner !== "sprite") {
+    const targetId = projectId !== "" ? projectId : jobId;
+    return targetId === "" ? { module: owner } : { module: owner, jobId: targetId, stage };
+  }
   if (projectId !== "") {
     const framePick = method === "prepareFramePick" || method === "setFramePick" || method === "setFramePicks" || method === "resetFramePicks";
     return { module: "sprite", projectId, stage: framePick ? "frames" : stage };

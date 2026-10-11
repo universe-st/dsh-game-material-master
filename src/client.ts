@@ -1241,16 +1241,18 @@
         "A job is running…",
 
       // ── 地图编辑器：实验性说明弹窗 ──────────────────────────────────────
-      "这条路是**全本地的**：导入图集、切分、自动过渡、拼图、导出都在本机算，一次模型调用都没有，所以不花钱。":
+      "这条路是全本地的：导入图集、切分、自动过渡、拼图、导出都在本机算，一次模型调用都没有，所以不花钱。":
         "This road is **fully local**: importing the atlas, slicing, auto-tiling, assembly and export all run on this machine — not a single model call, so nothing is billed.",
       "与模块⑤不同：它不生成素材，只把你已有的 tileset 切成可用地块。自动过渡支持单块 / 16 掩码 / 47 掩码，缺掩码会回退并在覆盖率里标出来。":
         "Unlike module ⑤ it generates no artwork: it slices the tileset you already have into usable tiles. Auto-tiling supports single / 16-mask / 47-mask; missing masks fall back and are flagged in the coverage report.",
-      "界面上看到的地图与导出的 PNG 执行的是**同一份绘制计划**，所以不会有「预览好看、导出位移」这种事。":
+      "界面上看到的地图与导出的 PNG 执行的是同一份绘制计划，所以不会有「预览好看、导出位移」这种事。":
         "The map you see and the exported PNG execute the **same draw plan**, so \"looks right in the preview but shifts on export\" cannot happen.",
       "地图编辑器仍在开发中":
         "The map editor is still in development",
       "地图编辑器（实验性）":
-        "Map editor (experimental)"
+        "Map editor (experimental)",
+      "先选一块图当笔刷：点调色板里的图块，或点上面的族胶囊。":
+        "Pick a tile first: click a tile in the palette, or a family chip above."
     };
 /* i18n-ignore-end */
 
@@ -1698,9 +1700,9 @@
     /** 进入模块⑥时的实验性说明要点（导入自己的 tileset 那条路）。 */
     function make_MAP_EXPERIMENTAL_POINTS() {
       return [
-      T("这条路是**全本地的**：导入图集、切分、自动过渡、拼图、导出都在本机算，一次模型调用都没有，所以不花钱。"),
+      T("这条路是全本地的：导入图集、切分、自动过渡、拼图、导出都在本机算，一次模型调用都没有，所以不花钱。"),
       T("与模块⑤不同：它不生成素材，只把你已有的 tileset 切成可用地块。自动过渡支持单块 / 16 掩码 / 47 掩码，缺掩码会回退并在覆盖率里标出来。"),
-      T("界面上看到的地图与导出的 PNG 执行的是**同一份绘制计划**，所以不会有「预览好看、导出位移」这种事。"),
+      T("界面上看到的地图与导出的 PNG 执行的是同一份绘制计划，所以不会有「预览好看、导出位移」这种事。"),
       T("发现问题或有改进想法，欢迎到 GitHub 仓库一起开发。")
     ];
     }
@@ -5923,8 +5925,23 @@
       const strokeRef = React.useRef(null);
       const flushTimer = React.useRef(null);
       const pendingOps = React.useRef([]);
+      /**
+       * 当前这一笔的 id（一次按下 → 抬起算一笔）。
+       *
+       * 拖动时 op 每 ~60ms 提交一次，带上同一个 id 宿主才会把它并成**一条**历史 ——
+       * 否则一次拖拽要按好几次撤销才回得去。
+       */
+      const strokeId = React.useRef(0);
       const [viewport, setViewport] = React.useState({ w: 640, h: 420 });
       const [ghost, setGhost] = React.useState(null);
+      /**
+       * 「矩形填充」开关。
+       *
+       * ⚠️ 必须自己一个 state，**不能挂在 `ghost` 上**：ghost 是跟着指针走的瞬时
+       * 状态（指针移出画布就 null），挂在它上面的勾选框会变成「点不动」——
+       * 真机实测：勾选框看着能点，点完状态不变（onChange 里被 `prev === null` 吞掉）。
+       */
+      const [rectFilled, setRectFilled] = React.useState(false);
       const [imagesReady, setImagesReady] = React.useState(0);
       const [planWarnings, setPlanWarnings] = React.useState([]);
       const intent = useStudioIntent();
@@ -6035,12 +6052,23 @@
         if (ctx === null || ctx === undefined) return;
         const width = Math.max(1, Math.round(viewport.w));
         const height = Math.max(1, Math.round(viewport.h));
-        if (canvas.width !== width) canvas.width = width;
-        if (canvas.height !== height) canvas.height = height;
+        /**
+         * 按 devicePixelRatio 放大 backing store。
+         *
+         * 不放大时在 Retina 上每个地图像素只占 1 个物理像素 → 整张图发糊
+         * （像素画尤其明显）。坐标仍然按 CSS 像素记，倍率进 transform，
+         * 所以计划里的目标坐标**一个都不用改**（drawImage 的入参保持原样）。
+         */
+        const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+        const backingWidth = Math.round(width * dpr);
+        const backingHeight = Math.round(height * dpr);
+        if (canvas.width !== backingWidth) canvas.width = backingWidth;
+        if (canvas.height !== backingHeight) canvas.height = backingHeight;
         ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.clearRect(0, 0, width, height);
+        ctx.clearRect(0, 0, backingWidth, backingHeight);
         ctx.imageSmoothingEnabled = false;
-        ctx.setTransform(zoom, 0, 0, zoom, -pan.x * zoom, -pan.y * zoom);
+        const scale = zoom * dpr;
+        ctx.setTransform(scale, 0, 0, scale, -pan.x * scale, -pan.y * scale);
         const rectOf = (index) => legend.get(index);
         /**
          * 帧统计。
@@ -6147,8 +6175,15 @@
         const ops = pendingOps.current;
         if (ops.length === 0 || api === undefined || projectId === null || mapId === null) return;
         pendingOps.current = [];
+        // 调试钩子：`window.__mapDebug = true` 时记下每次提交的笔画 id 与条数
+        // （「一次拖拽被拆成好几步撤销」就是靠它定位的）
+        if ((window as any).__mapDebug === true) {
+          const log = ((window as any).__mapOpsLog = (window as any).__mapOpsLog ?? []);
+          log.push({ stroke: ops[0]?.stroke ?? null, count: ops.length });
+          if (log.length > 200) log.shift();
+        }
         try {
-          const result = await api.applyMapOps({ projectId, mapId, ops });
+          const result = await api.applyMapOps({ projectId, mapId, ops, stroke: ops[0]?.stroke });
           setChunks((prev) => MAP_mergePatches(prev, result.patches));
           setView((prev) => (prev === null ? prev : { ...prev, doc: { ...prev.doc, canUndo: result.canUndo, canRedo: result.canRedo } }));
           if (result.skipped !== undefined && result.skipped.length > 0) {
@@ -6161,7 +6196,13 @@
 
       const queueOps = React.useCallback(
         (ops, immediate) => {
-          pendingOps.current = pendingOps.current.concat(ops);
+          const stroke = `s${++strokeId.current}`;
+          const stamped = ops.map((op) => ({ ...op, stroke }));
+          // ⚠️ 同一笔的多次 flush 必须共用同一个 id：拖动时的中间批次要沿用
+          // 当前笔画的 id，只有新按下时才换新的。
+          const key = immediate === true ? stroke : (currentStroke.current ?? stroke);
+          currentStroke.current = immediate === true ? null : key;
+          pendingOps.current = pendingOps.current.concat(stamped.map((op) => ({ ...op, stroke: key })));
           if (immediate === true) {
             void flushOps();
             return;
@@ -6188,15 +6229,32 @@
         [layout, zoom, pan]
       );
 
+      /** 当前拖拽笔画的 id（null = 没有正在进行的笔画）。 */
+      const currentStroke = React.useRef(null);
+
+      /**
+       * 某个工具要不要先选笔刷。
+       *
+       * ⚠️ **橡皮不需要笔刷**（它就是把格子清空）。以前这条判断是
+       * `activeLayer === undefined || brush === null`，于是刚进面板、还没点过调色板时
+       * 拿橡皮在画布上拖，**一点反应都没有也不报错**（真机实测）。
+       */
+      const needsBrush = (name) => name === "paint" || name === "fill" || name === "rect";
+      const warnNoBrush = () => {
+        if (brush === null) {
+          setNotice({ kind: "error", text: T("先选一块图当笔刷：点调色板里的图块，或点上面的族胶囊。") });
+          return true;
+        }
+        return false;
+      };
+
       const strokePaint = (from, to) => {
-        if (activeLayer === undefined || brush === null) return;
+        if (activeLayer === undefined) return;
+        if (needsBrush(tool) && warnNoBrush()) return;
         const cells = from === null ? [to] : MAP_lineCells(from.r, from.c, to.r, to.c);
+        const tile = tool === "erase" ? 0 : (brush === null ? 0 : brush.tile);
         queueOps([
-          {
-            kind: "paint",
-            layerId: activeLayer.id,
-            cells: cells.map((cell) => ({ r: cell.r, c: cell.c, tile: tool === "erase" ? 0 : brush.tile }))
-          }
+          { kind: "paint", layerId: activeLayer.id, cells: cells.map((cell) => ({ r: cell.r, c: cell.c, tile })) }
         ]);
       };
 
@@ -6209,11 +6267,13 @@
           return;
         }
         if (tool === "fill") {
-          if (activeLayer === undefined || brush === null) return;
+          if (activeLayer === undefined) return;
+          if (warnNoBrush()) return;
           queueOps([{ kind: "fill", layerId: activeLayer.id, r: hit.r, c: hit.c, tile: brush.tile }], true);
           return;
         }
         if (tool === "rect") {
+          if (warnNoBrush()) return;
           strokeRef.current = { mode: "rect", from: hit };
           setGhost({ cells: [hit], ok: true });
           return;
@@ -6225,6 +6285,7 @@
           if (found !== undefined) setBrush({ tile: found.t });
           return;
         }
+        currentStroke.current = null;
         strokeRef.current = { mode: "paint", from: hit };
         strokePaint(null, hit);
         setGhost({ cells: [hit], ok: true });
@@ -6244,7 +6305,13 @@
           const c0 = Math.min(stroke.from.c, hit.c);
           const c1 = Math.max(stroke.from.c, hit.c);
           const cells = [];
-          for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) cells.push({ r, c });
+          for (let r = r0; r <= r1; r++) {
+            for (let c = c0; c <= c1; c++) {
+              // 描边模式只高亮边框，所见即所得（否则预览比实际涂的多一圈）
+              if (rectFilled !== true && r !== r0 && r !== r1 && c !== c0 && c !== c1) continue;
+              cells.push({ r, c });
+            }
+          }
           setGhost({ cells, ok: true });
           return;
         }
@@ -6262,18 +6329,17 @@
       const onPointerUp = () => {
         const stroke = strokeRef.current;
         strokeRef.current = null;
-        if (stroke !== null && stroke !== undefined && stroke.mode === "rect" && ghost !== null && brush !== null && activeLayer !== undefined) {
+        currentStroke.current = null;
+        if (stroke !== null && stroke !== undefined && stroke.mode === "rect" && ghost !== null && activeLayer !== undefined) {
           const cells = ghost.cells;
           if (cells.length > 0) {
             const r0 = Math.min.apply(null, cells.map((cell) => cell.r));
             const r1 = Math.max.apply(null, cells.map((cell) => cell.r));
             const c0 = Math.min.apply(null, cells.map((cell) => cell.c));
             const c1 = Math.max.apply(null, cells.map((cell) => cell.c));
-            if (tool === "rect" && ghost.filled === true) {
-              queueOps([{ kind: "rect", layerId: activeLayer.id, r0, c0, r1, c1, tile: brush.tile, filled: true }], true);
-            } else {
-              queueOps([{ kind: "rect", layerId: activeLayer.id, r0, c0, r1, c1, tile: brush.tile, filled: false }], true);
-            }
+            if (warnNoBrush()) return;
+            const tile = brush.tile;
+            queueOps([{ kind: "rect", layerId: activeLayer.id, r0, c0, r1, c1, tile, filled: rectFilled }], true);
           }
         }
         void flushOps();
@@ -6467,24 +6533,40 @@
         );
       }
 
+      /**
+       * 阶段条。
+       *
+       * ⚠️ 用**模块五同款**的 `.SPR_steps` / `.SPR_step` / `.SPR_stepMark`
+       * （见 `SPR_step` 的 CSS 定义），别自造类名：
+       *  · 自造 `SPR_stages` / `SPR_stageTab` 的话一个 CSS 规则都没有，阶段条会塌成
+       *    几个 58px 宽的小按钮，文字全叠在一起；
+       *  · 更坑的是 `SPR_stageHint` —— 那个类**已经存在**，是「绝对定位铺满容器」的
+       *    蒙层样式（给八方向图的 WASD 预览用的）。复用它会把所有阶段说明**叠在面板
+       *    正中间**，整个面板看着就是坏的（真机实测：整屏只剩中间一行叠字）。
+       * 阶段说明改放 `title`（悬停）+ 内容区顶部一行 `.SPR_hint`。
+       */
       const stageTabs = h(
         "div",
-        { className: "SPR_stages" },
-        MAP_STAGES.map((entry) =>
-          h(
+        { className: "SPR_steps" },
+        MAP_STAGES.map((entry) => {
+          const state = (project.stages ?? {})[entry.key] ?? { status: "idle" };
+          return h(
             "button",
             {
               key: entry.key,
               type: "button",
-              className: "SPR_stageTab",
-              "data-active": stage === entry.key ? "true" : undefined,
+              className: `SPR_step${stage === entry.key ? " SPR_step-active" : ""} SPR_step-${state.status}`,
+              title: entry.hint,
+              "data-stage": entry.key,
               onClick: () => setStage(entry.key)
             },
-            h("span", { className: "SPR_stageTitle" }, entry.title),
-            h("span", { className: "SPR_stageHint" }, entry.hint)
-          )
-        )
+            entry.title,
+            state.status === "done" ? h("span", { className: "SPR_stepMark" }, "✓") : null,
+            state.status === "error" ? h("span", { className: "SPR_stepMark" }, "!") : null
+          );
+        })
       );
+      const stageHintLine = h("p", { className: "SPR_hint" }, (MAP_STAGES.find((entry) => entry.key === stage) ?? MAP_STAGES[0]).hint);
 
       const tilesets = project.tilesets || [];
       const families = project.families || [];
@@ -6598,8 +6680,9 @@
                 { className: "SPR_meCheck" },
                 h("input", {
                   type: "checkbox",
-                  checked: ghost !== null && ghost.filled === true,
-                  onChange: (event) => setGhost((prev) => (prev === null ? prev : { ...prev, filled: event.target.checked }))
+                  checked: rectFilled,
+                  "data-testid": "map-rect-filled",
+                  onChange: (event) => setRectFilled(event.target.checked)
                 }),
                 T("矩形填充")
               )
@@ -7062,6 +7145,7 @@
           project.busy === true ? h("span", { className: "SPR_meBusy" }, T("任务进行中…")) : null
         ),
         stageTabs,
+        stageHintLine,
         notice === null ? null : h("div", { className: `SPR_notice SPR_notice-${notice.kind}` }, notice.text),
         project.warnings.length === 0
           ? null

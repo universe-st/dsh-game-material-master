@@ -1054,7 +1054,12 @@ export class GameStudioGateway extends TypertRemoteService {
   }
   async applyMapOps(payload: any) {
     const input = asRecord(payload);
-    return mapgen.applyMapOps(asString(input.projectId), asString(input.mapId), Array.isArray(input.ops) ? (input.ops as unknown[]) : []);
+    return mapgen.applyMapOps(
+      asString(input.projectId),
+      asString(input.mapId),
+      Array.isArray(input.ops) ? (input.ops as unknown[]) : [],
+      typeof input.stroke === "string" && input.stroke !== "" ? input.stroke : undefined
+    );
   }
   async mapUndo(payload: any) {
     const input = asRecord(payload);
