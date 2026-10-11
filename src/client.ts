@@ -1238,7 +1238,19 @@
       "还没有导出过。":
         "Nothing exported yet.",
       "任务进行中…":
-        "A job is running…"
+        "A job is running…",
+
+      // ── 地图编辑器：实验性说明弹窗 ──────────────────────────────────────
+      "这条路是**全本地的**：导入图集、切分、自动过渡、拼图、导出都在本机算，一次模型调用都没有，所以不花钱。":
+        "This road is **fully local**: importing the atlas, slicing, auto-tiling, assembly and export all run on this machine — not a single model call, so nothing is billed.",
+      "与模块⑤不同：它不生成素材，只把你已有的 tileset 切成可用地块。自动过渡支持单块 / 16 掩码 / 47 掩码，缺掩码会回退并在覆盖率里标出来。":
+        "Unlike module ⑤ it generates no artwork: it slices the tileset you already have into usable tiles. Auto-tiling supports single / 16-mask / 47-mask; missing masks fall back and are flagged in the coverage report.",
+      "界面上看到的地图与导出的 PNG 执行的是**同一份绘制计划**，所以不会有「预览好看、导出位移」这种事。":
+        "The map you see and the exported PNG execute the **same draw plan**, so \"looks right in the preview but shifts on export\" cannot happen.",
+      "地图编辑器仍在开发中":
+        "The map editor is still in development",
+      "地图编辑器（实验性）":
+        "Map editor (experimental)"
     };
 /* i18n-ignore-end */
 
@@ -1270,6 +1282,9 @@
       () => {
         MAP_TOOL_LABELS = make_MAP_TOOL_LABELS();
         MAP_TOOL_HINTS = make_MAP_TOOL_HINTS();
+      },
+      () => {
+        MAP_EXPERIMENTAL_POINTS = make_MAP_EXPERIMENTAL_POINTS();
       },
       () => {
         STAGES = make_STAGES();
@@ -1680,8 +1695,19 @@
     }
     let TILE_EXPERIMENTAL_POINTS = make_TILE_EXPERIMENTAL_POINTS();
 
+    /** 进入模块⑥时的实验性说明要点（导入自己的 tileset 那条路）。 */
+    function make_MAP_EXPERIMENTAL_POINTS() {
+      return [
+      T("这条路是**全本地的**：导入图集、切分、自动过渡、拼图、导出都在本机算，一次模型调用都没有，所以不花钱。"),
+      T("与模块⑤不同：它不生成素材，只把你已有的 tileset 切成可用地块。自动过渡支持单块 / 16 掩码 / 47 掩码，缺掩码会回退并在覆盖率里标出来。"),
+      T("界面上看到的地图与导出的 PNG 执行的是**同一份绘制计划**，所以不会有「预览好看、导出位移」这种事。"),
+      T("发现问题或有改进想法，欢迎到 GitHub 仓库一起开发。")
+    ];
+    }
+    let MAP_EXPERIMENTAL_POINTS = make_MAP_EXPERIMENTAL_POINTS();
 
-    /** 五个功能模块。插件是「大师」，每个模块管一类素材。 */
+
+    /** 六个功能模块。插件是「大师」，每个模块管一类素材。 */
     function make_MODULES() {
       return [
       { key: "sprite", title: T("八方向图生成"), hint: T("一张设定图 → 8 方向 × 8 帧精灵图") },
@@ -5902,6 +5928,14 @@
       const [imagesReady, setImagesReady] = React.useState(0);
       const [planWarnings, setPlanWarnings] = React.useState([]);
       const intent = useStudioIntent();
+      /**
+       * 实验性进入提示。
+       *
+       * ⚠️ Hook 必须在**任何提前 return 之前**（下面 `project === null` 那条早返回
+       * 会绕过它）—— 顺序一变就是 React error #310，整块白屏。
+       */
+      const [gateOpen, setGateOpen] = React.useState(experimentalGateMuted.map !== true);
+      const closeGate = React.useCallback(() => setGateOpen(false), []);
 
       const project = React.useMemo(() => (view === null ? null : view), [view]);
       const doc = project === null ? null : project.doc;
@@ -6408,6 +6442,7 @@
         return h(
           "div",
           { className: "SPR_moduleBody" },
+          gateOpen ? h(MapExperimentalDialog, { onClose: closeGate }) : null,
           h("div", { className: "SPR_empty" }, T("还没有地图项目。")),
           h(
             "div",
@@ -7008,6 +7043,7 @@
       return h(
         "div",
         { className: "SPR_moduleBody", "data-module": "map" },
+        gateOpen ? h(MapExperimentalDialog, { onClose: closeGate }) : null,
         h(
           "div",
           { className: "SPR_toolbar" },
@@ -12638,7 +12674,7 @@
      * 「不再提示」，进 45° 地图地块时弹窗就再也不出现了 —— 两个模块的
      * 实验性说明内容完全不同，那样等于静默漏掉一次告知。
      */
-    const experimentalGateMuted = { rig: false, tile: false };
+    const experimentalGateMuted = { rig: false, tile: false, map: false };
 
     /**
      * 实验性说明弹窗（模块④ / ⑤ 共用）。
@@ -12741,6 +12777,17 @@
         title: T("45°地图地块生成仍在开发中"),
         ariaLabel: T("45°地图地块生成（实验性）"),
         points: TILE_EXPERIMENTAL_POINTS,
+        onClose
+      });
+    }
+
+    /** 进入模块⑥时的实验性说明弹窗（地图编辑器）。 */
+    function MapExperimentalDialog({ onClose }) {
+      return h(ExperimentalDialog, {
+        moduleKey: "map",
+        title: T("地图编辑器仍在开发中"),
+        ariaLabel: T("地图编辑器（实验性）"),
+        points: MAP_EXPERIMENTAL_POINTS,
         onClose
       });
     }
@@ -14193,7 +14240,7 @@
      * `mapgeom` / `mapdoc` 的真实现做黄金对照逐点比对 —— 界面复刻的那部分几何
      * 必须有守门的，否则「预览与导出错位」会以静默的方式回来。
      */
-    bundleModule.exports.__test = { StudioPanel, TileModule, ImageModule, SequenceModule, RigSemanticsPanel, MapModule, MAP_pointToCell, MAP_cellAnchor, MAP_cellTopLeft, MAP_lineCells, MAP_visibleChunks, MAP_chunkKey, usePendingTasks, LoadingOverlay, MediaBox, BusyBtn, BusyBadge, NumField, ZoomableImage, CSS, subscribeIntent, parseIntents, openStudioIntent, OPEN_QUERY_KEY, StudioGlyph, StudioGlyphIcon, publishHiddenModules, useHiddenModules, visibleModulesOf, normalizeHiddenKeys, ConfigSection };
+    bundleModule.exports.__test = { StudioPanel, TileModule, ImageModule, SequenceModule, RigSemanticsPanel, MapModule, MapExperimentalDialog, MAP_pointToCell, MAP_cellAnchor, MAP_cellTopLeft, MAP_lineCells, MAP_visibleChunks, MAP_chunkKey, usePendingTasks, LoadingOverlay, MediaBox, BusyBtn, BusyBadge, NumField, ZoomableImage, CSS, subscribeIntent, parseIntents, openStudioIntent, OPEN_QUERY_KEY, StudioGlyph, StudioGlyphIcon, publishHiddenModules, useHiddenModules, visibleModulesOf, normalizeHiddenKeys, ConfigSection };
     return bundleModule.exports;
   }
 });

@@ -568,12 +568,17 @@ function checkRigContracts(text, label) {
     /TileExperimentalDialog[\s\S]{0,400}?ExperimentalBar/.test(text),
     "TileModule 里没有挂 ExperimentalBar"
   );
-  check(
-    `${label}：实验性弹窗「不再提示」按模块分开记`,
-    text.includes("experimentalGateMuted = { rig: false, tile: false }") &&
-    text.includes("experimentalGateMuted[moduleKey] = true"),
-    "共用一个标志会让一个模块的「不再提示」静默吞掉另一个模块的说明"
-  );
+  {
+    // 每个实验性模块各有一格标志（写死那几个 key 的话，加一个模块这里必然漏）
+    const muted = (text.match(/experimentalGateMuted = \{([^}]*)\}/) ?? [])[1] ?? "";
+    const mutedKeys = [...muted.matchAll(/(\w+)\s*:/g)].map((match) => match[1]);
+    const experimental = [...text.matchAll(/\{ key: "(\w+)", title: T\("[^"]*"\), hint: T\("[^"]*"\)[^}]*experimental: true \}/g)].map((match) => match[1]);
+    check(
+      `${label}：实验性弹窗「不再提示」按模块分开记（${mutedKeys.join("、")}）`,
+      experimental.length > 0 && experimental.every((key) => mutedKeys.includes(key)) && text.includes("experimentalGateMuted[moduleKey] = true"),
+      `实验性模块 ${experimental.join("、")} vs 标志 ${mutedKeys.join("、")}`
+    );
+  }
   check(`${label}：实验性弹窗用 position:fixed`, /\.SPR_gateMask\{[^}]*position:fixed/.test(text));
   {
     // 模块集合从宿主清单派生：写死个数的话，加一个模块这里必然漏（历史教训）

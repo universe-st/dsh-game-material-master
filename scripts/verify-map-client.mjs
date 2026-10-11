@@ -110,6 +110,22 @@ try {
   function resetHooks() {
     cells = [];
   }
+
+  /**
+   * 用**临时的一份 Hook 存储**渲染别的组件，结束后原样换回来。
+   *
+   * ⚠️ 直接 `resetHooks()` 会把正在测的面板状态一起清掉（表现是「后面全变空态」）。
+   * 单独渲染弹窗这类子组件时必须用这个。
+   */
+  async function withFreshHooks(render) {
+    const saved = cells;
+    cells = [];
+    try {
+      return await render();
+    } finally {
+      cells = saved;
+    }
+  }
   let pendingRender = false;
   let effects = [];
   const HOOK_MISMATCH = [];
@@ -195,39 +211,50 @@ try {
       }
       return element;
     },
+    /**
+     * ⚠️ 每个 Hook 都要**捕获当前那份存储**（`const store = cells`）。
+     *
+     * 直接用模块级的 `cells` 的话，`withFreshHooks` 换回来之后，某个组件里
+     * 迟到的 `setState` 会写进**别人的存储**（表现是「面板上一堆断言突然全错位」）。
+     */
     useState(initial) {
       const index = cursor++;
-      if (!(index in cells)) cells[index] = typeof initial === "function" ? initial() : initial;
+      const store = cells;
+      if (!(index in store)) store[index] = typeof initial === "function" ? initial() : initial;
       return [
-        cells[index],
+        store[index],
         (next) => {
-          cells[index] = typeof next === "function" ? next(cells[index]) : next;
+          store[index] = typeof next === "function" ? next(store[index]) : next;
           pendingRender = true;
         }
       ];
     },
     useRef(initial) {
       const index = cursor++;
-      if (!(index in cells)) cells[index] = { current: initial };
-      return cells[index];
+      const store = cells;
+      if (!(index in store)) store[index] = { current: initial };
+      return store[index];
     },
     useMemo(fn, deps) {
       const index = cursor++;
-      const slot = cells[index];
-      if (slot === undefined || slot === null || !sameDeps(slot.deps, deps)) cells[index] = { deps, value: fn() };
-      return cells[index].value;
+      const store = cells;
+      const slot = store[index];
+      if (slot === undefined || slot === null || !sameDeps(slot.deps, deps)) store[index] = { deps, value: fn() };
+      return store[index].value;
     },
     useCallback(fn, deps) {
       const index = cursor++;
-      const slot = cells[index];
-      if (slot === undefined || slot === null || !sameDeps(slot.deps, deps)) cells[index] = { deps, value: fn };
-      return cells[index].value;
+      const store = cells;
+      const slot = store[index];
+      if (slot === undefined || slot === null || !sameDeps(slot.deps, deps)) store[index] = { deps, value: fn };
+      return store[index].value;
     },
     useEffect(fn, deps) {
       const index = cursor++;
-      const slot = cells[index];
+      const store = cells;
+      const slot = store[index];
       if (slot === undefined || slot === null || !sameDeps(slot.deps, deps)) {
-        cells[index] = { deps };
+        store[index] = { deps };
         effects.push(fn);
       }
     },
@@ -317,8 +344,9 @@ try {
   check("apply 可执行", true);
 
   const test = bundle.__test ?? {};
-  const { MapModule, MAP_pointToCell, MAP_cellAnchor, MAP_cellTopLeft, MAP_lineCells, MAP_visibleChunks } = test;
+  const { MapModule, MapExperimentalDialog, MAP_pointToCell, MAP_cellAnchor, MAP_cellTopLeft, MAP_lineCells, MAP_visibleChunks } = test;
   check("产物带出 MapModule 与坐标函数", typeof MapModule === "function" && typeof MAP_pointToCell === "function" && typeof MAP_cellAnchor === "function");
+  check("产物带出实验性弹窗（自检要能单独渲染它）", typeof MapExperimentalDialog === "function");
   check("带出黄金对照要用的另外三个函数", typeof MAP_cellTopLeft === "function" && typeof MAP_lineCells === "function" && typeof MAP_visibleChunks === "function");
   if (typeof MapModule !== "function") throw new Error("没有 MapModule，后面没法测");
 
@@ -462,6 +490,16 @@ try {
     return (node.children ?? []).map(textOf).join("");
   };
 
+  /**
+   * 递归展开函数组件（**只用于独立渲染的子树**：展开会消耗 Hook 槽位）。
+   */
+  function expandComponents(node, depth = 0) {
+    if (node === null || node === undefined || typeof node !== "object" || depth > 8) return node;
+    if (Array.isArray(node)) return node.map((child) => expandComponents(child, depth));
+    if (typeof node.type === "function") return expandComponents(node.type(node.props), depth + 1);
+    return { ...node, children: (node.children ?? []).map((child) => expandComponents(child, depth)) };
+  }
+
   /** 渲染 → 跑 effect → 有 setState 就再来一轮（最多 30 轮，防死循环）。 */
   async function renderTree(element, options = {}) {
     if (options.fresh === true) resetHooks();
@@ -505,6 +543,30 @@ try {
   let tree = null;
   tree = await renderTree(() => MapModule({ api }));
   check("面板能渲染（无异常）", tree !== null && tree !== undefined);
+  /**
+   * 实验性模块的进入弹窗。
+   *
+   * ⚠️ 别在面板的树里「展开」弹窗组件去断言它的内容：`ExperimentalDialog` 自己有
+   * Hook，在面板的 Hook 存储里调它会**把槽位读串**，后面每个断言都会莫名其妙地错位。
+   * 这里只看「面板挂出了这个元素」，内容另开一份独立存储单独渲染。
+   */
+  const gateElement = collect(tree, (node) => typeof node.type === "function" && node.type.name === "MapExperimentalDialog")[0];
+  check("进入模块⑥会弹实验性说明（实验性模块不能没有标记）", gateElement !== undefined);
+  if (gateElement !== undefined && typeof MapExperimentalDialog === "function") {
+    // ⚠️ 展开 / 点击都必须留在临时存储里：`expandComponents` 会真的调用子组件，
+    // 跑到面板的存储上就会把面板的槽位覆盖掉（表现是「后面全崩」）。
+    const gate = await withFreshHooks(async () => {
+      let closed = false;
+      const raw = await renderTree(() => MapExperimentalDialog({ onClose: () => { closed = true; } }));
+      const expanded = expandComponents(raw);
+      const closers = collect(expanded, (node) => node.type === "button" && textOf(node).trim() !== "");
+      if (closers.length > 0) closers[closers.length - 1].props.onClick({ stopPropagation() {} });
+      return { expanded, closers, closed };
+    });
+    check("弹窗列出模块六自己的要点（不是抄模块五的）", byClass(gate.expanded, "SPR_gateBody").length >= 3, `${byClass(gate.expanded, "SPR_gateBody").length} 条`);
+    check("弹窗文案里点明「全本地、不花钱」", textOf(gate.expanded).includes("全本地") || textOf(gate.expanded).includes("不花钱"), textOf(gate.expanded).slice(0, 60));
+    check("弹窗有关闭按钮，点了会回调 onClose", gate.closers.length > 0 && gate.closed === true, `${gate.closers.length} 个按钮 closed=${gate.closed}`);
+  }
   check("有地图项目被选中", textOf(tree).includes("客户端自检"), textOf(tree).slice(0, 80));
   check("四个阶段页签都在", byClass(tree, "SPR_stageTab").length === 4, `${byClass(tree, "SPR_stageTab").length} 个`);
   check("① 图集阶段能看到导入入口", collect(tree, (node) => node.props?.["data-testid"] === "map-tileset-input").length === 1);
@@ -643,6 +705,10 @@ try {
   const emptyApi = { ...api, listMapProjects: async () => ({ projects: [] }), getMapProject: async () => ({}) };
   const emptyTree = await renderTree(() => MapModule({ api: emptyApi }), { fresh: true });
   check("没有项目时给空态而不是崩", textOf(emptyTree).includes("还没有地图项目"), textOf(emptyTree).slice(0, 60));
+  check(
+    "空态也带实验性说明弹窗（早退分支不能漏）",
+    collect(emptyTree, (node) => typeof node.type === "function" && node.type.name === "MapExperimentalDialog").length === 1
+  );
   check("空态里有新建入口", byClass(emptyTree, "SPR_btn").some((node) => textOf(node).includes("新建地图项目")));
   check("渲染循环没有失控", HOOK_MISMATCH.length === 0, HOOK_MISMATCH.join("；"));
 

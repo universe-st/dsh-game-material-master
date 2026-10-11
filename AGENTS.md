@@ -70,7 +70,7 @@ node scripts/verify-tile-client.mjs    # 地图地块界面真渲染（200 项�
 node scripts/verify-map.mjs            # 地图编辑器几何 / 自动过渡 / 切分内核（100 项，含 4 条反向验证）
 node scripts/verify-map-pipeline.mjs   # 地图编辑器数据层与流水线（128 项，含导出的 .tmj/.tsj 逐字段校验）
 node scripts/verify-map-gateway.mjs    # 地图编辑器走真实网关（81 项，含资源路由 403 / 目录穿越 / 并发提交）
-node scripts/verify-map-client.mjs     # 地图编辑器界面真渲染 + 黄金对照（55 项：坐标函数与宿主逐点一致、drawImage 序列 == 宿主计划）
+node scripts/verify-map-client.mjs     # 地图编辑器界面真渲染 + 黄金对照（61 项：坐标函数与宿主逐点一致、drawImage 序列 == 宿主计划、实验性弹窗）
 ```
 
 `scripts/find-missing-i18n.mjs` 不是断言脚本，是**工具**：列出所有还没进词条表的
