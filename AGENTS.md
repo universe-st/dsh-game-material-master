@@ -20,7 +20,8 @@ DSH 插件「游戏素材大师」：从一张角色设定图出发批量产出�
 | 图片生成 | `image` | 正式 |
 | 序列帧生成 | `sequence` | 正式 |
 | 骨骼动画生成 | `rig` | **实验性**（页签带角标、进入弹窗、模块内常驻提示条） |
-| 45°地图地块生成 | `tile` | **实验性**（45° 等距地块 → 拼成地图） |
+| 45°地图地块生成 | `tile` | **实验性**（45° 等距地块 → 拼成地图；AI 生成地块） |
+| 地图编辑器 | `map` | **实验性**（导入自己的 tileset → 自动过渡 → 多图层 → 导出 Tiled；**全本地零计费**） |
 
 ---
 
@@ -34,7 +35,9 @@ DSH 插件「游戏素材大师」：从一张角色设定图出发批量产出�
 | **没有任何运行时依赖** | `zod` / `cordis` / dsh-typert-protocol 等一律从 DSH 自身安装树解析；`node_modules` 与 lock 文件不入库 |
 | `lib/` **入库**（不是构建产物目录） | 包直接以 `main: lib/index.js` 发布，`npm publish` 不触发构建 |
 | 生成类调用必须带 loading 反馈，批量任务要按 `job.targets` 盖住**还没轮到**的方向 | 不盖遮罩时界面看着完全正常，只是「点了没反应」，用户会反复点——每次点击都真实计费。`verify-client.mjs` / `verify-feedback.mjs` 会拦 |
-| 新增产物子目录时，`SERVABLE_DIRS`（`src/index.ts`）必须同步加一条 | 静态资源路由按**第一段路径**比对白名单，漏掉就 403。界面只表现为「图裂了」、不报错——转圈截帧的 `turn/` 就踩过 |
+| 新增产物子目录时，`SERVABLE_DIRS`（`src/index.ts`）必须同步加一条 | 静态资源路由按**第一段路径**比对白名单，漏掉就 403。界面只表现为「图裂了」、不报错——转圈截帧的 `turn/` 就踩过。模块六是**四处**同步：`SERVABLE_MAP_DIRS` / `AssetScope` 类型 / `resolveAssetTarget` 分支 / `SCOPES` 数组，`verify-map-gateway.mjs` 会真调一遍路由 |
+| 模块六：**客户端只能执行宿主下发的绘制计划**，不许自己算变体 / 过渡 / 裁剪 / 坐标变换 | 界面里唯一允许复刻的是那四个 `MAP_*` 坐标函数（命中测试必需），且有黄金对照盯着。多写一套口径就是旧模块「预览好看、导出位移」的老路，`verify-map-client.mjs` 会扫源码拦 |
+| 模块六：**派生数据不落盘**（占格 / 垫底 / 掩码解析 / 包围盒一律现算） | 旧模块存了 `buildings` / `buildingGround` / `map.pixel` 三份缓存，各自都出过「过期后凭空多出一栋楼」这类 bug |
 | 界面文案一律写 `T("中文原文")`，并往 `src/client.ts` 的词条表补英文 | 中文原文就是 key；漏翻不会报错，只是那一条一直是中文。`verify-i18n.mjs` 会拦 |
 | **模块级**（工厂顶层）出现 `T()` 的文案表要同步加进 `staticTextRebuilders` | 模块顶层的 `T()` 在插件 load 时就求值了，那时 locale 服务还没挂上，此后永远停在中文。实测表现：切英文后方向名 / 模块页签不动。函数体内的 `T()` 不受影响 |
 | 浏览器半区往宿主加字段时，`src/wire.ts` 里那条方法的 `payload:` schema 必须同步加 | typert 按声明的 schema 校验 payload，**schema 里没有的键会被静默丢掉**。实测：给 `getProject` 带上 `lang` 却没进 schema，宿主永远读到 `undefined`，表现是「切了英文提示词还是中文」且不报任何错 |
@@ -53,22 +56,29 @@ npm run typecheck    # 只做类型检查
 
 ```bash
 node scripts/verify-host.mjs       # 宿主全链路（322 项）
-node scripts/verify-client.mjs     # 浏览器半区契约（347 项）
+node scripts/verify-client.mjs     # 浏览器半区契约（348 项）
 node scripts/verify-tools.mjs      # 对话调用面（147 项）
 node scripts/verify-pipeline.mjs   # 抽帧 / 抠像 / 合成（40 项）
 node scripts/verify-feedback.mjs   # 浏览器半区真渲染（161 项，含功能管理、侧栏菜单与语义保存错误）
 node scripts/verify-i18n.mjs       # 中英词条表契约（9 项）
 node scripts/verify-rig-runtime.mjs  # 骨骼改动：官方 Spine 4.2 实际加载/IK/Path/FFD/顶点求值（开发依赖）
 node scripts/verify-tile.mjs       # 地图地块几何内核（147 项，含反向验证）
-node scripts/verify-tile-pipeline.mjs  # 地图地块数据层与流水线（115 项）
+node scripts/verify-tile-pipeline.mjs  # 地图地块数据层与流水线（115 项；⚠️ 需要先跑过 e2e-tile-live 生成过地块，否则会在拼图阶段直接抛）
 node scripts/verify-tile-gateway.mjs   # 地图地块走真实网关（81 项：payload / 验收 / 作废边界 / 建筑 / 布局冻住 / 保存往返）
 node scripts/verify-tile-client.mjs    # 地图地块界面真渲染（200 项，拦「遮罩没出现」「地图不显示」这类静默问题）
+
+node scripts/verify-map.mjs            # 地图编辑器几何 / 自动过渡 / 切分内核（100 项，含 4 条反向验证）
+node scripts/verify-map-pipeline.mjs   # 地图编辑器数据层与流水线（128 项，含导出的 .tmj/.tsj 逐字段校验）
+node scripts/verify-map-gateway.mjs    # 地图编辑器走真实网关（81 项，含资源路由 403 / 目录穿越 / 并发提交）
+node scripts/verify-map-client.mjs     # 地图编辑器界面真渲染 + 黄金对照（55 项：坐标函数与宿主逐点一致、drawImage 序列 == 宿主计划）
 ```
 
 `scripts/find-missing-i18n.mjs` 不是断言脚本，是**工具**：列出所有还没进词条表的
 `T("…")` 原文，直接输出可粘贴的条目。加了新界面文案时先跑它。
 
 其余脚本（`verify-rig*.mjs`、`e2e-*.mjs` 等）的覆盖范围见 ENGINEERING.md 的「自检脚本」表。
+`e2e-map.mjs` 是模块六的**真实链路端到端**（不联网、不花钱）：它会**故意把产物留在**
+`<DSH_HOME>/game-material-master/map-jobs/` 下并打印绝对路径，方便人眼验收。
 `e2e-*.mjs` / `probe-redraw.mjs` 会**真实调 API 花钱**，不要顺手跑。
 
 ### ⚠️ 自检全绿 ≠ 界面对

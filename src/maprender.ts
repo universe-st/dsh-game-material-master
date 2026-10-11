@@ -525,6 +525,10 @@ export interface CoverageCell {
  *
  * 这一张图是「自动过渡能不能用」最快的验收方式：缺块的地方在地图上是**回退**
  * 出来的（能看，但过渡不自然），而这一点在界面上很容易被忽略。
+ *
+ * ⚠️ **行序 = `families` 数组顺序**，图上不写族名（本插件没有字体渲染，
+ * 手写一套位图字体不值当）。要对照族名就用界面里的「掩码覆盖率」那张表
+ * （那里有名字，是同一次 `coverageReport` 的输出）。
  */
 export function coverageMatrix(
   families: readonly FamilyLike[],
@@ -534,7 +538,8 @@ export function coverageMatrix(
 ): Bitmap {
   const cell = 40;
   const padding = 4;
-  const labelWidth = 96;
+  /** 只留一点点左边距 —— 族名不画在图上（见函数注释）。 */
+  const labelWidth = 8;
   const flat = flatTiles(tileset);
   const familyIds = families.map((family) => family.id);
   const widest = Math.max(1, ...familyIds.map((id) => (masks.get(id) ?? [0]).length));

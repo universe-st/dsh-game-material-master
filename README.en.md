@@ -19,11 +19,11 @@ no system image libraries required, and your assets are never uploaded to a thir
 > in place for one full turn, then the eight directions are cut out automatically; switch the method in
 > stage ① if you'd rather generate each direction separately).
 >
-> The sidebar entry also carries a **small chevron menu button**: click it to pop up the five features and
+> The sidebar entry also carries a **small chevron menu button**: click it to pop up the six features and
 > jump straight into the one you want. Features you do not use can be turned off in settings (see
 > "Feature management").
 
-All four modules share the same "generate → review → re-run" workbench. Every stage can be **redone on its
+All six modules share the same "generate → review → re-run" workbench. Every stage can be **redone on its
 own**, and every asset can be **approved item by item**. The "review mode" lets an agent approve each step
 and move on automatically, or stop at every step and wait for your go-ahead.
 
@@ -33,6 +33,7 @@ and move on automatically, or stop at every step and wait for your go-ahead.
 | **② Image generation** | Prompt (optionally with reference images) → images → green-screen keying | Clean transparent PNG character art / props |
 | **③ Sequence frames** | First/last frame or a reference video → generate video → extract frames → key | A horizontally laid out, loopable sequence |
 | **⑤ Map tile generation** | Isometric tiles → assemble a whole map | A tile pack (PNGs) + map PNG + layout JSON |
+| **⑥ Map editor** (experimental, **fully local, zero cost**) | Import your own tileset → slicing and terrain families → auto-tiling → multi-layer assembly | Layered/merged PNG + own JSON + **Tiled `.tmj`/`.tsj`** |
 | ~~④ Rigged animation~~ | Part extraction → assembly → skeletal animation → Spine / DragonBones atlas | **Experimental, not covered in this document** |
 
 > 💡 **Module ⑤ "Map tile generation" is built on one idea: geometry by code, content by AI.**
@@ -41,6 +42,13 @@ and move on automatically, or stop at every step and wait for your go-ahead.
 > is assembled locally on the isometric grid. Geometry is therefore always exact — tiles never show seams, and
 > re-assembling with the same seed is pixel-identical. Measured: letting the model draw the diamond freely
 > gives ratios of 1.03–1.55 (nowhere near 2:1), while template filling hits 100%.
+
+> 💡 **Module ⑥ "Map editor" takes the other road: it never generates art, it imports your own tileset.**
+> Import an atlas → slice it by grid or rectangles → assign tiles to terrain families (auto-tiling supports
+> **single tile / 16-mask / 47-mask blob**) → assemble several maps and layers (each layer can have a height
+> offset) → export PNG, own JSON and **Tiled `.tmj`/`.tsj`** (tileset images are copied alongside, so Tiled opens
+> it directly). Both square top-down and 2:1 isometric grids are supported, and **not a single model call is
+> made — so nothing is billed**.
 
 > ⚠️ **Module ④ "Rigged animation" is still experimental and not yet finished**: the quality of part extraction
 > depends on the image model, automatic assembly and bone inference frequently need manual correction on real
@@ -189,7 +197,7 @@ flowchart LR
 
 ## Driving it from chat
 
-**Every feature of all four modules** (including the experimental rigged animation) **is available through
+**Every feature of all six modules** (including the experimental rigged animation, map tiles and the map editor) **is available through
 chat**. The plugin registers the whole pipeline as `game_material_*` tools, so an agent can drive it forward,
 wait, review, and also stop at each step for you to approve.
 
@@ -288,7 +296,7 @@ the host side (the host has no access to the locale service), so the browser hal
 along every time it reads a project or resets prompts.
 
 Scope note: **localization covers the browser half's UI text and the built-in default prompts** — the workbench
-title, the four module tabs, every card's buttons and notice bars, dialogs, the settings page, the review
+title, the six module tabs, every card's buttons and notice bars, dialogs, the settings page, the review
 controls, and the default prompts. Two categories remain in Chinese, because DSH currently only exposes the
 locale service to the browser half:
 
@@ -318,7 +326,8 @@ Everything in the UI that you can click, change or approve is bilingual.
 ├── image-jobs/<id>/    image generation
 ├── sequence-jobs/<id>/ sequence frames
 └── rig-jobs/<id>/      rigged animation (experimental: sheet / parts / layout / rig / atlas)
-└── tile-jobs/<id>/     map tiles (template / raw / cell / decor / map / export)
+├── tile-jobs/<id>/     map tiles (template / raw / cell / decor / map / export)
+└── map-jobs/<id>/      map editor (tilesets / maps / preview / export)
 ```
 
 > Map tiles keep the **raw generation output** in `raw/`: after changing regularisation parameters such as
