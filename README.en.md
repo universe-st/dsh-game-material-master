@@ -157,8 +157,8 @@ without spending anything on generation.
 2. Optional: drop in **reference images** (up to 10); with references present, it runs image-to-image. To cite
    several of them, refer to "image one", "image two" in the prompt.
 3. Pick the model / size / count and click **Generate**.
-4. In the results area, review **image by image**: approve, download the PNG, regenerate, delete. The background
-   percentage is shown right there so you can judge how clean the keying is.
+4. In the results area, review **image by image**: approve, download the original / download the PNG (the keyed
+   result), regenerate, delete. The background percentage is shown right there so you can judge how clean the keying is.
 
 ![Image generation · prompt and reference images](https://raw.githubusercontent.com/universe-st/dsh-game-material-master/main/docs/images/gmm-06-image.png)
 
