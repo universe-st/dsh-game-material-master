@@ -17,7 +17,7 @@ const name = process.argv[3] ?? "真机验证（当前代码）";
 
 const G = await import("../lib/tilegen.js");
 const GEOM = await import("../lib/tilegeom.js");
-const MEDIA = await import("../lib/tilemedia.js");
+const MEDIA = await import("../lib/bitmap.js");
 
 const source = await G.readTileProject(sourceId);
 if (source === undefined) {

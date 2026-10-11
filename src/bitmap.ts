@@ -1,8 +1,10 @@
 /**
- * 地图地块模块的图像编解码与基础像素操作。
+ * 图像编解码与基础像素操作 —— **全插件共用**（原名 `tilemedia.ts`）。
  *
- * 这一层只做「字节 ↔ RGBA 缓冲区」和几个原语（PNG 头、颜色统计、菱形遮罩）。
- * 一切几何算法都在 `tilegeom.ts`，拼图在 `tilemap.ts`。
+ * 这一层只做「字节 ↔ RGBA 缓冲区」和几个与业务无关的原语
+ * （PNG 头、颜色统计、前景/背景掩码、包围盒）。地块几何在 `tilegeom.ts`、
+ * 拼图在 `tilemap.ts`、地图编辑器在 `mapgeom.ts` / `maprender.ts` ——
+ * 它们都只是这里的调用方，所以这个文件不叫 `tile*`。
  *
  * 为什么 PNG 解码走 ffmpeg：仓库**没有任何运行时依赖**（见 AGENTS.md），
  * 手写 PNG 解码器要处理 5 种 filter 类型，而 ffmpeg 已经是本插件的既有依赖
@@ -107,6 +109,21 @@ function runFfmpeg(args: string[]): Promise<Buffer> {
 /** 读盘 + 解码。 */
 export async function decodeFile(file: string, maxEdge = 0): Promise<Bitmap> {
   return decodeImage(file, maxEdge);
+}
+
+/**
+ * 只问尺寸、不要像素。
+ *
+ * PNG 直接读文件头（零成本）；JPEG / WebP / GIF 让 ffmpeg 解一帧成 PNG 再读头。
+ * 图集导入只需要知道「几乘几」，为了这个把几千万像素全解出来是白等。
+ */
+export async function probeImageSize(file: string): Promise<{ width: number; height: number }> {
+  const head = await readFile(file).catch(() => undefined);
+  if (head !== undefined) {
+    const size = pngSize(head);
+    if (size !== undefined) return size;
+  }
+  return probeDecodedSize(file, 0);
 }
 
 /** 编码落盘用的 PNG 字节。 */

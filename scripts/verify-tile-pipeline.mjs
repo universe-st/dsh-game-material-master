@@ -40,7 +40,7 @@ async function waitIdle(id, timeoutMs = 30000) {
 
 const G = await import("../lib/tilegen.js");
 const GEOM = await import("../lib/tilegeom.js");
-const MEDIA = await import("../lib/tilemedia.js");
+const MEDIA = await import("../lib/bitmap.js");
 const TILEMAP = await import("../lib/tilemap.js");
 const { tileJobsRoot } = await import("../lib/config.js");
 

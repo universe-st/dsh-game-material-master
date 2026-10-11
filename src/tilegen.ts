@@ -53,7 +53,7 @@ import {
   type TileSettings
 } from "./tilegeom.js";
 import { assembleMap, cropBitmap, emptyMapState, measureAssemblyBounds, pickVariantIndex, shapeOfEntry, trimTransparent, type TileMapState } from "./tilemap.js";
-import { decodeFile, encodeBitmap, pngSize, sniffImageExt, type Bitmap } from "./tilemedia.js";
+import { decodeFile, encodeBitmap, pngSize, sniffImageExt, type Bitmap } from "./bitmap.js";
 
 /**
  * 用户可见的阶段。

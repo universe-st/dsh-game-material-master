@@ -29,8 +29,8 @@
  * 实测白边像素 184 → 0，alpha 档位 2 → 115~208，剪影面积不变。
  */
 
-import type { Bitmap } from "./tilemedia.js";
-import { borderColor, foregroundMask, maskBounds, maskCount } from "./tilemedia.js";
+import type { Bitmap } from "./bitmap.js";
+import { borderColor, foregroundMask, maskBounds, maskCount } from "./bitmap.js";
 
 /** 目标菱形的固定尺寸：宽 2 份、高 1 份（严格的 2:1 等距）。 */
 export const DIAMOND_RATIO = 2 as const;

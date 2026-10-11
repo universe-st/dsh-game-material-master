@@ -36,7 +36,7 @@ import {
   shapeHalfWidthLocal,
   upscale
 } from "../lib/tilegeom.js";
-import { decodeFile, decodeImage, encodeBitmap, pngSize } from "../lib/tilemedia.js";
+import { decodeFile, decodeImage, encodeBitmap, pngSize } from "../lib/bitmap.js";
 import {
   assembleMap,
   countInteriorHoles,

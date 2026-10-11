@@ -296,7 +296,7 @@ section("④ 拼图 / ⑤ 导出（走网关，免费）");
     console.log("  · probe/ 不存在 —— 跳过拼图/导出（它们依赖真实产物）");
   } else {
     const GEOM = await import("../lib/tilegeom.js");
-    const MEDIA = await import("../lib/tilemedia.js");
+    const MEDIA = await import("../lib/bitmap.js");
     const decoded = await MEDIA.decodeFile(probe);
     const measure = GEOM.measureGroundDiamond(decoded);
     const out = GEOM.regularizeToCell(decoded, { cellWidth: 64, cellHeight: 96 }, measure, "measured");

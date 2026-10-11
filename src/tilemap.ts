@@ -19,7 +19,7 @@
  * 这正是等距游戏想要的效果，**不需要**额外的 z 排序逻辑。
  */
 
-import type { Bitmap } from "./tilemedia.js";
+import type { Bitmap } from "./bitmap.js";
 import { diamondHeight, diamondCenterY, type TileSettings } from "./tilegeom.js";
 
 /** 地图布局。与几何分离，所以改布局是零成本的。 */

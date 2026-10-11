@@ -20,7 +20,7 @@ const keys = (process.argv[3] ?? "grass,tree,rock").split(",").map((s) => s.trim
 
 const { configPath, dataRoot } = await import("../lib/config.js");
 const tilegen = await import("../lib/tilegen.js");
-const tilemedia = await import("../lib/tilemedia.js");
+const tilemedia = await import("../lib/bitmap.js");
 const tilegeom = await import("../lib/tilegeom.js");
 
 const config = JSON.parse(await readFile(configPath(), "utf8"));
