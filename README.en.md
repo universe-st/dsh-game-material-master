@@ -440,7 +440,7 @@ installation tree.
 | MiniMax API Key | "Test connection" is free and can tell an invalid key apart from other errors |
 | Video model | Defaults to `MiniMax-H3` (v2 protocol); Hailuo / I2V use v1; the UCloud version of H3 is selected explicitly |
 | Base URL | Host root, without `/v1` or `/v2`. `api.minimax.cn` in mainland China, `api.minimaxi.com` internationally |
-| Output size | Shared by every image-generating module; accepts `1K` / `2K` / `4K` or `width x height`. Enter explicit pixels (for example 1024x1024) to pin the output |
+| Output size | Default for every image-generating module; accepts `1K` / `2K` / `4K` or `width x height`. An image task can switch its size source to Custom to affect only that task; tasks that follow the global value update with this setting |
 | Key background color | Pure green `#00FF00` by default; switch to magenta / blue / white / black when the character wears green. "Green screen / #00FF00" in generated prompts is replaced accordingly, and every keying entry can pick its own color |
 | Default parameters | Cell width and height, frame count, pixel block size, keying threshold, and so on |
 | Local ComfyUI (image-to-video) | Routes image-to-video through a local **ComfyUI** instead of MiniMax; "Test connection" is read-only and free |

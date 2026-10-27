@@ -1533,15 +1533,30 @@ async function main() {
     `${imageJob.settings.model} vs ${(await studio.getConfig()).arkModel}`
   );
 
-  // 输出尺寸是全局设置：任务里再塞一个旧尺寸也不能覆盖它。
+  // 尺寸来源：默认跟全局；显式「自定义」后才保留任务自己的值。
+  check("新图片任务默认跟随全局尺寸", imageJob.settings.sizeMode === "global", imageJob.settings.sizeMode);
   {
     const originalSize = (await studio.getConfig()).arkSize;
     await studio.saveConfig({ arkSize: "1024x768" });
     await studio.saveImageJob({ jobId: imageId, settings: { size: "2K" } });
-    const sized = await studio.getImageJob({ jobId: imageId });
-    check("图片任务尺寸跟随全局设置（任务里的旧值被忽略）", sized.settings.size === "1024x768", sized.settings.size);
-    check("装饰后的配置给出当前输出尺寸", (await studio.getConfig()).imageProviderSize === "1024x768", (await studio.getConfig()).imageProviderSize);
+    let sized = await studio.getImageJob({ jobId: imageId });
+    check("只传 size 且与全局不同时自动转成自定义（老调用方不被静默忽略）", sized.settings.sizeMode === "custom" && sized.settings.size === "2K", JSON.stringify(sized.settings));
+
+    await studio.saveImageJob({ jobId: imageId, settings: { sizeMode: "global" } });
+    sized = await studio.getImageJob({ jobId: imageId });
+    check("跟随全局时用全局尺寸", sized.settings.size === "1024x768", sized.settings.size);
+
+    await studio.saveImageJob({ jobId: imageId, settings: { sizeMode: "custom", size: "1024x1536" } });
+    await studio.saveConfig({ arkSize: "512x512" });
+    sized = await studio.getImageJob({ jobId: imageId });
+    check("自定义尺寸不随全局漂移", sized.settings.sizeMode === "custom" && sized.settings.size === "1024x1536", JSON.stringify(sized.settings));
+
+    await studio.saveImageJob({ jobId: imageId, settings: { sizeMode: "global" } });
+    sized = await studio.getImageJob({ jobId: imageId });
+    check("切回跟随全局后拿到最新全局值", sized.settings.size === "512x512", sized.settings.size);
+    check("装饰后的配置给出当前输出尺寸", (await studio.getConfig()).imageProviderSize === "512x512", (await studio.getConfig()).imageProviderSize);
     await studio.saveConfig({ arkSize: originalSize });
+    await studio.saveImageJob({ jobId: imageId, settings: { sizeMode: "global" } });
   }
 
   // 上传一张已有图片直接做抠像——这是「支持绿幕抠图生成 png」的主路径

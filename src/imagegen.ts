@@ -64,6 +64,14 @@ export interface ImageJob {
   refs: Array<{ file: string; name: string }>;
   settings: {
     model: string;
+    /**
+     * 尺寸来源：
+     * - `global`（默认）：跟随「设置 → 输出尺寸」，全局改了任务跟着改；
+     * - `custom`：只这个任务用自己的 `size`，不跟全局漂移。
+     *
+     * 老任务没有这个字段时按 `global` 处理（0.11.1 的迁移口径）。
+     */
+    sizeMode: "global" | "custom";
     size: string;
     count: number;
     watermark: boolean;
@@ -125,6 +133,7 @@ export async function createImageJob(name: string): Promise<ImageJob> {
     refs: [],
     settings: {
       model: imageModelOf(config),
+      sizeMode: "global",
       size: imageSizeOf(config),
       count: 1,
       watermark: imageWatermarkOf(config)
@@ -219,6 +228,7 @@ function normalizeImageJob(raw: any): ImageJob {
       : [],
     settings: {
       model: typeof raw?.settings?.model === "string" ? raw.settings.model : "",
+      sizeMode: raw?.settings?.sizeMode === "custom" ? "custom" : "global",
       size: typeof raw?.settings?.size === "string" ? raw.settings.size : "2K",
       count: Math.min(8, Math.max(1, Number(raw?.settings?.count) || 1)),
       watermark: raw?.settings?.watermark === true
@@ -286,13 +296,13 @@ export async function generateImageItem(jobId: string, index: number): Promise<v
   // 生图模型同样是全局设置（设置 → 游戏素材大师 → 生图后端），任务只跟随、不覆盖。
   job.settings.model = imageModelOf(config);
   /**
-   * 输出尺寸是**全局设置**（和生图模型同一条思路）：所有模块 / 所有后端共用。
-   *
-   * 历史坑：自定义 / ToAPIs 后端会覆盖任务上的 size，火山方舟却保留任务级副本，
-   * 于是「改了设置里的尺寸」在旧任务上永远不生效 —— 用户看到的就是「总是同一个尺寸」。
-   * 现在任务只跟随、不覆盖；界面上的尺寸输入框直接改全局配置。
+   * 尺寸只在「跟随全局」时取全局值；用户显式把任务改成「自定义」后，
+   * 任务自己的 size 才是权威 —— 否则又会回到「改任务尺寸不生效」的老 bug。
    */
-  job.settings.size = imageSizeOf(config);
+  if (job.settings.sizeMode !== "custom") {
+    job.settings.sizeMode = "global";
+    job.settings.size = imageSizeOf(config);
+  }
 
   const item: ImageItem = job.items[index] ?? { index, status: "empty", source: "generated" };
   job.items[index] = { ...item, status: "running", error: undefined };

@@ -2060,15 +2060,18 @@
       "自定义": "Custom",
       "抠掉背景色（只留建筑本体）": "Key out the background color (keep only the object)",
       "抠掉背景色": "Key out the background color",
-      "输出尺寸（全局）": "Output size (global)",
-      "输出尺寸已保存": "Output size saved",
-      "所有模块共用；支持 1K / 2K / 4K 或 宽x高（要固定像素就直接填 1024x1024 这种）": "Shared by all modules; accepts 1K / 2K / 4K or width x height",
       "抠像背景色（全局默认）": "Key background color (global default)",
       "第四步 · 整理并回链：game_material({action:'call', method:'composeMapAsset', payload:{projectId:'{n0}', name:'{n1}', files:[<上面那些绝对路径，按顺序>], shape:'<你选的形态：plain|corner16|a2quad|stamp>', keyColor:'{n2}'}})": "Step 4 - Assemble and post the link: game_material({action:'call', method:'composeMapAsset', payload:{projectId:'{n0}', name:'{n1}', files:[<those absolute paths, in order>], shape:'<the shape you chose: plain|corner16|a2quad|stamp>', keyColor:'{n2}'}})",
       "  抠像底色是 {n0}：composeMapAsset 必须带上 keyColor:'{n0}'，与提示词里的背景色一致。": "  The key color is {n0}: composeMapAsset must pass keyColor:'{n0}' so keying matches the prompt background.",
       "第四步 · 整理并回链：game_material({action:'call', method:'composeIsoAsset', payload:{projectId:'{n0}', name:'{n1}', files:[<上面那些绝对路径，按顺序>], kind:'<ground 或 object>', footprint:<物件时给 {{cols:{n2},rows:{n3}}}>, keyColor:'{n4}'}})": "Step 4 - assemble and post the link: game_material({action:'call', method:'composeIsoAsset', payload:{projectId:'{n0}', name:'{n1}', files:[<those absolute paths, in order>], kind:'<ground or object>', footprint:<for objects: {{cols:{n2},rows:{n3}}}>, keyColor:'{n4}'}})",
       "  抠像底色是 {n0}：composeIsoAsset 必须带上 keyColor:'{n0}'，与提示词里的背景色一致。": "  The key color is {n0}: composeIsoAsset must pass keyColor:'{n0}' so keying matches the prompt background.",
       "1K / 2K / 4K 由模型决定像素；要固定尺寸请直接填 宽x高": "1K / 2K / 4K are model-defined pixel sizes; enter width x height to pin exact dimensions",
+      "尺寸来源": "Size source",
+      "跟随全局（{n0}）": "Follow global ({n0})",
+      "任务尺寸": "Task size",
+      "只影响这个任务；支持 1K / 2K / 4K 或 宽x高": "Affects only this task; accepts 1K / 2K / 4K or width x height",
+      "当前全局尺寸": "Current global size",
+      "在「设置 → 游戏素材大师 → 输出尺寸」里改": "Change it in Settings → Game Material Master → Output size",
     };
 /* i18n-ignore-end */
 
@@ -4630,13 +4633,6 @@
         };
       }, [api]);
       return value;
-    }
-
-    /** 当前生图后端的尺寸配置键（设置页与图片模块共用）。 */
-    function sizeConfigKey(config) {
-      if (config?.imageProvider === "custom") return "customSize";
-      if (config?.imageProvider === "toapis") return "toapisImageSize";
-      return "arkSize";
     }
 
     /** 只读展示当前生效的全局模型：模型只在设置里改，模块内不允许覆盖。 */
@@ -15863,18 +15859,7 @@
       const [suffixDraft, setSuffixDraft] = React.useState("");
       const [settingsDraft, setSettingsDraft] = React.useState({});
       const [keyingDraft, setKeyingDraft] = React.useState({});
-      const [globalSizeDraft, setGlobalSizeDraft] = React.useState(null);
       const globalConfig = useGlobalConfig(api);
-      /**
-       * 输出尺寸是**全局设置**（和生图模型同一条思路）。
-       *
-       * 之前任务里存一份尺寸副本：自定义 / ToAPIs 后端会覆盖它，火山方舟却保留，
-       * 于是「改了设置里的尺寸」在旧任务上永远不生效 —— 用户看到的就是「总是
-       * 1254×1254 这类固定尺寸」。现在输入框直接改全局配置，所有模块一起变。
-       */
-      React.useEffect(() => {
-        if (globalConfig !== null) setGlobalSizeDraft(globalConfig.imageProviderSize ?? "");
-      }, [globalConfig]);
       // 「正在调用接口」的记账表（上传走自己的 uploading 状态，不在这里）。
       const tasks = usePendingTasks();
       // 深链接：切到某一个图片任务。
@@ -16076,24 +16061,53 @@
                       h(
                         "label",
                         { className: "SPR_field" },
-                        h("span", { className: "SPR_fieldLabel" }, T("输出尺寸（全局）")),
-                        h("input", {
-                          className: "SPR_input",
-                          "data-testid": "image-global-size",
-                          value: globalSizeDraft ?? globalConfig?.imageProviderSize ?? "",
-                          placeholder: "1K / 2K / 4K / 1024x1024",
-                          onChange: (event) => setGlobalSizeDraft(event.target.value),
-                          onKeyDown: (event) => {
-                            if (event.key === "Enter") event.target.blur();
+                        h("span", { className: "SPR_fieldLabel" }, T("尺寸来源")),
+                        h(
+                          "select",
+                          {
+                            className: "SPR_input",
+                            "data-testid": "image-size-mode",
+                            value: settingsDraft.sizeMode === "custom" ? "custom" : "global",
+                            onChange: (event) => {
+                              const mode = event.target.value === "custom" ? "custom" : "global";
+                              const next = {
+                                ...settingsDraft,
+                                sizeMode: mode,
+                                ...(mode === "global" ? { size: globalConfig?.imageProviderSize ?? settingsDraft.size } : {})
+                              };
+                              setSettingsDraft(next);
+                              void saveJob({ settings: next });
+                            }
                           },
-                          onBlur: () => {
-                            const value = (globalSizeDraft ?? "").trim();
-                            if (value === "") return;
-                            void run(() => api.saveConfig({ [sizeConfigKey(globalConfig)]: value }), T("输出尺寸已保存"));
-                          }
-                        }),
-                        h("span", { className: "SPR_fieldLabel" }, T("所有模块共用；支持 1K / 2K / 4K 或 宽x高（要固定像素就直接填 1024x1024 这种）"))
+                          h("option", { value: "global" }, T("跟随全局（{n0}）", { n0: globalConfig?.imageProviderSize ?? "—" })),
+                          h("option", { value: "custom" }, T("自定义"))
+                        )
                       ),
+                      settingsDraft.sizeMode === "custom"
+                        ? h(
+                            "label",
+                            { className: "SPR_field" },
+                            h("span", { className: "SPR_fieldLabel" }, T("任务尺寸")),
+                            h("input", {
+                              className: "SPR_input",
+                              "data-testid": "image-task-size",
+                              value: settingsDraft.size ?? "",
+                              placeholder: "1K / 2K / 4K / 1024x1024",
+                              onChange: (event) => setSettingsDraft({ ...settingsDraft, size: event.target.value }),
+                              onKeyDown: (event) => {
+                                if (event.key === "Enter") event.target.blur();
+                              },
+                              onBlur: () => void saveJob({ settings: settingsDraft })
+                            }),
+                            h("span", { className: "SPR_fieldLabel" }, T("只影响这个任务；支持 1K / 2K / 4K 或 宽x高"))
+                          )
+                        : h(
+                            "label",
+                            { className: "SPR_field" },
+                            h("span", { className: "SPR_fieldLabel" }, T("当前全局尺寸")),
+                            h("input", { className: "SPR_input", value: globalConfig?.imageProviderSize ?? settingsDraft.size ?? "", readOnly: true, disabled: true, "data-testid": "image-global-size" }),
+                            h("span", { className: "SPR_fieldLabel" }, T("在「设置 → 游戏素材大师 → 输出尺寸」里改"))
+                          ),
                       h(NumField, { label: T("生成张数（1~8）"), value: settingsDraft.count ?? 1, min: 1, max: 8, onChange: (v) => { setSettingsDraft({ ...settingsDraft, count: v }); void saveJob({ settings: { ...settingsDraft, count: v } }); } })
                     ),
                     h(
@@ -16109,12 +16123,6 @@
                           onClick: () =>
                             void run(
                               async () => {
-                                // 尺寸输入框失焦与点生成可能同一拍发生：先把全局尺寸落盘，
-                                // 否则本次生成可能仍读到旧尺寸（用户看到的就是「改了也不行」）。
-                                const sizeValue = (globalSizeDraft ?? "").trim();
-                                if (sizeValue !== "" && sizeValue !== (globalConfig?.imageProviderSize ?? "") && typeof api.saveConfig === "function") {
-                                  await api.saveConfig({ [sizeConfigKey(globalConfig)]: sizeValue });
-                                }
                                 await enqueueImageSave({ prompt: promptDraft, suffix: suffixDraft, settings: settingsDraft });
                                 return api.runImageJob({ jobId: job.id });
                               },

@@ -343,7 +343,7 @@ const api = new Proxy(
  */
 const EXPECTED_HOOKS = {
   StudioPanel: 21,
-  ImageModule: 18,
+  ImageModule: 17,
   SequenceModule: 17
 };
 
@@ -891,7 +891,7 @@ function makeImageJob(overrides = {}) {
     prompt: "一只猫",
     suffix: "",
     refs: [],
-    settings: { count: 2 },
+    settings: { count: 2, size: "2K", sizeMode: "global" },
     keying: { enabled: false },
     log: [],
     items: [
@@ -929,9 +929,9 @@ function makeSequenceJob(overrides = {}) {
  * ImageModule 的 useState 顺序：
  *   0 useLocaleTick（语言切换计数器）/ 1 jobs / 2 jobId / 3 job / 4 notice /
  *   5 uploading / 6 promptDraft / 7 suffixDraft /
- *   8 settingsDraft / 9 keyingDraft / 10 globalSizeDraft /
- *   11 useGlobalConfig / 12 usePendingTasks.map / 13 useStudioIntent（深链接意图）/
- *   14 loadedDrafts(useRef，上次从宿主读到的草稿；不读槽位)
+ *   8 settingsDraft / 9 keyingDraft / 10 useGlobalConfig /
+ *   11 usePendingTasks.map / 12 useStudioIntent（深链接意图）/
+ *   13 loadedDrafts(useRef，上次从宿主读到的草稿；不读槽位)
  * SequenceModule 的顺序与之完全相同（它另有自己的 jobIdRef，排在这个 ref 之前）。
  */
 function renderModule(component, job, tasks) {
@@ -947,12 +947,7 @@ function renderModule(component, job, tasks) {
     { ...(job.settings ?? {}) },
     { ...(job.keying ?? {}) }
   ];
-  if (component === ImageModule) {
-    // 图片模块多一个「全局输出尺寸」草稿槽（见上方 Hook 顺序注释）。
-    HOOK.slots = [...base, null, undefined, tasks.map, null];
-  } else {
-    HOOK.slots = [...base, undefined, tasks.map, null];
-  }
+  HOOK.slots = [...base, undefined, tasks.map, null];
   HOOK.cursor = 0;
   const tree = component({ api });
   return { tree, overflow: false, hooks: HOOK.cursor };
@@ -974,6 +969,10 @@ if (typeof ImageModule === "function") {
       ""
     );
     check("图片模块有全局输出尺寸输入框", byTag(idle.tree, "input").some((node) => node.props["data-testid"] === "image-global-size"));
+    check("图片模块有「尺寸来源」选择器（默认跟随全局）", byTag(idle.tree, "select").some((node) => node.props["data-testid"] === "image-size-mode" && node.props.value === "global"));
+    check("跟随全局时不显示任务尺寸输入框", !byTag(idle.tree, "input").some((node) => node.props["data-testid"] === "image-task-size"));
+    const customSize = renderModule(ImageModule, makeImageJob({ settings: { count: 2, size: "1024x1536", sizeMode: "custom" } }), makeTasks());
+    check("自定义尺寸时显示任务尺寸输入框", byTag(customSize.tree, "input").some((node) => node.props["data-testid"] === "image-task-size" && node.props.value === "1024x1536"));
 
     const gen = renderModule(ImageModule, makeImageJob(), makeTasks(["img:job"]));
     check("整批生成时两张图都被盖住", overlays(gen.tree).length >= 2, `${overlays(gen.tree).length} 个`);
@@ -1546,7 +1545,7 @@ section("图片提示词保存与生成时序");
     getImageJob: async () => job,
     listImageJobs: async () => ({ jobs: [job] })
   };
-  HOOK.slots = [0, [job], job.id, job, null, false, "latest typed prompt", "", {...job.settings}, {...job.keying}, null, undefined, {}, null];
+  HOOK.slots = [0, [job], job.id, job, null, false, "latest typed prompt", "", {...job.settings}, {...job.keying}, undefined, {}, null];
   HOOK.cursor = 0;
   const tree = ImageModule({ api: apiQueued });
   const prompt = byTag(tree, "textarea").find(node => node.props.placeholder === "描述你要生成的图片…");
