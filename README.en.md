@@ -12,7 +12,14 @@ third-party service.
 [![npm](https://img.shields.io/npm/v/dsh-game-material-master?color=blue)](https://www.npmjs.com/package/dsh-game-material-master)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-> **🆕 0.11.0 update**: both map editors gain a full **Agent loop** — `mapInspect` / `isoInspect` read cells,
+> **🆕 0.11.2 update**: image-size and key-color fixes — an image task now **follows the global size** by default,
+> or can switch to **Custom** to pin its own dimensions; global size accepts `1K` / `2K` / `4K` or explicit
+> `width x height`, and hard-coded `Empty*` sizes in a ComfyUI workflow are injected automatically.
+> A configurable **key background color** (green / blue / magenta / cyan / yellow / red / white / black + custom)
+> is available in image, sequence, eight-direction, map-stamp, 45° object and both AI-asset entry points;
+> default prompts replace "green screen / #00FF00" with the chosen color while leaving user-written text untouched.
+>
+> **0.11.0 update**: both map editors gain a full **Agent loop** — `mapInspect` / `isoInspect` read cells,
 > objects, stamps, markers and passability by region, while `mapRender` / `isoRender` synchronously produce a
 > **check image** (region crop, zoom, optional marker / grid / passability / outline overlays) and return a local
 > absolute path for `read_image`. `applyMapOps` / `applyIsoOps` add **`dryRun`** (validate without writing) and
@@ -403,7 +410,7 @@ dsh plugin --profile web add /path/to/dsh-game-material-master
 ```
 
 The package is published to npm: [dsh-game-material-master](https://www.npmjs.com/package/dsh-game-material-master)
-(currently `0.11.0`, `latest`). It has no runtime dependencies, so `dsh plugin add` is all you need.
+(currently `0.11.2`, `latest`). It has no runtime dependencies, so `dsh plugin add` is all you need.
 
 **DSH version**: `>=0.2.0-rc.2 <0.3.0` (the `engines.dsh` field; since DSH 0.2.1 the plugin manager checks it first).
 When a Web deployment uses `--public-url https://host/prefix/`, deep links and asset URLs include that path prefix.

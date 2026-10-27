@@ -10,7 +10,12 @@
 [![npm](https://img.shields.io/npm/v/dsh-game-material-master?color=blue)](https://www.npmjs.com/package/dsh-game-material-master)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-> **🆕 0.11.0 更新**：两套地图编辑器补上 **Agent 闭环** —— `mapInspect` / `isoInspect` 按区域读逐格、物件、整图、标记与通行性，
+> **🆕 0.11.2 更新**：生图尺寸与抠像底色修复 —— 图片任务默认**跟随全局尺寸**，也可切「**自定义**」只影响本任务；
+> 全局尺寸支持 `1K` / `2K` / `4K` 与精确宽高，ComfyUI 工作流里写死的 `Empty*` 尺寸也会被自动注入。
+> 新增可配置**抠像背景色**（绿 / 蓝 / 品红 / 青 / 黄 / 红 / 白 / 黑 + 自定义），图片、序列帧、八方向、地图整图、
+> 45° 物件与两套 AI 生成素材入口都可选；默认提示词里的「绿幕 / #00FF00」会跟着底色替换，用户手写原文不改。
+>
+> **0.11.0 更新**：两套地图编辑器补上 **Agent 闭环** —— `mapInspect` / `isoInspect` 按区域读逐格、物件、整图、标记与通行性，
 > `mapRender` / `isoRender` 同步出**检查图**（区域裁切、放大、可叠标记 / 网格 / 通行性 / 轮廓，返回本机绝对路径交给 `read_image`）；
 > `applyMapOps` / `applyIsoOps` 新增 **`dryRun`**（只校验不写盘）与 **`ifRevision`**（旧版本直接拒绝，防覆盖）。
 > 标记可带 **类型 / 颜色 / 备注 / 标签**（`marker update`，导出格式升到 `@5` / `@2`）；整图支持**移动 / 旋转**、最小占格放宽到 **1×1**，
@@ -338,7 +343,7 @@ dsh plugin --profile web add /path/to/dsh-game-material-master
 ```
 
 包已发布到 npm：[dsh-game-material-master](https://www.npmjs.com/package/dsh-game-material-master)
-（当前 `0.11.0`，`latest`）。本包没有运行时依赖，`dsh plugin add` 拉下来即可用。
+（当前 `0.11.2`，`latest`）。本包没有运行时依赖，`dsh plugin add` 拉下来即可用。
 
 **DSH 版本**：`>=0.2.0-rc.2 <0.3.0`（`package.json` 的 `engines.dsh`；DSH 0.2.1 起插件管理器优先按它判断兼容性）。
 Web 部署用 `--public-url https://host/prefix/` 时，深链接与产物地址会跟着补路径前缀。
