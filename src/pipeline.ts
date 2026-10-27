@@ -49,6 +49,7 @@ import {
   videoBackendOf
 } from "./videogen.js";
 import { composeSheet, keyGreen, type SheetRow } from "./chroma.js";
+import { applyKeyColorToPrompt } from "./keycolor.js";
 import { encodePng } from "./png.js";
 import { zipEntries, type ZipEntry } from "./zip.js";
 import {
@@ -213,7 +214,8 @@ async function generateOne(projectId: string, key: string, promptOverride?: stri
   // 后端没配好就不要往下走：这一步会真实计费，早失败比「跑到一半报错」好。
   assertImageProviderReady(config);
 
-  const basePrompt = (promptOverride ?? project.prompts.images[key] ?? "").trim();
+  const keyColor = project.settings.keyColorOverride === true ? project.settings.keyColor : config.keyColor;
+  const basePrompt = applyKeyColorToPrompt((promptOverride ?? project.prompts.images[key] ?? "").trim(), keyColor, "zh");
   if (basePrompt === "") throw new Error("提示词为空，请先填写生图提示词");
   // 统一附加提示词接在每个方向的提示词后面（跨方向的共同注意事项）。
   const suffix = (project.prompts.suffix ?? "").trim();
@@ -396,7 +398,8 @@ async function submitTurnVideo(projectId: string): Promise<void> {
   const first = await turnFirstFrame(projectId, project);
   if (first === undefined) throw new Error("还没有源图，无法生成转圈视频");
 
-  const base = (project.prompts.turn ?? DEFAULT_TURN_PROMPT).trim();
+  const keyColor = project.settings.keyColorOverride === true ? project.settings.keyColor : config.keyColor;
+  const base = applyKeyColorToPrompt((project.prompts.turn ?? DEFAULT_TURN_PROMPT).trim(), keyColor, "zh");
   if (base === "") throw new Error("提示词为空，请先填写转圈视频提示词");
   const suffix = (project.prompts.suffix ?? "").trim();
   const prompt = suffix === "" ? base : `${base}\n${suffix}`;
@@ -1036,7 +1039,8 @@ export function startVideos(projectId: string, keys?: string[]): { started: bool
       try {
         const jpegRel = `videos/${key}-first-frame.jpg`;
         const dataUri = await toJpegDataUri(assetPath(projectId, image.file), assetPath(projectId, jpegRel), 1280, 3, videoBackendOf(config) === "toapis" ? "white" : undefined);
-        const prompt = (fresh.prompts.videoPerDirection?.[key] ?? fresh.prompts.video).trim();
+        const keyColor = fresh.settings.keyColorOverride === true ? fresh.settings.keyColor : config.keyColor;
+        const prompt = applyKeyColorToPrompt((fresh.prompts.videoPerDirection?.[key] ?? fresh.prompts.video).trim(), keyColor, "zh");
         const submitted = await submitVideoTask(config, {
           prompt,
           firstFrameImage: dataUri,
@@ -1605,6 +1609,8 @@ async function renderSheet(projectId: string, options: RenderOptions = {}): Prom
   const project = await readProject(projectId);
   if (project === undefined) throw new Error(`项目不存在：${projectId}`);
   const settings = project.settings;
+  const config = await loadConfig();
+  const keyColor = settings.keyColorOverride === true ? settings.keyColor : config.keyColor;
 
   await patchProject(projectId, (current) => {
     current.sheet = { ...current.sheet, status: "running", error: undefined };
@@ -1612,6 +1618,7 @@ async function renderSheet(projectId: string, options: RenderOptions = {}): Prom
 
   try {
     const keyOptions = {
+      keyColor,
       keyLow: settings.keyLow,
       keyHigh: settings.keyHigh,
       despill: settings.despill,

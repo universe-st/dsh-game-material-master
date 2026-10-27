@@ -18,19 +18,19 @@ import { join, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import { writeJsonAtomic } from "./jsonio.js";
 import {
-  DEFAULT_TURN_PROMPT,
-  DEFAULT_VIDEO_PROMPT,
   DIRECTION_KEYS,
   DEFAULT_ROW_ORDER,
   TURN_FRAME_COUNT_DEFAULT,
   TURN_DIRECTION_DEFAULT,
   TURN_FRAME_COUNT_MAX,
   TURN_FRAME_COUNT_MIN,
-  defaultImagePrompts,
+  applyKeyColorToPrompts,
+  defaultPrompts,
   defaultTurnPicks,
   type TurnDirection
 } from "./directions.js";
 import { DEFAULT_CONFIG, ROW_ORDER_VERSION, isLegacyRowOrder, loadConfig, projectsRoot, type Config } from "./config.js";
+import { normalizeKeyColor } from "./keycolor.js";
 
 export type NodeStatus = "empty" | "running" | "ready" | "error";
 export type StageKey = "images" | "videos" | "frames" | "sheet";
@@ -248,6 +248,10 @@ export interface ProjectSettings {
   fillRatio: number;
   bottomMargin: number;
   cropInset: number;
+  /** 抠像底色（`#RRGGBB`）。 */
+  keyColor: string;
+  /** 用户是否在项目里显式改过底色；false = 跟随全局设置。 */
+  keyColorOverride: boolean;
   keyLow: number;
   keyHigh: number;
   despill: number;
@@ -356,6 +360,8 @@ export function settingsFromConfig(config: Config, rowOrder?: string[]): Project
     fillRatio: config.fillRatio,
     bottomMargin: config.bottomMargin,
     cropInset: config.cropInset,
+    keyColor: config.keyColor,
+    keyColorOverride: false,
     keyLow: config.keyLow,
     keyHigh: config.keyHigh,
     despill: config.despill,
@@ -478,6 +484,7 @@ export async function createProject(name: string): Promise<Project> {
   const id = `p${Date.now().toString(36)}${randomUUID().slice(0, 6)}`;
   const now = Date.now();
   const settings = settingsFromConfig(config);
+  const defaults = defaultPrompts("zh", config.keyColor);
   const project: Project = {
     id,
     name: name.trim() === "" ? "未命名项目" : name.trim(),
@@ -485,9 +492,9 @@ export async function createProject(name: string): Promise<Project> {
     updatedAt: now,
     source: null,
     prompts: {
-      images: defaultImagePrompts(),
-      video: DEFAULT_VIDEO_PROMPT,
-      turn: DEFAULT_TURN_PROMPT,
+      images: defaults.images,
+      video: defaults.video,
+      turn: defaults.turn,
       videoPerDirection: {},
       suffix: ""
     },
@@ -611,6 +618,8 @@ function normalizeProject(raw: any): Project {
     fillRatio: num(settings.fillRatio, defaults.fillRatio),
     bottomMargin: num(settings.bottomMargin, defaults.bottomMargin),
     cropInset: num(settings.cropInset, defaults.cropInset),
+    keyColor: normalizeKeyColor(settings.keyColor, defaults.keyColor),
+    keyColorOverride: settings.keyColorOverride === true,
     keyLow: num(settings.keyLow, defaults.keyLow),
     keyHigh: num(settings.keyHigh, defaults.keyHigh),
     despill: num(settings.despill, defaults.despill),
@@ -660,12 +669,20 @@ function normalizeProject(raw: any): Project {
     }
   }
 
-  const defaultPrompts = defaultImagePrompts();
+  const promptDefaults = defaultPrompts("zh", merged.keyColor);
   const images_prompts: Record<string, string> = {};
   for (const key of DIRECTION_KEYS) {
     const value = raw?.prompts?.images?.[key];
-    images_prompts[key] = typeof value === "string" && value.trim() !== "" ? value : defaultPrompts[key];
+    images_prompts[key] = typeof value === "string" && value.trim() !== "" ? value : promptDefaults.images[key];
   }
+  const videoPrompt = typeof raw?.prompts?.video === "string" && raw.prompts.video.trim() !== "" ? raw.prompts.video : promptDefaults.video;
+  const turnPrompt = typeof raw?.prompts?.turn === "string" && raw.prompts.turn.trim() !== "" ? raw.prompts.turn : promptDefaults.turn;
+  const perDirectionPrompts =
+    raw?.prompts?.videoPerDirection !== null && typeof raw?.prompts?.videoPerDirection === "object"
+      ? { ...raw.prompts.videoPerDirection }
+      : {};
+  const normalizedPrompts = { images: images_prompts, video: videoPrompt, turn: turnPrompt, videoPerDirection: perDirectionPrompts, suffix: "" };
+  applyKeyColorToPrompts(normalizedPrompts, merged.keyColor);
 
   const imageMode = deriveImageMode(raw);
 
@@ -676,13 +693,10 @@ function normalizeProject(raw: any): Project {
     updatedAt: num(raw?.updatedAt, now),
     source: raw?.source?.file ? { file: String(raw.source.file), name: String(raw.source.name ?? "source") } : null,
     prompts: {
-      images: images_prompts,
-      video: typeof raw?.prompts?.video === "string" && raw.prompts.video.trim() !== "" ? raw.prompts.video : DEFAULT_VIDEO_PROMPT,
-      turn: typeof raw?.prompts?.turn === "string" && raw.prompts.turn.trim() !== "" ? raw.prompts.turn : DEFAULT_TURN_PROMPT,
-      videoPerDirection:
-        raw?.prompts?.videoPerDirection !== null && typeof raw?.prompts?.videoPerDirection === "object"
-          ? { ...raw.prompts.videoPerDirection }
-          : {},
+      images: normalizedPrompts.images,
+      video: normalizedPrompts.video,
+      turn: normalizedPrompts.turn,
+      videoPerDirection: normalizedPrompts.videoPerDirection,
       suffix: typeof raw?.prompts?.suffix === "string" ? raw.prompts.suffix : ""
     },
     images,

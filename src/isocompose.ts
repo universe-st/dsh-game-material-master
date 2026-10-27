@@ -16,6 +16,8 @@
 import { stat } from "node:fs/promises";
 import { decodeFile, type Bitmap } from "./bitmap.js";
 import { MAX_ASSET_SCALE, keyStampBackground, resampleToSize, STAMP_KEY_OPTIONS } from "./maptiles.js";
+import { isGreenKeyColor, keyScreenName, normalizeKeyColor } from "./keycolor.js";
+import { keyGreen } from "./chroma.js";
 import type { IsoCell, IsoFootprint } from "./isogeom.js";
 
 export type IsoAiAssetKind = "ground" | "object";
@@ -27,8 +29,10 @@ export interface ComposeIsoFramesInput {
   cell: IsoCell;
   /** 仅 object；默认 1×1。 */
   footprint?: IsoFootprint;
-  /** 是否把纯绿背景抠成透明；默认 true。 */
+  /** 是否把背景抠成透明；默认 true。 */
   keyGreen?: boolean;
+  /** 背景色（`#RRGGBB`，留空 = 默认绿）。 */
+  keyColor?: string;
 }
 
 export interface ComposeIsoFramesResult {
@@ -80,7 +84,7 @@ function cropOpaque(source: Bitmap): Bitmap {
 }
 
 /** 读一张原图、抠绿、裁到内容边界；返回可直接缩放的帧。 */
-async function readFrame(file: string, keyGreen: boolean): Promise<{ bitmap: Bitmap; keyed: number }> {
+async function readFrame(file: string, keyGreen: boolean, keyColor: string): Promise<{ bitmap: Bitmap; keyed: number }> {
   let info;
   try {
     info = await stat(file);
@@ -101,7 +105,7 @@ async function readFrame(file: string, keyGreen: boolean): Promise<{ bitmap: Bit
   if (keyGreen) {
     const result = keyStampBackground(bitmap, (rgba, width, height) => {
       // 与「整图」同一条严格绿幕参数：只认饱和纯绿，避免把草地 / 深色阴影误判成背景。
-      return keyGreenPixels(rgba, width, height);
+      return keyBackgroundPixels(rgba, width, height, keyColor);
     });
     bitmap = result.bitmap;
     keyed = result.keyed;
@@ -113,20 +117,25 @@ async function readFrame(file: string, keyGreen: boolean): Promise<{ bitmap: Bit
  * 严格绿幕（与 maptiles.STAMP_KEY_OPTIONS 同口径）。
  * 这里单独包一层是为了不把 chroma 的默认参数（适合角色）带进地图素材。
  */
-function keyGreenPixels(rgba: Buffer, width: number, height: number): { rgba: Buffer; backgroundFraction: number } {
-  const out = Buffer.from(rgba);
-  let hit = 0;
-  for (let i = 0; i < width * height; i++) {
-    const r = out[i * 4];
-    const g = out[i * 4 + 1];
-    const b = out[i * 4 + 2];
-    const advantage = g - Math.max(r, b);
-    if (g >= STAMP_KEY_OPTIONS.keyLow && advantage >= STAMP_KEY_OPTIONS.keyHigh) {
-      out[i * 4 + 3] = 0;
-      hit++;
+function keyBackgroundPixels(rgba: Buffer, width: number, height: number, keyColor: string): { rgba: Buffer; backgroundFraction: number } {
+  const color = normalizeKeyColor(keyColor);
+  // 绿色保持原来的严格判据（只认饱和纯绿），避免把草地 / 深色阴影误判成背景。
+  if (isGreenKeyColor(color)) {
+    const out = Buffer.from(rgba);
+    let hit = 0;
+    for (let i = 0; i < width * height; i++) {
+      const r = out[i * 4];
+      const g = out[i * 4 + 1];
+      const b = out[i * 4 + 2];
+      const advantage = g - Math.max(r, b);
+      if (g >= STAMP_KEY_OPTIONS.keyLow && advantage >= STAMP_KEY_OPTIONS.keyHigh) {
+        out[i * 4 + 3] = 0;
+        hit++;
+      }
     }
+    return { rgba: out, backgroundFraction: hit / Math.max(1, width * height) };
   }
-  return { rgba: out, backgroundFraction: hit / Math.max(1, width * height) };
+  return keyGreen(rgba, width, height, { ...STAMP_KEY_OPTIONS, keyColor: color });
 }
 
 /** 把一帧贴进目标格子的菱形框；只保留菱形内部。 */
@@ -222,17 +231,19 @@ export async function composeIsoFrames(input: ComposeIsoFramesInput): Promise<Co
     ? { cols: 1, rows: 1 }
     : { cols: Math.max(1, Math.round(input.footprint.cols)), rows: Math.max(1, Math.round(input.footprint.rows)) };
   const keyGreen = input.keyGreen !== false;
+  const keyColor = normalizeKeyColor(input.keyColor);
   const notes: string[] = [];
   const read = [];
-  for (const file of files) read.push(await readFrame(file, keyGreen));
+  for (const file of files) read.push(await readFrame(file, keyGreen, keyColor));
 
   const keyedValues = read.map((entry) => entry.keyed);
   const keyedCount = keyedValues.filter((value) => value > 0).length;
   const keyed = keyedValues.length === 0 ? 0 : keyedValues.reduce((sum, value) => sum + value, 0) / keyedValues.length;
+  const screen = keyScreenName(keyColor, "zh");
   if (keyGreen && keyedCount === 0) {
-    notes.push("没检测到绿幕背景：这次按原图用了。想要透明背景，让模型把背景画成纯绿（#00FF00 一类，不要渐变 / 阴影）。");
+    notes.push(`没检测到${screen}背景：这次按原图用了。想要透明背景，让模型把背景画成纯色 ${keyColor}（不要渐变 / 阴影）。`);
   } else if (keyedCount > 0) {
-    notes.push(`已抠掉绿幕背景（平均 ${Math.round(keyed * 100)}% 的像素变成透明）。`);
+    notes.push(`已抠掉${screen}背景（平均 ${Math.round(keyed * 100)}% 的像素变成透明）。`);
   }
 
   if (input.kind === "ground") {

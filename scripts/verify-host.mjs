@@ -301,6 +301,26 @@ async function main() {
   check("frameCount 被夹到上限 64", clamped.frameCount === 64, String(clamped.frameCount));
   check("concurrency 被夹到上限 8", clamped.concurrency === 8, String(clamped.concurrency));
 
+  // 抠像底色：新配置项能被保存，且默认提示词会跟着换成对应颜色。
+  await studio.saveConfig({ keyColor: "#0000FF" });
+  const colorConfig = await studio.getConfig();
+  check("抠像底色已保存为蓝幕", colorConfig.keyColor === "#0000FF", colorConfig.keyColor);
+  const colorProject = await studio.createProject({ name: "底色测试角色" });
+  let colorView = await studio.getProject({ projectId: colorProject.projectId, lang: "zh" });
+  check("蓝幕下默认方向提示词换成蓝幕", /蓝幕/.test(colorView.prompts.images.front) && !/#00FF00/.test(colorView.prompts.images.front), colorView.prompts.images.front.slice(0, 80));
+  check("蓝幕下转圈 / 行走视频提示词也换", /蓝幕/.test(colorView.prompts.turn) && /蓝幕/.test(colorView.prompts.video), colorView.prompts.turn.slice(0, 60));
+  check("转圈提示词保留「全程保持纯蓝」这句（没被整图句式顶掉）", /全程保持纯蓝/.test(colorView.prompts.turn), colorView.prompts.turn.slice(-80));
+  await studio.saveSettings({ projectId: colorProject.projectId, settings: { keyColor: "#FF00FF" } });
+  colorView = await studio.getProject({ projectId: colorProject.projectId, lang: "zh" });
+  check("项目里改成品红幕后提示词跟着变", /品红幕/.test(colorView.prompts.images.front) && !/蓝幕/.test(colorView.prompts.images.front), colorView.prompts.images.front.slice(0, 80));
+  await studio.saveConfig({ keyColor: "#00FF00" });
+  colorView = await studio.getProject({ projectId: colorProject.projectId, lang: "zh" });
+  check("项目显式改过底色后不再跟全局漂移", /品红幕/.test(colorView.prompts.images.front), colorView.prompts.images.front.slice(0, 80));
+  await studio.saveSettings({ projectId: colorProject.projectId, settings: { keyColor: "#00FF00" } });
+  colorView = await studio.getProject({ projectId: colorProject.projectId, lang: "zh" });
+  check("改回绿色后提示词还原", /纯色绿幕/.test(colorView.prompts.images.front), colorView.prompts.images.front.slice(0, 80));
+  await studio.deleteProject({ projectId: colorProject.projectId });
+
   // 行序迁移只做一次：没有版本号的旧配置才迁移，之后显式设置一律尊重。
   // loadConfig 有进程内缓存，走 API 测不出来，所以直接测纯函数。
   const { normalizeConfig, ROW_ORDER_VERSION } = await import("../lib/config.js");
@@ -1513,6 +1533,17 @@ async function main() {
     `${imageJob.settings.model} vs ${(await studio.getConfig()).arkModel}`
   );
 
+  // 输出尺寸是全局设置：任务里再塞一个旧尺寸也不能覆盖它。
+  {
+    const originalSize = (await studio.getConfig()).arkSize;
+    await studio.saveConfig({ arkSize: "1024x768" });
+    await studio.saveImageJob({ jobId: imageId, settings: { size: "2K" } });
+    const sized = await studio.getImageJob({ jobId: imageId });
+    check("图片任务尺寸跟随全局设置（任务里的旧值被忽略）", sized.settings.size === "1024x768", sized.settings.size);
+    check("装饰后的配置给出当前输出尺寸", (await studio.getConfig()).imageProviderSize === "1024x768", (await studio.getConfig()).imageProviderSize);
+    await studio.saveConfig({ arkSize: originalSize });
+  }
+
   // 上传一张已有图片直接做抠像——这是「支持绿幕抠图生成 png」的主路径
   await studio.addImageItem({ jobId: imageId, name: "green.png", data: greenPng.toString("base64") });
   await studio.saveImageJob({
@@ -1540,6 +1571,12 @@ async function main() {
     typeof imageSettled?.items?.[0]?.backgroundFraction === "number" && imageSettled.items[0].backgroundFraction > 0.4,
     String(imageSettled?.items?.[0]?.backgroundFraction?.toFixed(2))
   );
+  // 抠像底色可逐任务改：角色穿绿衣服时改成品红 / 蓝，任务要记住。
+  await studio.saveImageJob({ jobId: imageId, keying: { keyColor: "#0000FF" } });
+  imageJob = await studio.getImageJob({ jobId: imageId });
+  check("图片任务保存了新的抠像底色", imageJob.keying.keyColor === "#0000FF", imageJob.keying.keyColor);
+  await studio.saveImageJob({ jobId: imageId, keying: { keyColor: "#00FF00" } });
+
   // 提示词与附加提示词要分开存，附加词可被清空
   check("主提示词与附加提示词分开保存", imageSettled?.prompt === "一只橙色的方块" && imageSettled?.suffix === "不要出现文字");
   await studio.saveImageJob({ jobId: imageId, suffix: "" });
@@ -1584,6 +1621,9 @@ async function main() {
   let seqJob = await studio.getSequenceJob({ jobId: seqId });
   check("首帧图已记录", seqJob.refs.firstFrame?.file !== undefined, seqJob.refs.firstFrame?.file ?? "");
   check("模式与参数已保存", seqJob.mode === "frames" && seqJob.settings.frameCount === 4, `${seqJob.mode} ${seqJob.settings.frameCount}`);
+  await studio.saveSequenceJob({ jobId: seqId, keying: { keyColor: "#FF00FF" } });
+  seqJob = await studio.getSequenceJob({ jobId: seqId });
+  check("序列帧任务保存了新的抠像底色", seqJob.keying.keyColor === "#FF00FF", seqJob.keying.keyColor);
 
   // 视频模型同样是全局设置：任务里不允许留一份会打错网关的旧模型副本
   // （实测过的坑：任务存官方 H3 + 全局切优云智算 → cp.compshare.cn/v2/... 404）。

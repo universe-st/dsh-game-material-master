@@ -26,11 +26,13 @@ import {
   defaultPrompts,
   directionOf,
   localizePrompts,
+  applyKeyColorToPrompts,
   normalizePromptLang
 } from "./directions.js";
+import { DEFAULT_KEY_COLOR, normalizeKeyColor } from "./keycolor.js";
 import { checkFfmpeg } from "./media.js";
 import { testArk } from "./ark.js";
-import { customImageBlocker, imageModelOf, imageSizeOf, imageProviderBlocker, imageProviderSummary, imageUsesConfiguredSize, testCustomImage } from "./imageprovider.js";
+import { customImageBlocker, imageModelOf, imageSizeOf, imageProviderBlocker, imageProviderSummary, testCustomImage } from "./imageprovider.js";
 import {
   detectComfyBindings,
   fetchComfyObjectInfo,
@@ -431,6 +433,7 @@ export class GameStudioGateway extends TypertRemoteService {
       "fillRatio",
       "bottomMargin",
       "cropInset",
+      "keyColor",
       "keyLow",
       "keyHigh",
       "despill",
@@ -644,9 +647,20 @@ export class GameStudioGateway extends TypertRemoteService {
     let project = await readProject(projectId);
     if (project === undefined)
       throw new Error(`项目不存在：${projectId}`);
-    if (lang !== undefined && localizePrompts(project.prompts, lang)) {
+    // 底色也是项目级设置：没在项目里显式改过时跟随全局配置。
+    const config = await loadConfig();
+    const effectiveKeyColor = project.settings.keyColorOverride === true ? project.settings.keyColor : config.keyColor;
+    const effectiveChanged = project.settings.keyColor !== effectiveKeyColor;
+    if (effectiveChanged) project.settings.keyColor = effectiveKeyColor;
+    // 读项目时把「仍是默认句式」的提示词同步到它的底色，这样老项目 / 刚改过底色的
+    // 项目在界面上看到的就是生成时会用的那一版。
+    const colorChanged = applyKeyColorToPrompts(project.prompts, effectiveKeyColor);
+    const localized = lang !== undefined ? localizePrompts(project.prompts, lang, effectiveKeyColor) : false;
+    if (colorChanged || localized || effectiveChanged) {
       project = await patchProject(projectId, (draft) => {
-        localizePrompts(draft.prompts, lang);
+        draft.settings.keyColor = effectiveKeyColor;
+        applyKeyColorToPrompts(draft.prompts, effectiveKeyColor);
+        if (lang !== undefined) localizePrompts(draft.prompts, lang, effectiveKeyColor);
         return draft;
       });
     }
@@ -740,7 +754,12 @@ export class GameStudioGateway extends TypertRemoteService {
     const resetVideo = input.resetVideoToDefault === true;
     const resetTurn = input.resetTurnToDefault === true;
     // 「重置为默认」要重置成**当前界面语言**的默认值，否则英文界面点一下会掉出中文提示词。
-    const defaults = defaultPrompts(normalizePromptLang(input.lang));
+    const configured = await loadConfig();
+    const projectForColor = await readProject(projectId);
+    const effectiveKeyColor = projectForColor?.settings?.keyColorOverride === true
+      ? projectForColor.settings.keyColor
+      : configured.keyColor;
+    const defaults = defaultPrompts(normalizePromptLang(input.lang), effectiveKeyColor);
     await patchProject(projectId, (project) => {
       // 提示词模板升级后（例如这次把方位语义改对），老项目要能一键重新套用默认值。
       if (resetImages)
@@ -778,6 +797,7 @@ export class GameStudioGateway extends TypertRemoteService {
     const input = asRecord(payload);
     const projectId = asString(input.projectId);
     const raw = asRecord(input.settings);
+    const config = await loadConfig();
     const changed = await patchProject(projectId, (project) => {
       const before = { ...project.settings };
       const current = project.settings;
@@ -792,6 +812,10 @@ export class GameStudioGateway extends TypertRemoteService {
         fillRatio: clampFloat(raw.fillRatio, current.fillRatio, 0.5, 1),
         bottomMargin: clampInt(raw.bottomMargin, current.bottomMargin, 0, 64),
         cropInset: clampFloat(raw.cropInset, current.cropInset, 0, 0.2),
+        keyColor: normalizeKeyColor(raw.keyColor, current.keyColor),
+        keyColorOverride: raw.keyColor === undefined
+          ? current.keyColorOverride === true
+          : normalizeKeyColor(raw.keyColor, current.keyColor) !== config.keyColor,
         keyLow: clampInt(raw.keyLow, current.keyLow, 0, 255),
         keyHigh: clampInt(raw.keyHigh, current.keyHigh, 1, 255),
         despill: clampFloat(raw.despill, current.despill, 0, 1),
@@ -810,6 +834,9 @@ export class GameStudioGateway extends TypertRemoteService {
         project.settings.rowOrder = [...DEFAULT_ROW_ORDER];
       if (project.settings.keyHigh <= project.settings.keyLow)
         project.settings.keyHigh = Math.min(255, project.settings.keyLow + 1);
+      // 改底色时，把「还是默认句式」的提示词一起换过去；用户手改过一个字都不动。
+      if (before.keyColor !== project.settings.keyColor)
+        applyKeyColorToPrompts(project.prompts, project.settings.keyColor);
       const differs = (fields) => fields.some((field) => JSON.stringify(before[field]) !== JSON.stringify(project.settings[field]));
       if (differs(["workingLongEdge", "cropInset"])) {
         // 抽帧参数变了：raw.bin 已经作废，必须重抽，不能只重新合成。
@@ -1021,7 +1048,8 @@ export class GameStudioGateway extends TypertRemoteService {
       anchor: input.anchor,
       objectScale: input.objectScale,
       pass: input.pass,
-      keyGreen: input.keyGreen
+      keyGreen: input.keyGreen,
+      keyColor: typeof input.keyColor === "string" && input.keyColor.trim() !== "" ? input.keyColor : (await loadConfig()).keyColor
     });
     const project = await isogen.readIsoProject(asString(input.projectId));
     const revisions = await isogen.tilesetRevisions(asString(input.projectId));
@@ -1035,13 +1063,15 @@ export class GameStudioGateway extends TypertRemoteService {
   }
   async composeIsoAsset(payload: any) {
     const input = asRecord(payload);
+    const config = await loadConfig();
     return isogen.composeIsoAsset({
       projectId: asString(input.projectId),
       name: asString(input.name),
       files: Array.isArray(input.files) ? input.files.map((file: unknown) => asString(file)) : [],
       kind: input.kind as any,
       footprint: input.footprint as any,
-      keyGreen: input.keyGreen === false ? false : true
+      keyGreen: input.keyGreen === false ? false : true,
+      keyColor: typeof input.keyColor === "string" && input.keyColor.trim() !== "" ? input.keyColor : config.keyColor
     });
   }
   async saveIsoTileset(payload: any) {
@@ -1230,8 +1260,9 @@ export class GameStudioGateway extends TypertRemoteService {
       loop: input.loop,
       // 整图规格（给了它就是整图；校验在 mapgen.parseStampSpec 里）。
       stamp: input.stamp,
-      // 整图：导入时抠绿幕（手动那条路；AI 那条在 composeMapAsset 里已经抠过）。
-      stampKey: input.stampKey
+      // 整图：导入时抠背景（手动那条路；AI 那条在 composeMapAsset 里已经抠过）。
+      stampKey: input.stampKey,
+      keyColor: typeof input.keyColor === "string" && input.keyColor.trim() !== "" ? input.keyColor : (await loadConfig()).keyColor
     });
     // `rev` 不在 project.json 里（派生数据），要在回给界面时现取 —— 少了它重烘后界面会拿旧缓存图。
     const revisions = await mapgen.tilesetRevisions(asString(input.projectId));
@@ -1255,6 +1286,7 @@ export class GameStudioGateway extends TypertRemoteService {
   async composeMapAsset(payload: any) {
     const input = asRecord(payload);
     const files = Array.isArray(input.files) ? input.files.map((file: unknown) => asString(file)) : [];
+    const config = await loadConfig();
     return mapgen.composeMapAsset({
       projectId: asString(input.projectId),
       name: asString(input.name),
@@ -1264,7 +1296,8 @@ export class GameStudioGateway extends TypertRemoteService {
       animRows: input.animRows === true ? true : input.animRows === false ? false : undefined,
       // 整图：占几格（校验在 mapgen.parseStampSpec 里；不给就按 3×3 常见尺寸？不 —— 明确报错）。
       stampCols: input.stampCols,
-      stampRows: input.stampRows
+      stampRows: input.stampRows,
+      keyColor: typeof input.keyColor === "string" && input.keyColor.trim() !== "" ? input.keyColor : config.keyColor
     });
   }
   async recomposeMapTileset(payload: any) {
@@ -1701,8 +1734,8 @@ export class GameStudioGateway extends TypertRemoteService {
       const current = await loadConfig();
       // 生图模型是全局设置（设置 → 游戏素材大师 → 生图后端），任务里不保留可覆盖的副本。
       job.settings.model = imageModelOf(current);
-      // 自定义后端的尺寸也是全局参数；火山方舟下才保留任务级覆盖。
-      job.settings.size = imageUsesConfiguredSize(current) ? imageSizeOf(current) : asString(raw.size, job.settings.size);
+      // 尺寸是全局设置：任务不再保留会过期的覆盖值（见 imagegen 的同名注释）。
+      job.settings.size = imageSizeOf(current);
       job.settings.count = clampInt(raw.count, job.settings.count, 1, 8);
       job.settings.watermark = raw.watermark === true;
     }
@@ -2746,6 +2779,7 @@ export class GameStudioGateway extends TypertRemoteService {
  * 三个模块共用同一套参数名，所以收敛逻辑也共用。
  */
 function applyKeying(target, raw): void {
+  if (typeof raw.keyColor === "string") target.keyColor = normalizeKeyColor(raw.keyColor, target.keyColor || DEFAULT_KEY_COLOR);
   target.keyLow = clampInt(raw.keyLow, target.keyLow, 0, 255);
   target.keyHigh = clampInt(raw.keyHigh, target.keyHigh, 1, 255);
   if (target.keyHigh <= target.keyLow) target.keyHigh = Math.min(255, target.keyLow + 1);

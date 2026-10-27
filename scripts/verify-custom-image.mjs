@@ -301,6 +301,23 @@ section("4) ComfyUI 协议：上传参考图 → 提交工作流 → 轮询 → 
   check("没写 {{image}} 时自动改 LoadImage 的文件名（ComfyUI 自己的约定）", nodes["1"].inputs.image === "sub/gmm-uploaded.png", nodes["1"].inputs.image);
 }
 {
+  // 没写 {{width}} / {{height}} → 直接把尺寸写进空 latent 节点。
+  // 这是「改了尺寸也不行」的典型原因：用户从 ComfyUI 导出的工作流把宽高写死了。
+  received.length = 0;
+  comfyHistoryCalls = 0;
+  const workflow = JSON.stringify({
+    "1": { class_type: "EmptyLatentImage", inputs: { width: 1254, height: 1254, batch_size: 1 } },
+    "2": { class_type: "KSampler", inputs: { seed: "{{seed}}" } }
+  });
+  await generateCustomImage({ ...base, protocol: "comfyui", baseUrl: ORIGIN, apiKey: "", model: "", images: [], workflow, size: "1024x768" });
+  const nodes = jsonOf(pathHits("/prompt")[0]).prompt;
+  check(
+    "没写 width/height 占位符时，自动改 EmptyLatentImage 的宽高",
+    nodes["1"].inputs.width === 1024 && nodes["1"].inputs.height === 768,
+    JSON.stringify(nodes["1"].inputs)
+  );
+}
+{
   // 一个占位符都不写 = 原样跑（合法用法：固定工作流）。
   received.length = 0;
   comfyHistoryCalls = 0;

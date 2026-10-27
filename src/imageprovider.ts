@@ -30,8 +30,13 @@ export interface ProviderImageRequest {
 
 export type ProviderImageResult = ArkResult;
 
-/** Non-Ark backends take their size from their own provider settings. */
-export function imageUsesConfiguredSize(config: Config): boolean {return config.imageProvider !== "ark";}
+/**
+ * 所有后端都使用同一份全局输出尺寸。
+ *
+ * 历史行为是「Ark 保留任务级尺寸、自定义后端只读全局」，导致同一个设置页里
+ * 改尺寸时好时坏；现在统一成全局参数。保留这个函数是为了兼容旧的调用方 / 自检。
+ */
+export function imageUsesConfiguredSize(_config: Config): boolean {return true;}
 /** Only Ark supports a separate redraw model; other backends retain their selected model. */
 export function imageRedrawModelOf(config: Config): string {
   return config.imageProvider === "ark" ? config.arkRedrawModel.trim() || config.arkModel : imageModelOf(config);

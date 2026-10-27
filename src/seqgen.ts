@@ -27,6 +27,7 @@ import { normalizeDuration, normalizeResolution } from "./minimax.js";
 import { assertVideoBackendReady, downloadVideoTask, queryVideoTask, submitVideoTask, videoFailureReason } from "./videogen.js";
 import { extractFrames, fileSize, mimeOf, toJpegDataUri } from "./media.js";
 import { composeSheet, keyGreen, type SheetRow } from "./chroma.js";
+import { normalizeKeyColor } from "./keycolor.js";
 import { encodePng } from "./png.js";
 import { appendJobLog, messageOf, readJson, writeJsonAtomic, type JobLogEntry } from "./jsonio.js";
 import { safeName, sniffImage } from "./imagegen.js";
@@ -115,6 +116,8 @@ export interface SequenceJob {
     pixelSize: number;
   };
   keying: {
+    /** 抠像底色（`#RRGGBB`）；老任务留空时回落当前全局配置。 */
+    keyColor: string;
     keyLow: number;
     keyHigh: number;
     despill: number;
@@ -193,6 +196,7 @@ export async function createSequenceJob(name: string): Promise<SequenceJob> {
       pixelSize: config.pixelSize
     },
     keying: {
+      keyColor: config.keyColor,
       keyLow: config.keyLow,
       keyHigh: config.keyHigh,
       despill: config.despill,
@@ -299,6 +303,7 @@ function normalizeSequenceJob(raw: any): SequenceJob {
       pixelSize: clampInt(raw?.settings?.pixelSize, 0, 0, 32)
     },
     keying: {
+      keyColor: typeof raw?.keying?.keyColor === "string" ? normalizeKeyColor(raw.keying.keyColor) : "",
       keyLow: clampInt(raw?.keying?.keyLow, 14, 0, 255),
       keyHigh: clampInt(raw?.keying?.keyHigh, 80, 1, 255),
       despill: num(raw?.keying?.despill, 0.65),
@@ -688,6 +693,7 @@ export function startSequenceKey(jobId: string): { started: boolean; reason?: st
 export async function keySequenceFrames(jobId: string): Promise<void> {
   const job = await readSequenceJob(jobId);
   if (job === undefined) throw new Error(`任务不存在：${jobId}`);
+  const config = await loadConfig();
   if (job.frames.raw === undefined || job.frames.width === undefined || job.frames.height === undefined) {
     throw new Error("还没有抽过帧，请先抽帧");
   }
@@ -702,6 +708,7 @@ export async function keySequenceFrames(jobId: string): Promise<void> {
   for (let i = 0; i < total; i++) {
     const slice = Buffer.from(raw.subarray(i * frameBytes, (i + 1) * frameBytes));
     const result = keyGreen(slice, width, height, {
+      keyColor: job.keying.keyColor || config.keyColor,
       keyLow: job.keying.keyLow,
       keyHigh: job.keying.keyHigh,
       despill: job.keying.despill,
@@ -724,6 +731,7 @@ export async function keySequenceFrames(jobId: string): Promise<void> {
 export async function composeSequenceSheet(jobId: string): Promise<void> {
   const job = await readSequenceJob(jobId);
   if (job === undefined) throw new Error(`任务不存在：${jobId}`);
+  const config = await loadConfig();
   if (job.frames.raw === undefined || job.frames.width === undefined || job.frames.height === undefined) {
     throw new Error("还没有抽过帧，请先抽帧");
   }
@@ -737,6 +745,7 @@ export async function composeSequenceSheet(jobId: string): Promise<void> {
   for (let i = 0; i < total; i++) {
     const slice = Buffer.from(raw.subarray(i * frameBytes, (i + 1) * frameBytes));
     const result = keyGreen(slice, width, height, {
+      keyColor: job.keying.keyColor || config.keyColor,
       keyLow: job.keying.keyLow,
       keyHigh: job.keying.keyHigh,
       despill: job.keying.despill,

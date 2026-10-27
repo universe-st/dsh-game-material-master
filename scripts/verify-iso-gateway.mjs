@@ -59,12 +59,12 @@ parseCase("importIsoTileset", {
   projectId: "gabc1234", name: "草地", data: "AAAA", kind: "object",
   sourceCell: { width: 64, height: 96 }, animRows: true, frames: 2, fps: 4,
   loop: "pingpong", clarity: "sharp", footprint: { cols: 2, rows: 2 },
-  anchor: { x: 0.5, y: 1 }, objectScale: 0.75, pass: [0, 1, 1, 2], keyGreen: true
-}, ["projectId", "name", "data", "kind", "sourceCell", "animRows", "frames", "fps", "loop", "clarity", "footprint", "anchor", "objectScale", "pass", "keyGreen"]);
+  anchor: { x: 0.5, y: 1 }, objectScale: 0.75, pass: [0, 1, 1, 2], keyGreen: true, keyColor: "#0000FF"
+}, ["projectId", "name", "data", "kind", "sourceCell", "animRows", "frames", "fps", "loop", "clarity", "footprint", "anchor", "objectScale", "pass", "keyGreen", "keyColor"]);
 parseCase("composeIsoAsset", {
   projectId: "gabc1234", name: "AI 草地", files: ["/tmp/a.png", "/tmp/b.png"],
-  kind: "ground", footprint: { cols: 2, rows: 1 }, keyGreen: true
-}, ["projectId", "name", "files", "kind", "footprint", "keyGreen"]);
+  kind: "ground", footprint: { cols: 2, rows: 1 }, keyGreen: true, keyColor: "#FF00FF"
+}, ["projectId", "name", "files", "kind", "footprint", "keyGreen", "keyColor"]);
 parseCase("saveIsoTileset", { projectId: "gabc1234", tilesetId: "ts1", name: "n", fps: null, loop: "reverse" }, ["projectId", "tilesetId", "name", "fps", "loop"]);
 parseCase("saveIsoDoc", { projectId: "gabc1234", name: "n", cols: 9, rows: 7, layers: [{ id: "l0", name: "x" }], addLayer: { name: "y", kind: "object" }, removeLayerId: "l2", moveLayer: { id: "l1", toIndex: 0 }, clearLayerId: "l1" }, ["projectId", "name", "cols", "rows", "layers", "addLayer", "removeLayerId", "moveLayer", "clearLayerId"]);
 parseCase("applyIsoOps", { projectId: "gabc1234", ops: [{ kind: "paint" }], stroke: "s1", have: ["0,0"], dryRun: true, ifRevision: "abc" }, ["projectId", "ops", "stroke", "have", "dryRun", "ifRevision"]);

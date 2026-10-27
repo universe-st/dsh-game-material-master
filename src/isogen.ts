@@ -13,6 +13,7 @@ import { appendJobLog, messageOf, readJson, sweepTempFiles, writeJsonAtomic, typ
 import { dataRoot } from "./config.js";
 import { decodeFile, encodeBitmap, pngSize, probeImageSize, sniffImageExt, type Bitmap } from "./bitmap.js";
 import { keyGreen, DEFAULT_KEY_OPTIONS } from "./chroma.js";
+import { keyScreenName, normalizeKeyColor } from "./keycolor.js";
 import {
   MAX_ASSET_SCALE,
   applyLoop,
@@ -692,6 +693,8 @@ export async function importIsoTileset(
     objectScale?: unknown;
     pass?: unknown;
     keyGreen?: unknown;
+    /** 抠像底色（`#RRGGBB`，留空 = 默认绿）。 */
+    keyColor?: unknown;
   } = {}
 ): Promise<ImportIsoTilesetResult> {
   const project = await readProjectOrThrow(projectId);
@@ -740,9 +743,11 @@ export async function importIsoTileset(
     anchor = parseIsoAnchor(opts.anchor) ?? { x: 0.5, y: 1 };
     pass = parsePassCells(opts.pass, footprint) ?? new Array(footprint.cols * footprint.rows).fill(1);
     if (opts.keyGreen === true) {
-      const keyed = keyStampBackground(bitmap, (rgba, width, height) => keyGreen(rgba, width, height, STAMP_KEY_OPTIONS));
+      const keyColor = normalizeKeyColor(opts.keyColor);
+      const screen = keyScreenName(keyColor, "zh");
+      const keyed = keyStampBackground(bitmap, (rgba, width, height) => keyGreen(rgba, width, height, { ...STAMP_KEY_OPTIONS, keyColor }));
       bitmap = keyed.bitmap;
-      if (keyed.keyed === 0) warnings.push("没有检测到绿幕背景，按原图用了。");
+      if (keyed.keyed === 0) warnings.push(`没有检测到${screen}背景，按原图用了。`);
     }
     const targetWidth = Math.max(1, Math.round(footprint.cols * project.cell.width * (objectScale ?? 1)));
     stored = objectSheet(bitmap, sourceCell, frames, targetWidth, clarity);
@@ -809,6 +814,8 @@ export interface ComposeIsoAssetInput {
   kind: IsoAiAssetKind;
   footprint?: { cols?: number; rows?: number };
   keyGreen?: boolean;
+  /** 抠像底色（`#RRGGBB`，留空 = 默认绿）。 */
+  keyColor?: string;
 }
 
 export interface ComposeIsoAssetResult {
@@ -860,7 +867,8 @@ export async function composeIsoAsset(input: ComposeIsoAssetInput): Promise<Comp
     kind: input.kind,
     cell: project.cell,
     footprint,
-    keyGreen: input.keyGreen !== false
+    keyGreen: input.keyGreen !== false,
+    keyColor: input.keyColor
   });
   const name = input.name === undefined || String(input.name).trim() === "" ? "AI 素材" : String(input.name).trim();
   const file = `ai/${safeAssetStem(name)}.png`;

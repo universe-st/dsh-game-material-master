@@ -3010,6 +3010,20 @@ try {
       oneFrame.slice(0, 80)
     );
     check("提示词：写明「按地图网格出图」与「不要绿幕 / 不做抠像」", oneFrame.includes("32×32") && oneFrame.includes("绿幕") && oneFrame.includes("抠像"));
+    const bluePrompt = promptOf({ shape: "stamp", keyColor: "#0000FF" });
+    check(
+      "提示词：换成蓝幕后「绿幕 / #00FF00」全部替换",
+      bluePrompt.includes("蓝幕") && bluePrompt.includes("#0000FF") && !bluePrompt.includes("#00FF00") && !bluePrompt.includes("纯绿幕"),
+      bluePrompt.match(/[^\n]*蓝幕[^\n]*/)?.[0] ?? ""
+    );
+    check(
+      "提示词：composeMapAsset 必须带上同一个 keyColor",
+      bluePrompt.includes("keyColor:'#0000FF'") && bluePrompt.includes("抠像底色是 #0000FF"),
+      bluePrompt.match(/[^\n]*keyColor[^\n]*/)?.[0] ?? ""
+    );
+    check("提示词：默认不传 keyColor 时仍是绿幕（旧行为逐字兼容）", oneFrame.includes("绿幕") && oneFrame.includes("#00FF00"));
+    const userGreen = promptOf({ shape: "stamp", keyColor: "#0000FF", prompt: "一只绿色史莱姆" });
+    check("提示词：模板换成蓝幕，但用户原文「绿色史莱姆」一个字不改", userGreen.includes("一只绿色史莱姆") && !userGreen.includes("一只蓝色史莱姆"), userGreen.match(/一只[^\n]*史莱姆/)?.[0] ?? "");
     check("提示词：帧数 1 时只走图片生成（不含序列帧那几步）", oneFrame.includes("runImageJob") && !oneFrame.includes("runSequenceVideo"), "");
     /**
      * ★ 按一格的实际像素给「细节尺寸」的指导。

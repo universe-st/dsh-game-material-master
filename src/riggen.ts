@@ -37,7 +37,6 @@ import {
   imageSizeOf,
   imageTimeoutOf,
   imageWatermarkOf,
-  imageUsesConfiguredSize,
   imageRedrawModelOf
 } from "./imageprovider.js";
 import { decodeToRgba, mimeOf, toDataUri } from "./media.js";
@@ -2951,7 +2950,8 @@ export async function generateSheet(jobId: string): Promise<void> {
   const prompt = buildSheetRequest(job);
   const model = imageModelOf(config);
   job.settings.model = model;
-  if (imageUsesConfiguredSize(config)) job.settings.size = imageSizeOf(config);
+  // 输出尺寸是全局设置：任务只跟随，不保留会过期的副本（见 imagegen 的同名注释）。
+  job.settings.size = imageSizeOf(config);
   job.sheet = { ...job.sheet, status: "running", error: undefined };
   appendJobLog(job.log, "info", `开始拆件生图（模型 ${model}）`);
   await writeRigJob(job);
@@ -2961,7 +2961,7 @@ export async function generateSheet(jobId: string): Promise<void> {
     const result = await generateImageWithProvider({
       prompt,
       images: [reference],
-      size: job.settings.size || imageSizeOf(config),
+      size: imageSizeOf(config),
       // 与图片生成那条路同口径：全局设置或任务上的旧覆盖位，任一为真就带水印。
       watermark: imageWatermarkOf(config) || job.settings.watermark === true,
       timeoutMs: imageTimeoutOf(config)

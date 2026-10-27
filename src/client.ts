@@ -310,16 +310,12 @@
       "收起选帧": "Hide frame picker",
       "调整选帧": "Adjust frame pick",
       "手动选帧": "Pick frames manually",
-      "正在抠绿幕并合成整图…": "Keying green screen and composing sheet…",
+      "正在抠背景并合成整图…": "Keying the background and composing sheet…",
       "抠像在这里会**再跑一次**：第 3 步那次抠的是每个方向的预览带（顺便把整图合出来），这里重抠是为了让下面这些参数改完立刻生效——两次读的是同一份帧缓存（raw.bin）、同一套参数，所以结果一致。": "Keying runs **one more time** here: step 3 keyed the preview strip for each direction (and composed the sheet along the way), while re-keying here makes the parameters below take effect the moment you change them. Both passes read the same frame cache (raw.bin) with the same settings, so the results always match.",
       "改完参数会自动重新抠像并合成整图，不需要重新抽帧。": "Changing the parameters re-keys and recomposes the sheet automatically, with no need to re-extract frames.",
       "整图单格宽（px）": "Sheet cell width (px)",
       "整图单格高（px）": "Sheet cell height (px)",
       "像素块边长（0/1 = 关闭）": "Pixel block size (0/1 = off)",
-      "背景分割容差（0 = 只认绿色）": "Background split tolerance (0 = green only)",
-      "抠像下限（绿色优势）": "Key low (green dominance)",
-      "抠像上限（绿色优势）": "Key high (green dominance)",
-      "去绿溢出 0~1": "Despill green 0~1",
       "边缘收缩（px）": "Edge shrink (px)",
       "自动裁剪填充比例 0.5~1": "Auto-crop fill ratio 0.5~1",
       "底部留白（px）": "Bottom padding (px)",
@@ -389,7 +385,6 @@
       "描述你要生成的图片…": "Describe the image you want to generate…",
       "统一附加提示词（可留空）": "Shared suffix prompt (optional)",
       "生图模型": "Image model",
-      "尺寸": "Size",
       "生成张数（1~8）": "Images to generate (1~8)",
       "正在生成 {n0} 张…": "Generating {n0} images…",
       "已开始生成 {n0} 张": "Started generating {n0} images",
@@ -400,13 +395,13 @@
       "把参考图拖到这里": "Drag reference images here",
       "已移除参考图": "Reference image removed",
       "移除": "Remove",
-      "③ 绿幕抠图": "③ Green screen keying",
+      "③ 背景抠像": "③ Background keying",
       "开启后每张生成完会自动抠一遍；也可以上传已有图片只做抠像。": "When on, each image is keyed automatically after it is generated; you can also upload existing images to key them only.",
       "不抠像": "No keying",
-      "自动抠绿幕输出 PNG": "Auto-key green screen, output PNG",
+      "自动抠背景输出 PNG": "Auto-key the background, output PNG",
       "正在抠像…": "Keying…",
       "已开始抠像": "Keying started",
-      "正在抠绿幕…": "Keying green screen…",
+      "正在抠背景…": "Keying the background…",
       "按当前参数重新抠像": "Re-key with current settings",
       "上传一张已有图片，直接抠成透明 PNG": "Upload an existing image to key straight to a transparent PNG",
       "④ 结果（{n0} 张）": "④ Results ({n0} images)",
@@ -1042,7 +1037,6 @@
       "可通过 · 角色在上面": "Walkable · character drawn on top",
       "不可通过": "Blocked",
       "可通过 · 物件盖住角色": "Walkable · object covers the character",
-      "抠掉绿幕背景": "Key out the green background",
       "名字": "Name",
       "{n0} 帧/秒": "{n0} fps",
       "格子宽": "Cell width",
@@ -1109,7 +1103,6 @@
       "一格只有 {n0}px：任何细节不能小于一格的 1/4（约 {n1}px）；比这更细的纹理缩到格子上会糊成色雾。": "One cell is only {n0}px: no detail smaller than 1/4 of a cell (about {n1}px); finer texture turns into color mush at this size.",
       "① 先出一张静态首帧图：createImageJob({name}) → saveImageJob({jobId, prompt:<上面的主题 + 画法要求 + 排布>}) → runImageJob({jobId, count:1}) → game_material({action:'wait', id:jobId})；然后 getImageJob({jobId}) 取 dir 与 items[0].file，首帧绝对路径 = dir + '/' + file。": "1) First make one static first frame: createImageJob({name}) -> saveImageJob({jobId, prompt:<subject + rendering requirements + layout above>}) -> runImageJob({jobId, count:1}) -> game_material({action:'wait', id:jobId});then getImageJob({jobId}) for dir and items[0].file; absolute first-frame path = dir + '/' + file.",
       "② 再让它动起来并抽帧：createSequenceJob({name}) → game_material({action:'upload', module:'sequence', id, kind:'firstFrame', path:<首帧绝对路径>}) → runSequenceVideo({jobId}) → game_material({action:'wait'}) → runSequenceFrames({jobId, count:{n0}}) → game_material({action:'wait'})；然后 getSequenceJob({jobId}) 取 dir 与 frames.files，按顺序取前 {n0} 帧的绝对路径 = dir + '/' + file。": "2) Then animate and extract frames: createSequenceJob({name}) -> game_material({action:'upload', module:'sequence', id, kind:'firstFrame', path:<absolute first-frame path>}) -> runSequenceVideo({jobId}) -> game_material({action:'wait'}) -> runSequenceFrames({jobId, count:{n0}}) -> game_material({action:'wait'});then getSequenceJob({jobId}) for dir and frames.files; take the first {n0} absolute paths in order = dir + '/' + file.",
-      "第四步 · 整理并回链：game_material({action:'call', method:'composeIsoAsset', payload:{projectId:'{n0}', name:'{n1}', files:[<上面那些绝对路径，按顺序>], kind:'<ground 或 object>', footprint:<物件时给 {{cols:{n2},rows:{n3}}}>}})": "Step 4 - assemble and post the link: game_material({action:'call', method:'composeIsoAsset', payload:{projectId:'{n0}', name:'{n1}', files:[<those absolute paths, in order>], kind:'<ground or object>', footprint:<for objects: {{cols:{n2},rows:{n3}}}>}})",
       "  `kind` 必须和这次实际画的一致；不要传 `auto`。物件必须给 footprint；地面不需要。": "  `kind` must match what you actually drew; never pass `auto`. Objects require footprint; ground does not.",
       "  把这次调用返回的 openUrl **原样**贴成 Markdown 链接（例如 [回到 45° 地图编辑器](…)）：点开就回到项目、素材窗口展开、": "  Post the openUrl returned by that call **verbatim** as a Markdown link (for example [Back to the 45° map editor](...)): it returns to the project, opens the assets window and",
       "「新增素材」里这张图与用途 / 帧数 / 占格都已经预选好，用户点「确定」才真的导入。": "\"Add asset\" already has the image, use, frame count and footprint preselected; the user clicks \"OK\" to import.",
@@ -1641,11 +1634,9 @@
       "画法要求：**只画物件本体、背景是纯绿幕**（上面整图那段写了）—— 插件会把绿抠成透明，剩下的部分要铺满、不留白边。": "Painting rules: **only the object itself on a pure green background** (see the stamp section above) - the plugin keys the green to transparent; what remains must fill the frame with no white margins.",
       "  ⚠️ 整图**不要**自己去抠像（别为了抠图再跑一次 image 模块的 keyImageJob）：`composeMapAsset` 会先抠绿幕、再按占格切片。生成完直接把原图路径交给它。": "  WARNING: for stamps do **not** run keying yourself (do not call the image module's keyImageJob just to cut it out): `composeMapAsset` keys the green screen first and then slices by the cell span. Hand it the generated image paths directly.",
       "背景": "Background",
-      "抠掉绿幕背景（只留建筑本体）": "Key out the green screen (keep only the object)",
       "整图是「立在格子上的物件」：背景该是透明的，不然地图上会多出一块绿框。AI 生成的图请在提示词里要**纯绿背景**，这里勾上就会自动抠掉；自己导的透明 PNG 也可以勾着（没有绿就什么都不做）。": "A stamp is an object standing on the map: its background should be transparent, otherwise a green rectangle shows up on the map. For AI images, ask for a **pure green background** in the prompt and tick this box to key it out automatically; a transparent PNG of your own can leave it ticked too (with no green there, nothing changes).",
       "  · 整图（stamp）：**一张画占好几格**的多格建筑 / 装饰 —— 雕像 / 壁画 / 喷泉 / 大门 / 摊位 / 地毯这种「一整个物件」；判据是「它比一格大，而且不该被切成小块重复」。": "  - Stamp (stamp): a multi-cell building/prop where **one picture covers several cells** - statue / mural / fountain / gate / stall / carpet, i.e. a single object. The test is: it is bigger than one cell and must not be sliced into repeated fragments.",
       "  【整图】只画**一整张**完整的画（整张图就是这栋建筑 / 这座雕像本身，**不要**分格、**不要**画成 N×N 的格子拼图、不要裁成小块）：": "  [Stamp] Draw **one whole picture** (the entire image IS the building/statue; do NOT split it into cells, do NOT draw an NxN tile sheet, do NOT crop it into pieces):",
-      "第四步 · 整理并回链：game_material({action:'call', method:'composeMapAsset', payload:{projectId:'{n0}', name:'{n1}', files:[<上面那些绝对路径，按顺序>], shape:'<你选的形态：plain|corner16|a2quad|stamp>'}})": "Step 4 - Assemble and post the link: game_material({action:'call', method:'composeMapAsset', payload:{projectId:'{n0}', name:'{n1}', files:[<those absolute paths, in order>], shape:'<the shape you chose: plain|corner16|a2quad|stamp>'}})",
       "  整图还要多给「占几格」：shape:'stamp', stampCols:{n0}, stampRows:{n1}（每张源图 = 一帧的整张画；区域留给用户在导入时点）。": "  Stamps also need the cell span: shape:'stamp', stampCols:{n0}, stampRows:{n1} (each source image = one whole frame; areas are clicked by the user at import).",
       "整图（一张画占好几格）": "Stamp (one picture, several cells)",
       "多格建筑 / 装饰：雕像、壁画、喷泉、大门、地毯。每张图 = 一整张完整的画（不要分格），插件按「占几格」切成格子；哪些格能走导入时你自己点。": "Multi-cell buildings/props: statues, murals, fountains, gates, carpets. Each image is one whole picture (not split into cells); the plugin slices it by the cell span. You click which cells are walkable at import time.",
@@ -2052,6 +2043,32 @@
       "默认模型": "Default model",
       "默认输出格式": "Default output format",
       "默认采样率": "Default sample rate",
+      "背景分割容差（0 = 只认背景色）": "Background split tolerance (0 = background color only)",
+      "抠像下限（背景色接近度）": "Key low (background closeness)",
+      "抠像上限（背景色接近度）": "Key high (background closeness)",
+      "去溢色 0~1": "Despill 0~1",
+      "绿幕（默认）": "Green screen (default)",
+      "蓝幕": "Blue screen",
+      "品红幕": "Magenta screen",
+      "青幕": "Cyan screen",
+      "黄幕": "Yellow screen",
+      "红幕": "Red screen",
+      "白幕": "White screen",
+      "黑幕": "Black screen",
+      "抠像背景色": "Key background color",
+      "自定义背景色": "Custom background color",
+      "自定义": "Custom",
+      "抠掉背景色（只留建筑本体）": "Key out the background color (keep only the object)",
+      "抠掉背景色": "Key out the background color",
+      "输出尺寸（全局）": "Output size (global)",
+      "输出尺寸已保存": "Output size saved",
+      "所有模块共用；支持 1K / 2K / 4K 或 宽x高（要固定像素就直接填 1024x1024 这种）": "Shared by all modules; accepts 1K / 2K / 4K or width x height",
+      "抠像背景色（全局默认）": "Key background color (global default)",
+      "第四步 · 整理并回链：game_material({action:'call', method:'composeMapAsset', payload:{projectId:'{n0}', name:'{n1}', files:[<上面那些绝对路径，按顺序>], shape:'<你选的形态：plain|corner16|a2quad|stamp>', keyColor:'{n2}'}})": "Step 4 - Assemble and post the link: game_material({action:'call', method:'composeMapAsset', payload:{projectId:'{n0}', name:'{n1}', files:[<those absolute paths, in order>], shape:'<the shape you chose: plain|corner16|a2quad|stamp>', keyColor:'{n2}'}})",
+      "  抠像底色是 {n0}：composeMapAsset 必须带上 keyColor:'{n0}'，与提示词里的背景色一致。": "  The key color is {n0}: composeMapAsset must pass keyColor:'{n0}' so keying matches the prompt background.",
+      "第四步 · 整理并回链：game_material({action:'call', method:'composeIsoAsset', payload:{projectId:'{n0}', name:'{n1}', files:[<上面那些绝对路径，按顺序>], kind:'<ground 或 object>', footprint:<物件时给 {{cols:{n2},rows:{n3}}}>, keyColor:'{n4}'}})": "Step 4 - assemble and post the link: game_material({action:'call', method:'composeIsoAsset', payload:{projectId:'{n0}', name:'{n1}', files:[<those absolute paths, in order>], kind:'<ground or object>', footprint:<for objects: {{cols:{n2},rows:{n3}}}>, keyColor:'{n4}'}})",
+      "  抠像底色是 {n0}：composeIsoAsset 必须带上 keyColor:'{n0}'，与提示词里的背景色一致。": "  The key color is {n0}: composeIsoAsset must pass keyColor:'{n0}' so keying matches the prompt background.",
+      "1K / 2K / 4K 由模型决定像素；要固定尺寸请直接填 宽x高": "1K / 2K / 4K are model-defined pixel sizes; enter width x height to pin exact dimensions",
     };
 /* i18n-ignore-end */
 
@@ -2353,6 +2370,74 @@
       return T("先读手册：game_material({action:'guide', topic:'{n0}'})；下面所有远程方法都通过 game_material({action:'call', method:'<名>', payload:{…}}) 调用，wait/upload 用同工具的对应 action。", { n0: topic });
     }
 
+    /**
+     * 抠像底色：浏览器半区不 import 宿主模块（经典脚本），这里保留一份很小的
+     * 颜色名表/替换逻辑。只用于**拼给模型看的提示词**，真正的颜色解析与
+     * 抠像都在宿主 `keycolor.ts` / `chroma.ts`。
+     */
+    const KEY_COLOR_NAMES = [
+      { hex: "#00FF00", zh: "绿幕", zhWord: "绿", en: "green screen", enWord: "green" },
+      { hex: "#0000FF", zh: "蓝幕", zhWord: "蓝", en: "blue screen", enWord: "blue" },
+      { hex: "#FF00FF", zh: "品红幕", zhWord: "品红", en: "magenta screen", enWord: "magenta" },
+      { hex: "#00FFFF", zh: "青幕", zhWord: "青", en: "cyan screen", enWord: "cyan" },
+      { hex: "#FFFF00", zh: "黄幕", zhWord: "黄", en: "yellow screen", enWord: "yellow" },
+      { hex: "#FF0000", zh: "红幕", zhWord: "红", en: "red screen", enWord: "red" },
+      { hex: "#FFFFFF", zh: "白幕", zhWord: "白", en: "white screen", enWord: "white" },
+      { hex: "#000000", zh: "黑幕", zhWord: "黑", en: "black screen", enWord: "black" }
+    ];
+    function normalizeKeyColorHex(value) {
+      const text = typeof value === "string" ? value.trim().toLowerCase() : "";
+      if (/^#[0-9a-f]{6}$/u.test(text)) return text.toUpperCase();
+      if (/^#[0-9a-f]{3}$/u.test(text)) {
+        const [r, g, b] = text.slice(1).split("");
+        return `#${r}${r}${g}${g}${b}${b}`.toUpperCase();
+      }
+      return "#00FF00";
+    }
+    /** 把内置默认提示词里的「绿幕」换成当前底色；绿色保持原样（逐字兼容旧提示词）。 */
+    function applyKeyColorText(text, value) {
+      const color = normalizeKeyColorHex(value);
+      if (color === "#00FF00" || typeof text !== "string") return text;
+      const preset = KEY_COLOR_NAMES.find((entry) => entry.hex === color);
+      const zhScreen = preset === undefined ? "纯色背景" : preset.zh;
+      const zhWord = preset === undefined ? color : preset.zhWord;
+      const zhBackground = preset === undefined ? "纯色背景" : `${preset.zh}背景`;
+      const enScreen = preset === undefined ? "solid background" : preset.en;
+      const enWord = preset === undefined ? color.toLowerCase() : preset.enWord;
+      const enBackground = preset === undefined ? "solid background" : `${preset.en} background`;
+      let out = text;
+      // 中文：先换更长的固定搭配，最后才换单独的「绿幕」。
+      out = out.split("不要用绿幕背景").join("不要用纯色背景");
+      out = out.split("不要用绿幕").join("不要用纯色背景");
+      out = out.split("纯绿幕").join(preset === undefined ? "纯色背景" : `纯${zhScreen}`);
+      out = out.split("绿幕背景").join(zhBackground);
+      out = out.split("干净的绿幕").join(`干净的${zhScreen}`);
+      out = out.split("没检测到绿幕").join(`没检测到${zhScreen}`);
+      out = out.split("每一片绿").join(`每一片${zhWord}`);
+      out = out.split("一片绿").join(`一片${zhWord}`);
+      out = out.split("抠绿幕").join(`抠${zhScreen}`);
+      out = out.split("抠绿").join(`抠${zhWord}`);
+      out = out.split("绿框").join(`${zhWord}框`);
+      out = out.split("绿色描边").join(`${zhWord}色描边`);
+      out = out.split("绿色外发光").join(`${zhWord}色外发光`);
+      out = out.split("绿色").join(`${zhWord}色`);
+      out = out.split("绿幕").join(zhScreen);
+      out = out.split("纯绿").join(`纯${zhWord}`);
+      // 英文。
+      out = out.split("no green-screen background").join("no solid-color background");
+      out = out.split("green screen background").join(enBackground);
+      out = out.split("clean green screen").join(`clean ${enScreen}`);
+      out = out.split("pure green").join(`pure ${enWord}`);
+      out = out.split("green outline").join(`${enWord} outline`);
+      out = out.split("green glow").join(`${enWord} glow`);
+      out = out.split("the same green").join(`the same ${enWord}`);
+      out = out.split("green background").join(enBackground);
+      out = out.split("green screen").join(enScreen);
+      // 色值最后换，避免把「标准 chroma key 绿 #00FF00」拆成两半。
+      out = out.split("#00FF00").join(color);
+      return out;
+    }
+
     function buildAssetRequestPrompt(input: {
       projectId: string;
       projectName: string;
@@ -2366,9 +2451,12 @@
       /** 仅整图：占几格（用户指定；不指定时按 3×3 的常见尺寸）。 */
       stampCols?: number;
       stampRows?: number;
+      /** 抠像底色；提示词里的「绿幕 / #00FF00」按它替换。 */
+      keyColor?: string;
     }): string {
       const shape = ASSET_SHAPES.includes(input.shape) ? input.shape : "auto";
       const fixed = shape !== "auto";
+      const keyColorHex = normalizeKeyColorHex(input.keyColor);
       /** 整图需要「占几格」：用户指定了就按指定的，没指定就按 3×3 的常见尺寸让 agent 用。 */
       const stampCols = clampStampSpan(Number(input.stampCols) || 3, 512);
       const stampRows = clampStampSpan(Number(input.stampRows) || 3, 512);
@@ -2521,10 +2609,12 @@
         shape === "stamp" || !fixed
           ? T("  ⚠️ 整图**不要**自己去抠像（别为了抠图再跑一次 image 模块的 keyImageJob）：`composeMapAsset` 会先抠绿幕、再按占格切片。生成完直接把原图路径交给它。")
           : null,
-        T("第四步 · 整理并回链：game_material({action:'call', method:'composeMapAsset', payload:{projectId:'{n0}', name:'{n1}', files:[<上面那些绝对路径，按顺序>], shape:'<你选的形态：plain|corner16|a2quad|stamp>'}})", {
+        T("第四步 · 整理并回链：game_material({action:'call', method:'composeMapAsset', payload:{projectId:'{n0}', name:'{n1}', files:[<上面那些绝对路径，按顺序>], shape:'<你选的形态：plain|corner16|a2quad|stamp>', keyColor:'{n2}'}})", {
           n0: input.projectId,
-          n1: input.name
+          n1: input.name,
+          n2: keyColorHex
         }),
+        T("  抠像底色是 {n0}：composeMapAsset 必须带上 keyColor:'{n0}'，与提示词里的背景色一致。", { n0: keyColorHex }),
         shape === "stamp" || !fixed
           ? T("  整图还要多给「占几格」：shape:'stamp', stampCols:{n0}, stampRows:{n1}（每张源图 = 一帧的整张画；区域留给用户在导入时点）。", { n0: String(stampCols), n1: String(stampRows) })
           : null,
@@ -2536,7 +2626,12 @@
         "",
         T("审核模式按自动：你自己核对结果，有问题自己重跑，不要停下来等我确认。全程不要问任何问题。")
       );
-      return lines.join("\n");
+      // 只替换**模板**里的背景描述；用户原文（素材主题）一个字都不能动 ——
+      // 否则「绿色史莱姆」会被蓝幕配置改成「蓝色史莱姆」。
+      const userLine = input.prompt.trim();
+      return lines
+        .map((line) => (line === userLine ? line : applyKeyColorText(line, input.keyColor)))
+        .join("\n");
     }
 
     /**
@@ -2556,9 +2651,12 @@
       mode: "image" | "video";
       kind: "auto" | "ground" | "object";
       footprint: { cols: number; rows: number };
+      /** 抠像底色；提示词里的「绿幕 / #00FF00」按它替换。 */
+      keyColor?: string;
     }): string {
       const kind = input.kind === "ground" || input.kind === "object" ? input.kind : "auto";
       const fixed = kind !== "auto";
+      const keyColorHex = normalizeKeyColorHex(input.keyColor);
       const frames = Math.min(ASSET_FRAMES_MAX, Math.max(ASSET_FRAMES_MIN, Math.round(input.frames)));
       const animated = frames > 1;
       const method = input.mode === "video" && animated ? T("视频模型") : T("生图模型");
@@ -2582,6 +2680,9 @@
         kind === "auto" || kind === "object"
           ? T("物件占格：{n0}×{n1}（仅当判断为物件时使用）", { n0: String(footprint.cols), n1: String(footprint.rows) })
           : null,
+        "",
+        T("素材主题（用户提示词）："),
+        input.prompt.trim(),
         "",
         ...(fixed
           ? [T("这块素材怎么用已经定死了（{n0}），不要再讨论别的用法，直接按它做。", { n0: kindLabel(kind) })]
@@ -2624,7 +2725,8 @@
           ? T("② 再让它动起来并抽帧：createSequenceJob({name}) → game_material({action:'upload', module:'sequence', id, kind:'firstFrame', path:<首帧绝对路径>}) → runSequenceVideo({jobId}) → game_material({action:'wait'}) → runSequenceFrames({jobId, count:{n0}}) → game_material({action:'wait'})；然后 getSequenceJob({jobId}) 取 dir 与 frames.files，按顺序取前 {n0} 帧的绝对路径 = dir + '/' + file。", { n0: String(frames) })
           : T("然后 getImageJob({jobId}) 取 dir 与 items[]，按顺序取前 {n0} 张的绝对路径 = dir + '/' + file。", { n0: String(frames) }),
         "",
-        T("第四步 · 整理并回链：game_material({action:'call', method:'composeIsoAsset', payload:{projectId:'{n0}', name:'{n1}', files:[<上面那些绝对路径，按顺序>], kind:'<ground 或 object>', footprint:<物件时给 {{cols:{n2},rows:{n3}}}>}})", { n0: input.projectId, n1: input.name, n2: String(footprint.cols), n3: String(footprint.rows) }),
+        T("第四步 · 整理并回链：game_material({action:'call', method:'composeIsoAsset', payload:{projectId:'{n0}', name:'{n1}', files:[<上面那些绝对路径，按顺序>], kind:'<ground 或 object>', footprint:<物件时给 {{cols:{n2},rows:{n3}}}>, keyColor:'{n4}'}})", { n0: input.projectId, n1: input.name, n2: String(footprint.cols), n3: String(footprint.rows), n4: keyColorHex }),
+        T("  抠像底色是 {n0}：composeIsoAsset 必须带上 keyColor:'{n0}'，与提示词里的背景色一致。", { n0: keyColorHex }),
         T("  `kind` 必须和这次实际画的一致；不要传 `auto`。物件必须给 footprint；地面不需要。"),
         T("  把这次调用返回的 openUrl **原样**贴成 Markdown 链接（例如 [回到 45° 地图编辑器](…)）：点开就回到项目、素材窗口展开、"),
         T("「新增素材」里这张图与用途 / 帧数 / 占格都已经预选好，用户点「确定」才真的导入。"),
@@ -2632,7 +2734,11 @@
         "",
         T("审核模式按自动：你自己核对结果，有问题自己重跑，不要停下来等我确认。全程不要问任何问题。")
       );
-      return lines.filter((line) => line !== null).join("\n");
+      const userLine = input.prompt.trim();
+      return lines
+        .filter((line) => line !== null)
+        .map((line) => (line === userLine ? line : applyKeyColorText(line, input.keyColor)))
+        .join("\n");
     }
 
     /**
@@ -4524,6 +4630,13 @@
         };
       }, [api]);
       return value;
+    }
+
+    /** 当前生图后端的尺寸配置键（设置页与图片模块共用）。 */
+    function sizeConfigKey(config) {
+      if (config?.imageProvider === "custom") return "customSize";
+      if (config?.imageProvider === "toapis") return "toapisImageSize";
+      return "arkSize";
     }
 
     /** 只读展示当前生效的全局模型：模型只在设置里改，模块内不允许覆盖。 */
@@ -7007,7 +7120,7 @@
       // 合成整图是本地 CPU 重活，宿主侧会标 running；重抠像同样走这个状态。
       const composing = project.sheet?.status === "running" || tasks.has(KEY_SHEET_COMPOSE) || tasks.has(KEY_SHEET_REKEY);
       const keyed = project.sheet?.backgroundFraction;
-      const composeLabel = tasks.label(KEY_SHEET_REKEY) ?? tasks.label(KEY_SHEET_COMPOSE) ?? T("正在抠绿幕并合成整图…");
+      const composeLabel = tasks.label(KEY_SHEET_REKEY) ?? tasks.label(KEY_SHEET_COMPOSE) ?? T("正在抠背景并合成整图…");
 
       const moveRow = (index, delta) => {
         const next = [...rowOrder];
@@ -7059,29 +7172,30 @@
             max: 32,
             onChange: (value) => setSettingsDraft({ ...draft, pixelSize: value })
           }),
+          h(KeyColorField, { value: draft.keyColor, onChange: (value) => { setSettingsDraft({ ...draft, keyColor: value }); void saveSettings({ keyColor: value }); } }),
           h(NumField, {
-            label: T("背景分割容差（0 = 只认绿色）"),
+            label: T("背景分割容差（0 = 只认背景色）"),
             value: draft.bgTolerance ?? 90,
             min: 0,
             max: 120,
             onChange: (value) => setSettingsDraft({ ...draft, bgTolerance: value })
           }),
           h(NumField, {
-            label: T("抠像下限（绿色优势）"),
+            label: T("抠像下限（背景色接近度）"),
             value: draft.keyLow ?? 14,
             min: 0,
             max: 255,
             onChange: (value) => setSettingsDraft({ ...draft, keyLow: value })
           }),
           h(NumField, {
-            label: T("抠像上限（绿色优势）"),
+            label: T("抠像上限（背景色接近度）"),
             value: draft.keyHigh ?? 80,
             min: 1,
             max: 255,
             onChange: (value) => setSettingsDraft({ ...draft, keyHigh: value })
           }),
           h(NumField, {
-            label: T("去绿溢出 0~1"),
+            label: T("去溢色 0~1"),
             value: draft.despill ?? 0.65,
             min: 0,
             max: 1,
@@ -7184,7 +7298,7 @@
               onClick: () =>
                 void start(() => api.compose({ projectId: project.id }), { reload: true }, {
                   key: KEY_SHEET_COMPOSE,
-                  label: T("正在抠绿幕并合成整图…")
+                  label: T("正在抠背景并合成整图…")
                 })
             },
             T("合成整图（{n0}/8 组帧就绪）", { n0: framesReady })
@@ -7733,15 +7847,73 @@
     }
 
     /** 抠像参数表单（三个模块共用同一套字段）。 */
-    function KeyingFields({ draft, onChange }) {
+    function KeyingFields({ draft, onChange, fallbackColor }) {
       return h(
         "div",
         { className: "SPR_fields" },
-        h(NumField, { label: T("抠像下限（绿色优势）"), value: draft.keyLow ?? 14, min: 0, max: 255, onChange: (v) => onChange({ keyLow: v }) }),
-        h(NumField, { label: T("抠像上限（绿色优势）"), value: draft.keyHigh ?? 80, min: 1, max: 255, onChange: (v) => onChange({ keyHigh: v }) }),
-        h(NumField, { label: T("去绿溢出 0~1"), value: draft.despill ?? 0.65, min: 0, max: 1, step: 0.05, onChange: (v) => onChange({ despill: v }) }),
-        h(NumField, { label: T("背景分割容差（0 = 只认绿色）"), value: draft.bgTolerance ?? 90, min: 0, max: 160, onChange: (v) => onChange({ bgTolerance: v }) }),
+        h(KeyColorField, { value: draft.keyColor || fallbackColor, onChange: (v) => onChange({ keyColor: v }) }),
+        h(NumField, { label: T("抠像下限（背景色接近度）"), value: draft.keyLow ?? 14, min: 0, max: 255, onChange: (v) => onChange({ keyLow: v }) }),
+        h(NumField, { label: T("抠像上限（背景色接近度）"), value: draft.keyHigh ?? 80, min: 1, max: 255, onChange: (v) => onChange({ keyHigh: v }) }),
+        h(NumField, { label: T("去溢色 0~1"), value: draft.despill ?? 0.65, min: 0, max: 1, step: 0.05, onChange: (v) => onChange({ despill: v }) }),
+        h(NumField, { label: T("背景分割容差（0 = 只认背景色）"), value: draft.bgTolerance ?? 90, min: 0, max: 160, onChange: (v) => onChange({ bgTolerance: v }) }),
         h(NumField, { label: T("边缘收缩（px）"), value: draft.edgeShrink ?? 0, min: 0, max: 8, onChange: (v) => onChange({ edgeShrink: v }) })
+      );
+    }
+
+    /**
+     * 抠像底色选择器（所有需要抠图的地方共用）。
+     *
+     * 角色身上有绿衣服时绿幕会把衣服一起吃掉，所以底色必须可换。预设只列
+     * 饱和纯色；「自定义」用浏览器原生取色器 / 十六进制输入。
+     */
+    function KeyColorField({ value, onChange, label }) {
+      const current = normalizeKeyColorHex(value);
+      const presets = [
+        { hex: "#00FF00", label: T("绿幕（默认）") },
+        { hex: "#0000FF", label: T("蓝幕") },
+        { hex: "#FF00FF", label: T("品红幕") },
+        { hex: "#00FFFF", label: T("青幕") },
+        { hex: "#FFFF00", label: T("黄幕") },
+        { hex: "#FF0000", label: T("红幕") },
+        { hex: "#FFFFFF", label: T("白幕") },
+        { hex: "#000000", label: T("黑幕") }
+      ];
+      return h(
+        "label",
+        { className: "SPR_field" },
+        h("span", { className: "SPR_fieldLabel" }, label ?? T("抠像背景色")),
+        h(
+          "div",
+          { style: { display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" } },
+          h("input", {
+            type: "color",
+            value: current,
+            "data-testid": "key-color",
+            title: T("自定义背景色"),
+            onChange: (event) => onChange(normalizeKeyColorHex(event.target.value)),
+            style: { width: 40, height: 30, padding: 0, border: "1px solid var(--dsw-alias-border-l2)", borderRadius: 6, background: "transparent" }
+          }),
+          h(
+            "select",
+            {
+              className: "SPR_input",
+              "data-testid": "key-color-preset",
+              style: { flex: "1 1 120px" },
+              value: presets.some((preset) => preset.hex === current) ? current : "",
+              onChange: (event) => onChange(event.target.value === "" ? current : event.target.value)
+            },
+            presets.map((preset) => h("option", { key: preset.hex, value: preset.hex }, preset.label)),
+            presets.some((preset) => preset.hex === current) ? null : h("option", { value: "" }, T("自定义"))
+          ),
+          h("input", {
+            className: "SPR_input",
+            style: { width: 108 },
+            defaultValue: current,
+            key: current,
+            "data-testid": "key-color-hex",
+            onBlur: (event) => onChange(normalizeKeyColorHex(event.target.value))
+          })
+        )
       );
     }
 
@@ -8170,6 +8342,7 @@
     function MapModule(props) {
       useLocaleTick();
       const api = props.api;
+      const globalConfig = useGlobalConfig(api);
 
       // ── 项目与视图 ───────────────────────────────────────────────────────
       const [projects, setProjects] = React.useState([]);
@@ -8615,7 +8788,8 @@
            * 回链带 `keyed=1` = 整理时**已经抠过绿幕**：这里要取消勾选，
            * 否则会抠第二遍（画面里已经没有绿了，第二遍只会按错误的背景色误伤像素）。
            */
-          stampKey: target.keyed !== 1
+          stampKey: target.keyed !== 1,
+          stampKeyColor: globalConfig?.keyColor
         };
         setOpenCard("assets");
         const base = (loaded !== null && loaded !== undefined && loaded.assetBase) || (view !== null && view.assetBase) || "";
@@ -9642,8 +9816,9 @@
           stampRows: "3",
           stampFrames: "1",
           stampPass: new Array(9).fill(0),
-          // 整图默认抠绿幕（AI 那条路生成的就是绿幕图）；回链带 keyed=1 时说明已经抠过。
-          stampKey: true
+          // 整图默认抠背景（AI 那条路生成的就是纯色背景图）；回链带 keyed=1 时说明已经抠过。
+          stampKey: true,
+          stampKeyColor: globalConfig?.keyColor
         });
 
       /**
@@ -9698,7 +9873,8 @@
              * 导入时抠绿幕（只对整图有意义）：AI 那条路在整理时已经抠过，回链会把它关掉，
              * 免得抠第二遍把画面里本就很少的绿误伤掉。
              */
-            stampKey: draft.shape === "stamp" ? draft.stampKey !== false : undefined
+            stampKey: draft.shape === "stamp" ? draft.stampKey !== false : undefined,
+            keyColor: draft.shape === "stamp" ? draft.stampKeyColor : undefined
           });
           setAddDraft(null);
           setNotice({ kind: "info", text: T("已新增素材 {n0}", { n0: draft.name.trim() === "" ? draft.file.name : draft.name.trim() }) });
@@ -10220,8 +10396,9 @@
                           checked: addDraft.stampKey !== false,
                           onChange: (event) => setAddDraft((current) => (current === null ? current : { ...current, stampKey: event.target.checked }))
                         }),
-                        T("抠掉绿幕背景（只留建筑本体）")
+                        T("抠掉背景色（只留建筑本体）")
                       ),
+                      addDraft.stampKey !== false ? h(KeyColorField, { value: addDraft.stampKeyColor ?? globalConfig?.keyColor, onChange: (value) => setAddDraft((current) => (current === null ? current : { ...current, stampKeyColor: value })) }) : null,
                       h(
                         "p",
                         { className: "SPR_mapEdHint" },
@@ -10349,6 +10526,8 @@
           frames: 1,
           mode: "image",
           shape: "auto",
+          // 抠像底色：默认跟全局，用户也可以在对话框里单独改。
+          keyColor: globalConfig?.keyColor,
           // 整图：占几格（只有选「整图」时才用得上；默认 3×3 是雕像 / 大门最常见的尺寸）。
           stampCols: "3",
           stampRows: "3"
@@ -10385,6 +10564,7 @@
           const loaded = await api.getMapProject({ projectId, lang: activeLang() });
           const grid = (loaded !== null && loaded !== undefined && loaded.grid) || { tileWidth: 32, tileHeight: 32 };
           const name = draft.name.trim() === "" ? deriveAssetName(prompt) : draft.name.trim();
+          const cfg = typeof api.getConfig === "function" ? await api.getConfig().catch(() => null) : null;
           const text = buildAssetRequestPrompt({
             projectId,
             projectName: (loaded !== null && loaded !== undefined && loaded.name) || "",
@@ -10394,6 +10574,7 @@
             frames,
             mode,
             shape,
+            keyColor: draft.keyColor || cfg?.keyColor,
             ...(shape === "stamp" ? { stampCols, stampRows } : {})
           });
           await openAssetChat(text);
@@ -10452,6 +10633,7 @@
                   placeholder: T("留空就用提示词开头几个字"),
                   onChange: (event) => setAiDraft((current) => (current === null ? current : { ...current, name: event.target.value }))
                 }),
+                h(KeyColorField, { label: T("抠像背景色"), value: aiDraft.keyColor ?? globalConfig?.keyColor, onChange: (value) => setAiDraft((current) => (current === null ? current : { ...current, keyColor: value })) }),
                 h("div", { className: "SPR_mapEdDlgLabel" }, T("动画帧数（1 = 静态）")),
                 h(
                   "div",
@@ -13977,6 +14159,7 @@
     function IsoModule(props) {
       useLocaleTick();
       const api = props.api;
+      const globalConfig = useGlobalConfig(api);
       const intent = useStudioIntent();
       const hiddenModules = useHiddenModules(api);
       const [projects, setProjects] = React.useState([]);
@@ -14851,6 +15034,7 @@
           frames: 1,
           mode: "image",
           kind: "auto",
+          keyColor: globalConfig?.keyColor,
           footprint: { cols: 1, rows: 1 }
         });
 
@@ -14880,6 +15064,7 @@
         setAiBusy(true);
         try {
           const name = draft.name.trim() === "" ? deriveAssetName(prompt) : draft.name.trim();
+          const cfg = typeof api.getConfig === "function" ? await api.getConfig().catch(() => null) : null;
           const text = buildIsoAssetRequestPrompt({
             projectId: view.id,
             projectName: view.name,
@@ -14889,7 +15074,8 @@
             frames,
             mode,
             kind,
-            footprint
+            footprint,
+            keyColor: draft.keyColor || cfg?.keyColor
           });
           await openIsoAssetChat(text);
           setAiDraft(null);
@@ -14937,6 +15123,7 @@
           objectScale: 1,
           passMode: 1,
           keyGreen: target.keyed !== 1,
+          keyColor: globalConfig?.keyColor,
           clarity: "smooth"
         };
         setOpenCard("assets");
@@ -14979,6 +15166,7 @@
             objectScale: addDraft.kind === "object" ? Number(addDraft.objectScale) || 1 : undefined,
             pass,
             keyGreen: addDraft.keyGreen === true,
+            keyColor: addDraft.keyGreen === true ? addDraft.keyColor : undefined,
             clarity: addDraft.clarity
           });
           if (result !== undefined && Array.isArray(result.warnings) && result.warnings.length > 0) setNotice({ kind: "info", text: result.warnings.join("；") });
@@ -15234,7 +15422,8 @@
                   h("option", { value: "0" }, T("不可通过")),
                   h("option", { value: "2" }, T("可通过 · 物件盖住角色"))
                 ),
-                h("label", { className: "SPR_isoCheck" }, h("input", { type: "checkbox", checked: addDraft.keyGreen === true, onChange: (event) => setAddDraft((current) => ({ ...current, keyGreen: event.target.checked })) }), T("抠掉绿幕背景"))
+                h("label", { className: "SPR_isoCheck" }, h("input", { type: "checkbox", checked: addDraft.keyGreen === true, onChange: (event) => setAddDraft((current) => ({ ...current, keyGreen: event.target.checked })) }), T("抠掉背景色")),
+                addDraft.keyGreen === true ? h(KeyColorField, { value: addDraft.keyColor ?? globalConfig?.keyColor, onChange: (value) => setAddDraft((current) => ({ ...current, keyColor: value })) }) : null
               )
             : null,
           h("label", { className: "SPR_isoLabel" }, T("清晰度")),
@@ -15275,6 +15464,7 @@
             placeholder: T("留空就用提示词开头几个字"),
             onChange: (event) => setAiDraft((current) => (current === null ? current : { ...current, name: event.target.value }))
           }),
+          h(KeyColorField, { label: T("抠像背景色"), value: aiDraft.keyColor ?? globalConfig?.keyColor, onChange: (value) => setAiDraft((current) => (current === null ? current : { ...current, keyColor: value })) }),
           h("label", { className: "SPR_isoLabel" }, T("动画帧数（1 = 静态）")),
           h(NumField, {
             label: T("帧"),
@@ -15488,7 +15678,7 @@
       const assetsCard = h("div", { className: "SPR_isoCard" },
         cardHead(T("素材")),
         h("div", { className: "SPR_isoRow" },
-          h(Btn, { primary: true, onClick: () => { setAddDraft({ base64: "", name: "", kind: "ground", sourceW: view.cell.width, sourceH: view.cell.height, frames: 1, animRows: false, footprint: { cols: 1, rows: 1 }, anchor: { x: 0.5, y: 1 }, objectScale: 1, passMode: 1, keyGreen: false, clarity: "smooth" }); setAddPreview(null); setAddPreviewNatural({ width: 0, height: 0 }); } }, T("新增素材")),
+          h(Btn, { primary: true, onClick: () => { setAddDraft({ base64: "", name: "", kind: "ground", sourceW: view.cell.width, sourceH: view.cell.height, frames: 1, animRows: false, footprint: { cols: 1, rows: 1 }, anchor: { x: 0.5, y: 1 }, objectScale: 1, passMode: 1, keyGreen: false, keyColor: globalConfig?.keyColor, clarity: "smooth" }); setAddPreview(null); setAddPreviewNatural({ width: 0, height: 0 }); } }, T("新增素材")),
           h(Btn, { "data-testid": "iso-ai-open", onClick: openIsoAiAsset }, T("AI 生成素材")),
           h(Btn, { busy: busyKey === "sample", onClick: () => void restoreSamples() }, T("恢复默认素材")),
           h(Btn, { onClick: () => setGuidePage(0) }, T("素材说明"))
@@ -15673,7 +15863,18 @@
       const [suffixDraft, setSuffixDraft] = React.useState("");
       const [settingsDraft, setSettingsDraft] = React.useState({});
       const [keyingDraft, setKeyingDraft] = React.useState({});
+      const [globalSizeDraft, setGlobalSizeDraft] = React.useState(null);
       const globalConfig = useGlobalConfig(api);
+      /**
+       * 输出尺寸是**全局设置**（和生图模型同一条思路）。
+       *
+       * 之前任务里存一份尺寸副本：自定义 / ToAPIs 后端会覆盖它，火山方舟却保留，
+       * 于是「改了设置里的尺寸」在旧任务上永远不生效 —— 用户看到的就是「总是
+       * 1254×1254 这类固定尺寸」。现在输入框直接改全局配置，所有模块一起变。
+       */
+      React.useEffect(() => {
+        if (globalConfig !== null) setGlobalSizeDraft(globalConfig.imageProviderSize ?? "");
+      }, [globalConfig]);
       // 「正在调用接口」的记账表（上传走自己的 uploading 状态，不在这里）。
       const tasks = usePendingTasks();
       // 深链接：切到某一个图片任务。
@@ -15875,8 +16076,23 @@
                       h(
                         "label",
                         { className: "SPR_field" },
-                        h("span", { className: "SPR_fieldLabel" }, T("尺寸")),
-                        h("input", { className: "SPR_input", value: settingsDraft.size ?? "", onChange: (event) => setSettingsDraft({ ...settingsDraft, size: event.target.value }), onBlur: () => void saveJob({ settings: settingsDraft }) })
+                        h("span", { className: "SPR_fieldLabel" }, T("输出尺寸（全局）")),
+                        h("input", {
+                          className: "SPR_input",
+                          "data-testid": "image-global-size",
+                          value: globalSizeDraft ?? globalConfig?.imageProviderSize ?? "",
+                          placeholder: "1K / 2K / 4K / 1024x1024",
+                          onChange: (event) => setGlobalSizeDraft(event.target.value),
+                          onKeyDown: (event) => {
+                            if (event.key === "Enter") event.target.blur();
+                          },
+                          onBlur: () => {
+                            const value = (globalSizeDraft ?? "").trim();
+                            if (value === "") return;
+                            void run(() => api.saveConfig({ [sizeConfigKey(globalConfig)]: value }), T("输出尺寸已保存"));
+                          }
+                        }),
+                        h("span", { className: "SPR_fieldLabel" }, T("所有模块共用；支持 1K / 2K / 4K 或 宽x高（要固定像素就直接填 1024x1024 这种）"))
                       ),
                       h(NumField, { label: T("生成张数（1~8）"), value: settingsDraft.count ?? 1, min: 1, max: 8, onChange: (v) => { setSettingsDraft({ ...settingsDraft, count: v }); void saveJob({ settings: { ...settingsDraft, count: v } }); } })
                     ),
@@ -15893,6 +16109,12 @@
                           onClick: () =>
                             void run(
                               async () => {
+                                // 尺寸输入框失焦与点生成可能同一拍发生：先把全局尺寸落盘，
+                                // 否则本次生成可能仍读到旧尺寸（用户看到的就是「改了也不行」）。
+                                const sizeValue = (globalSizeDraft ?? "").trim();
+                                if (sizeValue !== "" && sizeValue !== (globalConfig?.imageProviderSize ?? "") && typeof api.saveConfig === "function") {
+                                  await api.saveConfig({ [sizeConfigKey(globalConfig)]: sizeValue });
+                                }
                                 await enqueueImageSave({ prompt: promptDraft, suffix: suffixDraft, settings: settingsDraft });
                                 return api.runImageJob({ jobId: job.id });
                               },
@@ -15930,7 +16152,7 @@
                   h(
                     "div",
                     { className: "SPR_card" },
-                    h("div", { className: "SPR_cardHead" }, h("h3", null, T("③ 绿幕抠图"))),
+                    h("div", { className: "SPR_cardHead" }, h("h3", null, T("③ 背景抠像"))),
                     h("p", { className: "SPR_hint" }, T("开启后每张生成完会自动抠一遍；也可以上传已有图片只做抠像。") ),
                     h(
                       "div",
@@ -15948,7 +16170,7 @@
                           }
                         },
                         h("option", { value: "off" }, T("不抠像")),
-                        h("option", { value: "on" }, T("自动抠绿幕输出 PNG"))
+                        h("option", { value: "on" }, T("自动抠背景输出 PNG"))
                       ),
                       h(
                         BusyBtn,
@@ -15958,13 +16180,13 @@
                           onClick: () =>
                             void run(() => api.keyImageJob({ jobId: job.id }), T("已开始抠像"), {
                               key: K_IMG_KEY,
-                              label: T("正在抠绿幕…")
+                              label: T("正在抠背景…")
                             })
                         },
                         T("按当前参数重新抠像")
                       )
                     ),
-                    h(KeyingFields, { draft: keyingDraft, onChange: (patch) => { const next = { ...keyingDraft, ...patch }; setKeyingDraft(next); void saveJob({ keying: patch }); } }),
+                    h(KeyingFields, { draft: keyingDraft, fallbackColor: globalConfig?.keyColor, onChange: (patch) => { const next = { ...keyingDraft, ...patch }; setKeyingDraft(next); void saveJob({ keying: patch }); } }),
                     h(UploadBox, { label: T("上传一张已有图片，直接抠成透明 PNG"), accept: "image/*", multiple: false, busy: uploading || tasks.has(K_IMG_UPLOAD), onFiles: (files) => void upload(files, "item") }),
                     tasks.has(K_IMG_UPLOAD) ? h(BusyBadge, { show: true, text: tasks.label(K_IMG_UPLOAD) }) : null
                   ),
@@ -15993,7 +16215,7 @@
                             const overlay = itemBusy || keyingNow || waiting;
                             const overlayText =
                               tasks.label(itemKey) ??
-                              (keyingNow ? T("正在抠绿幕…") : waiting ? tasks.label(K_IMG_JOB) ?? T("正在生成…") : T("正在生成…"));
+                              (keyingNow ? T("正在抠背景…") : waiting ? tasks.label(K_IMG_JOB) ?? T("正在生成…") : T("正在生成…"));
                             return h(
                               "div",
                               { key: index, className: "SPR_node", "data-busy": overlay ? "true" : undefined },
@@ -16491,7 +16713,7 @@
                     "div",
                     { className: "SPR_card" },
                     h("div", { className: "SPR_cardHead" }, h("h3", null, T("④ 绿幕抠像与合成"))),
-                    h(KeyingFields, { draft: keyingDraft, onChange: (patch) => { const next = { ...keyingDraft, ...patch }; setKeyingDraft(next); void saveJob({ keying: patch }); } }),
+                    h(KeyingFields, { draft: keyingDraft, fallbackColor: globalConfig?.keyColor, onChange: (patch) => { const next = { ...keyingDraft, ...patch }; setKeyingDraft(next); void saveJob({ keying: patch }); } }),
                     h(
                       "div",
                       { className: "SPR_toolbar" },
@@ -20422,7 +20644,8 @@
                 className: "SPR_input",
                 value: config.arkSize,
                 onChange: (event) => void patch({ arkSize: event.target.value })
-              })
+              }),
+              h("span", { className: "SPR_fieldLabel" }, T("1K / 2K / 4K 由模型决定像素；要固定尺寸请直接填 宽x高"))
             ),
             h(
               "label",
@@ -21031,6 +21254,7 @@
               max: 8,
               onChange: (value) => void patch({ concurrency: value })
             }),
+            h(KeyColorField, { label: T("抠像背景色（全局默认）"), value: config.keyColor, onChange: (value) => void patch({ keyColor: value }) }),
             h(NumField, {
               label: T("抠像下限"),
               value: config.keyLow,
@@ -21061,7 +21285,7 @@
               onChange: (value) => void patch({ edgeShrink: value })
             }),
             h(NumField, {
-              label: T("背景分割容差（0 = 只认绿色）"),
+              label: T("背景分割容差（0 = 只认背景色）"),
               value: config.bgTolerance,
               min: 0,
               max: 160,

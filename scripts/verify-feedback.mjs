@@ -343,7 +343,7 @@ const api = new Proxy(
  */
 const EXPECTED_HOOKS = {
   StudioPanel: 21,
-  ImageModule: 17,
+  ImageModule: 18,
   SequenceModule: 17
 };
 
@@ -929,13 +929,13 @@ function makeSequenceJob(overrides = {}) {
  * ImageModule 的 useState 顺序：
  *   0 useLocaleTick（语言切换计数器）/ 1 jobs / 2 jobId / 3 job / 4 notice /
  *   5 uploading / 6 promptDraft / 7 suffixDraft /
- *   8 settingsDraft / 9 keyingDraft / 10 useGlobalConfig / 11 usePendingTasks.map /
- *   12 useStudioIntent（深链接意图）/
- *   13 loadedDrafts(useRef，上次从宿主读到的草稿；不读槽位)
+ *   8 settingsDraft / 9 keyingDraft / 10 globalSizeDraft /
+ *   11 useGlobalConfig / 12 usePendingTasks.map / 13 useStudioIntent（深链接意图）/
+ *   14 loadedDrafts(useRef，上次从宿主读到的草稿；不读槽位)
  * SequenceModule 的顺序与之完全相同（它另有自己的 jobIdRef，排在这个 ref 之前）。
  */
 function renderModule(component, job, tasks) {
-  HOOK.slots = [
+  const base = [
     0,
     [job],
     job.id,
@@ -945,11 +945,14 @@ function renderModule(component, job, tasks) {
     job.prompt ?? "",
     job.suffix ?? "",
     { ...(job.settings ?? {}) },
-    { ...(job.keying ?? {}) },
-    undefined,
-    tasks.map,
-    null
+    { ...(job.keying ?? {}) }
   ];
+  if (component === ImageModule) {
+    // 图片模块多一个「全局输出尺寸」草稿槽（见上方 Hook 顺序注释）。
+    HOOK.slots = [...base, null, undefined, tasks.map, null];
+  } else {
+    HOOK.slots = [...base, undefined, tasks.map, null];
+  }
   HOOK.cursor = 0;
   const tree = component({ api });
   return { tree, overflow: false, hooks: HOOK.cursor };
@@ -965,6 +968,12 @@ if (typeof ImageModule === "function") {
       `调用 ${idle.hooks} 个 Hook，期望 ${EXPECTED_HOOKS.ImageModule}`
     );
     check("空闲时一个遮罩都没有", overlays(idle.tree).length === 0, `${overlays(idle.tree).length} 个`);
+    check(
+      "图片模块有抠像底色选择器（角色穿绿衣服时可换蓝 / 品红）",
+      byTag(idle.tree, "input").some((node) => node.props.type === "color"),
+      ""
+    );
+    check("图片模块有全局输出尺寸输入框", byTag(idle.tree, "input").some((node) => node.props["data-testid"] === "image-global-size"));
 
     const gen = renderModule(ImageModule, makeImageJob(), makeTasks(["img:job"]));
     check("整批生成时两张图都被盖住", overlays(gen.tree).length >= 2, `${overlays(gen.tree).length} 个`);
@@ -1018,6 +1027,11 @@ if (typeof SequenceModule === "function") {
       `调用 ${idle.hooks} 个 Hook，期望 ${EXPECTED_HOOKS.SequenceModule}`
     );
     check("空闲时一个遮罩都没有", overlays(idle.tree).length === 0, `${overlays(idle.tree).length} 个`);
+    check(
+      "序列帧模块有抠像底色选择器",
+      byTag(idle.tree, "input").some((node) => node.props.type === "color"),
+      ""
+    );
 
     const video = renderModule(SequenceModule, makeSequenceJob(), makeTasks(["seq:video"]));
     check("生成视频时遮罩盖住 video", overlays(video.tree).length >= 1, `${overlays(video.tree).length} 个`);
@@ -1532,7 +1546,7 @@ section("图片提示词保存与生成时序");
     getImageJob: async () => job,
     listImageJobs: async () => ({ jobs: [job] })
   };
-  HOOK.slots = [0, [job], job.id, job, null, false, "latest typed prompt", "", {...job.settings}, {...job.keying}, undefined, {}, null];
+  HOOK.slots = [0, [job], job.id, job, null, false, "latest typed prompt", "", {...job.settings}, {...job.keying}, null, undefined, {}, null];
   HOOK.cursor = 0;
   const tree = ImageModule({ api: apiQueued });
   const prompt = byTag(tree, "textarea").find(node => node.props.placeholder === "描述你要生成的图片…");

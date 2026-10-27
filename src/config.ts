@@ -9,6 +9,7 @@ import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_ROW_ORDER } from "./directions.js";
+import { DEFAULT_KEY_COLOR, normalizeKeyColor } from "./keycolor.js";
 import { STUDIO_MODULES } from "./links.js";
 import { MUSIC_DEFAULT_MODEL } from "./musicmodels.js";
 import {
@@ -317,7 +318,9 @@ export interface Config {
   /** 提取帧时先裁剪掉的边缘比例（0~0.2），用于去掉视频边缘噪点。 */
   cropInset: number;
 
-  /** 抠绿阈值：绿色优势值低于 keyLow 视为前景，高于 keyHigh 视为背景。 */
+  /** 抠像底色（`#RRGGBB`，默认纯绿 #00FF00）。角色穿绿衣服时改成蓝 / 品红等。 */
+  keyColor: string;
+  /** 抠像阈值：绿色优势值（或与 keyColor 的 RGB 距离）低于 keyLow 视为前景，高于 keyHigh 视为背景。 */
   keyLow: number;
   keyHigh: number;
   /** 去绿溢出强度 0~1。 */
@@ -495,6 +498,7 @@ export const DEFAULT_CONFIG: Config = {
   bottomMargin: 2,
   cropInset: 0,
 
+  keyColor: DEFAULT_KEY_COLOR,
   keyLow: 14,
   keyHigh: 80,
   despill: 0.65,
@@ -597,7 +601,7 @@ export function normalizeConfig(input: unknown): Config {
     toapisBaseUrl: asString(raw.toapisBaseUrl, DEFAULT_CONFIG.toapisBaseUrl).trim(),
     toapisApiKey: asString(raw.toapisApiKey, DEFAULT_CONFIG.toapisApiKey).trim(),
     toapisImageModel: asString(raw.toapisImageModel, DEFAULT_CONFIG.toapisImageModel).trim(),
-    toapisImageSize: asString(raw.toapisImageSize, DEFAULT_CONFIG.toapisImageSize).trim(),
+    toapisImageSize: asString(raw.toapisImageSize, DEFAULT_CONFIG.toapisImageSize).trim() || DEFAULT_CONFIG.toapisImageSize,
     toapisImageQuality: asString(raw.toapisImageQuality, DEFAULT_CONFIG.toapisImageQuality).trim(),
     toapisImageBackground: raw.toapisImageBackground === "transparent" || raw.toapisImageBackground === "opaque" ? raw.toapisImageBackground : "auto",
     toapisVideo: asBool(raw.toapisVideo, DEFAULT_CONFIG.toapisVideo),
@@ -613,7 +617,7 @@ export function normalizeConfig(input: unknown): Config {
     customBaseUrl: asString(raw.customBaseUrl, DEFAULT_CONFIG.customBaseUrl).replace(/\/+$/, ""),
     customApiKey: asString(raw.customApiKey, DEFAULT_CONFIG.customApiKey),
     customModel: asString(raw.customModel, DEFAULT_CONFIG.customModel),
-    customSize: asString(raw.customSize, DEFAULT_CONFIG.customSize),
+    customSize: asString(raw.customSize, DEFAULT_CONFIG.customSize).trim() || DEFAULT_CONFIG.customSize,
     customNegativePrompt: asString(raw.customNegativePrompt, DEFAULT_CONFIG.customNegativePrompt),
     customSteps: asInt(raw.customSteps, DEFAULT_CONFIG.customSteps, 1, 150),
     // 上限放到 30：有些后端把 CFG 当纯缩放用；下限 0 = 完全不看提示词（罕见但合法）。
@@ -629,7 +633,7 @@ export function normalizeConfig(input: unknown): Config {
     arkBaseUrl: asString(raw.arkBaseUrl, DEFAULT_CONFIG.arkBaseUrl).replace(/\/+$/, ""),
     arkModel: asString(raw.arkModel, DEFAULT_CONFIG.arkModel),
     arkRedrawModel: asString(raw.arkRedrawModel, DEFAULT_CONFIG.arkRedrawModel),
-    arkSize: asString(raw.arkSize, DEFAULT_CONFIG.arkSize),
+    arkSize: asString(raw.arkSize, DEFAULT_CONFIG.arkSize).trim() || DEFAULT_CONFIG.arkSize,
     arkWatermark: asBool(raw.arkWatermark, DEFAULT_CONFIG.arkWatermark),
     arkTimeoutMs: asInt(raw.arkTimeoutMs, DEFAULT_CONFIG.arkTimeoutMs, 10000, 900000),
 
@@ -685,6 +689,7 @@ export function normalizeConfig(input: unknown): Config {
     bottomMargin: asInt(raw.bottomMargin, DEFAULT_CONFIG.bottomMargin, 0, 64),
     cropInset: asNumber(raw.cropInset, DEFAULT_CONFIG.cropInset, 0, 0.2),
 
+    keyColor: normalizeKeyColor(raw.keyColor, DEFAULT_CONFIG.keyColor),
     keyLow,
     keyHigh,
     despill: asNumber(raw.despill, DEFAULT_CONFIG.despill, 0, 1),

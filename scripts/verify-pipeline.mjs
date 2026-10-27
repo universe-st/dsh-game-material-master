@@ -421,6 +421,37 @@ async function main() {
   check("双色背景的下半也被抠掉", twoMask[95 * twoTone.w + 5] === 1);
   check("双色背景里的主体保住了", twoMask[50 * twoTone.w + 60] === 0);
 
+
+  console.log("13) 抠像：非绿底色（角色穿绿衣服时改用品红 / 蓝 / 白幕）");
+  {
+    const w = 140;
+    const h = 120;
+    const make = (bg) => {
+      const buf = Buffer.alloc(w * h * 4);
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const i = (y * w + x) * 4;
+          const body = x >= 45 && x < 95 && y >= 25 && y < 100;
+          const [r, g, b] = body ? [30, 210, 40] : bg;
+          buf[i] = r; buf[i + 1] = g; buf[i + 2] = b; buf[i + 3] = 255;
+        }
+      }
+      return buf;
+    };
+    const magenta = keyGreen(make([255, 0, 255]), w, h, { ...KEY_OPTIONS, keyColor: "#FF00FF" });
+    check("品红幕背景被抠掉", magenta.rgba[(10 * w + 10) * 4 + 3] === 0);
+    check("绿色衣服被保住", magenta.rgba[(60 * w + 60) * 4 + 3] === 255, `alpha=${magenta.rgba[(60 * w + 60) * 4 + 3]}`);
+    check("结果带回本次底色", magenta.keyColor === "#FF00FF", magenta.keyColor);
+
+    const blue = keyGreen(make([0, 0, 255]), w, h, { ...KEY_OPTIONS, keyColor: "#0000FF" });
+    check("蓝幕背景被抠掉", blue.rgba[(10 * w + 10) * 4 + 3] === 0);
+    check("蓝幕下绿色衣服仍不透明", blue.rgba[(60 * w + 60) * 4 + 3] === 255, `alpha=${blue.rgba[(60 * w + 60) * 4 + 3]}`);
+
+    const white = keyGreen(make([255, 255, 255]), w, h, { ...KEY_OPTIONS, keyColor: "#FFFFFF", bgTolerance: 0 });
+    check("白幕关闭空间分割也能抠掉", white.rgba[(10 * w + 10) * 4 + 3] === 0);
+    check("白幕下绿色衣服仍不透明", white.rgba[(60 * w + 60) * 4 + 3] === 255);
+  }
+
   console.log(`\n产物：${sheetFile}\n`);
   if (failures.length > 0) {
     console.error(`失败 ${failures.length} 项：${failures.join("、")}`);

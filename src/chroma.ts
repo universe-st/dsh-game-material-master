@@ -24,21 +24,30 @@
  */
 
 import { encodePng } from "./png.js";
+import { DEFAULT_KEY_COLOR, isGreenKeyColor, keyColorRgb, keyDominantChannels, normalizeKeyColor } from "./keycolor.js";
 
 export interface KeyOptions {
-  /** 绿色优势值 ≤ 该值 → 完全不透明。 */
+  /**
+   * 背景色（`#RRGGBB`）。
+   *
+   * 绿色（默认 #00FF00）继续走原来的「绿色优势值」判据；其它颜色走
+   * 「与背景色的 RGB 距离」判据。空间分割对两种都适用。
+   */
+  keyColor?: string;
+  /** 绿色优势值 / 背景色距离 ≤ 该值 → 完全不透明。 */
   keyLow: number;
-  /** 绿色优势值 ≥ 该值 → 完全透明。 */
+  /** 绿色优势值 / 背景色距离 ≥ 该值 → 完全透明。 */
   keyHigh: number;
-  /** 去绿溢出强度 0~1。 */
+  /** 去溢色强度 0~1（绿色压 G，蓝色压 B，品红压 R+B…）。 */
   despill: number;
-  /** 前景 alpha 腐蚀像素数，用于消除残留绿边。 */
+  /** 前景 alpha 腐蚀像素数，用于消除残留色边。 */
   edgeShrink: number;
   /** 洪水填充的局部颜色容差（RGB 欧氏距离）。0 = 关闭空间分割。 */
   bgTolerance: number;
 }
 
 export const DEFAULT_KEY_OPTIONS: KeyOptions = {
+  keyColor: DEFAULT_KEY_COLOR,
   keyLow: 14,
   keyHigh: 80,
   despill: 0.65,
@@ -48,6 +57,8 @@ export const DEFAULT_KEY_OPTIONS: KeyOptions = {
 
 export interface KeyResult {
   rgba: Buffer;
+  /** 本次使用的背景色（规范化后的 `#RRGGBB`）。 */
+  keyColor: string;
   /** 判定为背景的像素占比，可用来判断这次抠像是否可信。 */
   backgroundFraction: number;
   /** 是否真的用上了空间分割（容差为 0 或结果不合理时为 false）。 */
@@ -322,11 +333,27 @@ export function segmentBackgroundDetailed(
   return { mask: background, samples: built.samples, kept: built.kept, dropped: built.dropped };
 }
 
+/** 两个像素到某个背景色的 RGB 距离。 */
+function keyDistance(rgba: Buffer, offset: number, key: { r: number; g: number; b: number }): number {
+  const dr = rgba[offset] - key.r;
+  const dg = rgba[offset + 1] - key.g;
+  const db = rgba[offset + 2] - key.b;
+  return Math.sqrt(dr * dr + dg * dg + db * db);
+}
+
 /** 没启用空间分割时，用颜色判据粗略估一个背景占比，供界面判断可信度。 */
-function countGreenBackground(rgba: Buffer, high: number): number {
+function countKeyBackground(rgba: Buffer, high: number, keyColor: string): number {
+  const key = keyColorRgb(keyColor);
+  const green = isGreenKeyColor(keyColor);
   let count = 0;
+  if (green) {
+    for (let p = 0; p < rgba.length; p += 4) {
+      if (rgba[p + 1] - Math.max(rgba[p], rgba[p + 2]) >= high) count++;
+    }
+    return count;
+  }
   for (let p = 0; p < rgba.length; p += 4) {
-    if (rgba[p + 1] - Math.max(rgba[p], rgba[p + 2]) >= high) count++;
+    if (keyDistance(rgba, p, key) <= high) count++;
   }
   return count;
 }
@@ -336,6 +363,10 @@ function countGreenBackground(rgba: Buffer, high: number): number {
  * 输入输出都是 `width * height * 4` 字节、非预乘 alpha。
  */
 export function keyGreen(rgba: Buffer, width: number, height: number, options: KeyOptions): KeyResult {
+  const keyColor = normalizeKeyColor(options.keyColor ?? DEFAULT_KEY_COLOR);
+  const key = keyColorRgb(keyColor);
+  const greenMode = isGreenKeyColor(keyColor);
+  const dominant = keyDominantChannels(keyColor);
   const low = Math.max(0, Math.min(255, options.keyLow));
   const high = Math.max(low + 1, Math.min(255, options.keyHigh));
   const span = high - low;
@@ -370,26 +401,52 @@ export function keyGreen(rgba: Buffer, width: number, height: number, options: K
     const b = rgba[p + 2];
     const srcAlpha = rgba[p + 3];
 
-    const other = r > b ? r : b;
-    const greenness = g - other;
-
     let alpha = 1;
-    if (greenness >= high) alpha = 0;
-    else if (greenness > low) alpha = 1 - (greenness - low) / span;
+    if (greenMode) {
+      const other = r > b ? r : b;
+      const greenness = g - other;
+      if (greenness >= high) alpha = 0;
+      else if (greenness > low) alpha = 1 - (greenness - low) / span;
+    } else {
+      const distance = keyDistance(rgba, p, key);
+      if (distance >= high) alpha = 1;
+      else if (distance > low) alpha = (distance - low) / span;
+      else alpha = 0;
+    }
     alpha *= srcAlpha / 255;
 
-    // 空间上确认为背景的像素直接全透明；颜色判据只负责前景里的绿色残余。
+    // 空间上确认为背景的像素直接全透明；颜色判据只负责前景里的残余色边。
     if (background !== undefined && background[i] === 1) alpha = 0;
 
+    let outR = r;
     let outG = g;
-    if (despill > 0 && g > other) {
+    let outB = b;
+    if (despill > 0) {
       const weight = despill * (1 - alpha);
-      if (weight > 0) outG = Math.round(g - (g - other) * weight);
+      if (weight > 0) {
+        if (greenMode) {
+          const other = r > b ? r : b;
+          if (g > other) outG = Math.round(g - (g - other) * weight);
+        } else if (dominant.length > 0) {
+          const others = [0, 1, 2].filter((channel) => !dominant.includes(channel));
+          const values = [r, g, b];
+          const otherMax = others.length === 0 ? 0 : Math.max(...others.map((channel) => values[channel]));
+          for (const channel of dominant) {
+            const value = values[channel];
+            const excess = value - otherMax;
+            if (excess <= 0) continue;
+            const next = Math.round(value - excess * weight);
+            if (channel === 0) outR = next;
+            else if (channel === 1) outG = next;
+            else outB = next;
+          }
+        }
+      }
     }
 
-    out[p] = r;
+    out[p] = outR;
     out[p + 1] = outG;
-    out[p + 2] = b;
+    out[p + 2] = outB;
     out[p + 3] = Math.round(alpha * 255);
   }
 
@@ -397,7 +454,8 @@ export function keyGreen(rgba: Buffer, width: number, height: number, options: K
 
   return {
     rgba: out,
-    backgroundFraction: background !== undefined ? backgroundCount / pixels : countGreenBackground(rgba, high) / pixels,
+    keyColor,
+    backgroundFraction: background !== undefined ? backgroundCount / pixels : countKeyBackground(rgba, high, keyColor) / pixels,
     usedSegmentation: background !== undefined,
     borderSamples,
     borderSamplesDropped

@@ -41,6 +41,7 @@ import { appendJobLog, messageOf, readJson, sweepTempFiles, writeJsonAtomic, typ
 import { dataRoot } from "./config.js";
 import { decodeFile, encodeBitmap, pngSize, probeImageSize, sniffImageExt, type Bitmap } from "./bitmap.js";
 import { keyGreen, DEFAULT_KEY_OPTIONS } from "./chroma.js";
+import { keyScreenName, normalizeKeyColor } from "./keycolor.js";
 import {
   addLayer,
   applyOps,
@@ -938,7 +939,7 @@ interface RegisterInput {
    * 在**量到真实尺寸之后**才套上去 —— 校验用同一套 `normalizeCell` / `parseTilesetShape`，
    * 填了不合法的就退回识别结果，不静默改成别的值。
    */
-  overrides?: { cell?: Record<string, unknown>; shape?: unknown; animRows?: unknown; fps?: unknown; clarity?: unknown; scale?: unknown; loop?: unknown; stamp?: unknown; stampKey?: unknown };
+  overrides?: { cell?: Record<string, unknown>; shape?: unknown; animRows?: unknown; fps?: unknown; clarity?: unknown; scale?: unknown; loop?: unknown; stamp?: unknown; stampKey?: unknown; keyColor?: unknown };
   /**
    * 项目的地图网格：**没给 cell 时只用来「提醒」**，不改自动识别的结果。
    *
@@ -1056,8 +1057,10 @@ export async function importMapTileset(
     loop?: unknown;
     /** 整图规格：`{cols, rows, frames, pass}`（给了它就是整图，形态强制为 stamp）。 */
     stamp?: unknown;
-    /** 仅整图：导入时抠掉绿幕背景（手动导图用；AI 那条路在整理时已经抠过）。 */
+    /** 仅整图：导入时抠掉背景（手动导图用；AI 那条路在整理时已经抠过）。 */
     stampKey?: unknown;
+    /** 仅整图抠像：背景色（`#RRGGBB`，留空 = 默认绿）。 */
+    keyColor?: unknown;
   } = {}
 ): Promise<ImportTilesetResult> {
   const project = await readProjectOrThrow(projectId);
@@ -1069,7 +1072,7 @@ export async function importMapTileset(
     id: newTilesetId(),
     name: name.trim() === "" ? `素材 ${project.tilesets.length + 1}` : name.trim(),
     bytes,
-    overrides: { cell: opts.cell, shape: opts.shape, animRows: opts.animRows, fps: opts.fps, clarity: opts.clarity, scale: opts.scale, loop: opts.loop, stamp: opts.stamp, stampKey: opts.stampKey },
+    overrides: { cell: opts.cell, shape: opts.shape, animRows: opts.animRows, fps: opts.fps, clarity: opts.clarity, scale: opts.scale, loop: opts.loop, stamp: opts.stamp, stampKey: opts.stampKey, keyColor: opts.keyColor },
     projectGrid: { width: project.grid.tileWidth, height: project.grid.tileHeight }
   }, warnings);
   await patchMapProject(projectId, (fresh) => {
@@ -1180,6 +1183,8 @@ export interface ComposeMapAssetInput {
    */
   stampCols?: unknown;
   stampRows?: unknown;
+  /** 整图抠像的底色（`#RRGGBB`，留空 = 默认绿）。 */
+  keyColor?: string;
 }
 
 export interface ComposeMapAssetResult {
@@ -1278,8 +1283,10 @@ export async function composeMapAsset(input: ComposeMapAssetInput): Promise<Comp
   const frames: Bitmap[] = [];
   /** 每张源图裁掉了多少边（全部为 0 时说明没白边，不用提）。 */
   const trimmedAmounts: Array<{ file: string; left: number; top: number; right: number; bottom: number }> = [];
-  /** 整图抠绿幕的结果（keyed = 被判成背景的像素占比；0 = 没抠）。 */
+  /** 整图抠背景的结果（keyed = 被判成背景的像素占比；0 = 没抠）。 */
   const keyedAmounts: number[] = [];
+  const keyColor = normalizeKeyColor(input.keyColor);
+  const screen = keyScreenName(keyColor, "zh");
   for (const file of files) {
     let info;
     try {
@@ -1301,7 +1308,7 @@ export async function composeMapAsset(input: ComposeMapAssetInput): Promise<Comp
      * 留着会在地图上出现一块绿框，而且把本该空着的角落也涂满。
      * 其它形态不抠（它们的背景就是材质本身）。
      */
-    const keyed = shape === "stamp" ? keyStampBackground(await decodeFile(file), (rgba, width, height) => keyGreen(rgba, width, height, STAMP_KEY_OPTIONS)) : undefined;
+    const keyed = shape === "stamp" ? keyStampBackground(await decodeFile(file), (rgba, width, height) => keyGreen(rgba, width, height, { ...STAMP_KEY_OPTIONS, keyColor })) : undefined;
     if (keyed !== undefined) keyedAmounts.push(keyed.keyed);
     const trimmed = trimUniformBorder(keyed === undefined ? (keyed === undefined ? await decodeFile(file) : keyed.bitmap) : keyed.bitmap);
     trimmedAmounts.push({ file, left: trimmed.left, top: trimmed.top, right: trimmed.right, bottom: trimmed.bottom });
@@ -1338,12 +1345,12 @@ export async function composeMapAsset(input: ComposeMapAssetInput): Promise<Comp
     if (keyedCount > 0) {
       const average = keyedAmounts.reduce((sum, value) => sum + value, 0) / keyedAmounts.length;
       notes.push(
-        `已抠掉绿幕背景（平均 ${Math.round(average * 100)}% 的像素变成透明${keyedCount < frames.length ? `，${keyedCount}/${frames.length} 张抠掉了` : ""}）：` +
-          `整图是「立在格子上的物件」，背景要透明才看得见地砖；留着绿幕的话地图上会多出一块绿框。`
+        `已抠掉${screen}背景（平均 ${Math.round(average * 100)}% 的像素变成透明${keyedCount < frames.length ? `，${keyedCount}/${frames.length} 张抠掉了` : ""}）：` +
+          `整图是「立在格子上的物件」，背景要透明才看得见地砖；留着背景的话地图上会多出一块色块。`
       );
     } else {
       notes.push(
-        "**没检测到绿幕背景**：这次按原图用了（画面会连背景一起印到地图上）。想要背景透明，让模型把背景画成**纯绿**（#00FF00 一类，不要渐变 / 阴影），或者自己用透明 PNG。"
+        `**没检测到${screen}背景**：这次按原图用了（画面会连背景一起印到地图上）。想要背景透明，让模型把背景画成**纯色 ${keyColor}**（不要渐变 / 阴影），或者自己用透明 PNG。`
       );
     }
   }
@@ -1488,9 +1495,10 @@ async function registerTileset(projectId: string, input: RegisterInput, warnings
   try {
     // 「导入时抠绿幕」：手动导一张带绿幕的整图时用（AI 那条路在 composeMapAsset 里已经抠过）。
     const keyedSource = input.overrides?.stampKey === true;
+    const keyColor = normalizeKeyColor(input.overrides?.keyColor);
     if (stamp !== undefined && stampCell !== undefined) {
       const rawSource = await decodeFile(target);
-      const source = keyedSource ? keyStampBackground(rawSource, (rgba, width, height) => keyGreen(rgba, width, height, STAMP_KEY_OPTIONS)).bitmap : rawSource;
+      const source = keyedSource ? keyStampBackground(rawSource, (rgba, width, height) => keyGreen(rgba, width, height, { ...STAMP_KEY_OPTIONS, keyColor })).bitmap : rawSource;
       if (keyedSource) {
         // 抠完的源图要写回去：下面 resample + 烘焙读的是盘上这份（也便于排查）。
         storedBytes = encodeBitmap(source);

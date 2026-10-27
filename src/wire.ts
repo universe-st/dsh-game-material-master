@@ -568,7 +568,9 @@ const importIsoTilesetSchema = z.object({
   /** 仅物件：图片大小相对占格（1 = 正好占满）。 */
   objectScale: z.number().optional(),
   pass: z.array(z.number()).optional(),
-  keyGreen: z.boolean().optional()
+  keyGreen: z.boolean().optional(),
+  /** 抠像底色（`#RRGGBB`）；留空 = 默认绿。 */
+  keyColor: z.string().optional()
 });
 const composeIsoAssetSchema = z.object({
   projectId: z.string(),
@@ -578,8 +580,10 @@ const composeIsoAssetSchema = z.object({
   kind: z.enum(["ground", "object"]),
   /** 仅物件：占几格（1..地图大小）。 */
   footprint: z.record(z.string(), z.unknown()).optional(),
-  /** 是否抠掉纯绿背景（AI 那条路默认开；导入时已抠过的图会带 keyed=1 关掉）。 */
-  keyGreen: z.boolean().optional()
+  /** 是否抠掉背景（AI 那条路默认开；导入时已抠过的图会带 keyed=1 关掉）。 */
+  keyGreen: z.boolean().optional(),
+  /** 抠像底色（`#RRGGBB`）；留空 = 默认绿。 */
+  keyColor: z.string().optional()
 });
 const saveIsoTilesetSchema = z.object({
   projectId: z.string(),
@@ -779,8 +783,10 @@ const importMapTilesetSchema = z.object({
    * `cols*rows` 个 0/1/2（不可通过 / 可通过·被人物遮挡 / 可通过·遮挡人物）。
    */
   stamp: z.record(z.string(), z.unknown()).optional(),
-  /** 仅整图：导入时**抠掉绿幕背景**（手动导一张带绿幕的整图时用；AI 那条路在整理时已经抠过）。 */
+  /** 仅整图：导入时**抠掉背景**（手动导一张带背景的整图时用；AI 那条路在整理时已经抠过）。 */
   stampKey: z.boolean().optional(),
+  /** 仅整图抠像：背景色（`#RRGGBB`）；留空 = 默认绿。 */
+  keyColor: z.string().optional(),
   /** 会动的素材怎么循环：`forward` 正放（默认）/ `reverse` 倒放 / `pingpong` 来回。 */
   loop: z.string().optional()
 });
@@ -827,7 +833,9 @@ const composeMapAssetSchema = z.object({
   animRows: z.boolean().optional(),
   /** 仅整图：占几格（2~8）。少了它整图没法切 —— 宿主会明确报错。 */
   stampCols: z.number().optional(),
-  stampRows: z.number().optional()
+  stampRows: z.number().optional(),
+  /** 整图抠像的底色（`#RRGGBB`）；留空 = 默认绿。 */
+  keyColor: z.string().optional()
 });
 const removeMapTilesetSchema = z.object({ projectId: z.string(), tilesetId: z.string() });
 const saveMapDocSchema = z.object({

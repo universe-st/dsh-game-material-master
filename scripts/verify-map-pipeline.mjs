@@ -2101,7 +2101,7 @@ try {
       {
         const greens = join(HOME, "stamp-green");
         await mkdir(greens, { recursive: true });
-        const greenFrame = async (name, withGreen) => {
+        const greenFrame = async (name, withGreen, pureBlue = false) => {
           const w = 8 * 32, h = 2 * 32;
           const rgba = Buffer.alloc(w * h * 4);
           for (let y = 0; y < h; y++) {
@@ -2114,6 +2114,10 @@ try {
                 rgba[offset + 2] = 110;
               } else if (withGreen) {
                 rgba[offset + 1] = 224;
+              } else if (pureBlue) {
+                rgba[offset] = 0;
+                rgba[offset + 1] = 0;
+                rgba[offset + 2] = 255;
               } else {
                 rgba[offset] = 40;
                 rgba[offset + 1] = 90;
@@ -2128,6 +2132,7 @@ try {
         };
         const withGreen = await greenFrame("green.png", true);
         const withoutGreen = await greenFrame("blue.png", false);
+        const pureBlue = await greenFrame("pure-blue.png", false, true);
 
         const keyed = await G.composeMapAsset({ projectId: project.id, name: "绿幕城门", files: [withGreen], shape: "stamp", stampCols: 8, stampRows: 2 });
         const keyedSheet = await decodeFile(G.mapAssetPath(project.id, keyed.file));
@@ -2138,6 +2143,10 @@ try {
         check("★ 整图自动抠绿幕：合成图左上角是透明的（绿被抠掉了）", corner(keyedSheet)[3] === 0, JSON.stringify(corner(keyedSheet)));
         check("★ 抠到东西时 notes 说清楚（不让用户以为背景会自动透明）", keyed.notes.some((text) => text.includes("抠掉绿幕")), keyed.notes.join(" | "));
         check("回包带 keyed（回链据此让「新增素材」别再抠第二遍）", typeof keyed.keyed === "number" && keyed.keyed > 0.05, String(keyed.keyed));
+        const keyedBlue = await G.composeMapAsset({ projectId: project.id, name: "蓝幕城门", files: [pureBlue], shape: "stamp", stampCols: 8, stampRows: 2, keyColor: "#0000FF" });
+        const blueSheet = await decodeFile(G.mapAssetPath(project.id, keyedBlue.file));
+        check("★ 整图按指定蓝色底色抠像：左上角透明", corner(blueSheet)[3] === 0, JSON.stringify(corner(blueSheet)));
+        check("★ 蓝色底色的 notes 用「蓝幕」而不是绿幕", keyedBlue.notes.some((text) => text.includes("抠掉蓝幕")), keyedBlue.notes.join(" | "));
 
         /**
          * ★ 抠像参数是**严格**的：只认饱和纯绿。
