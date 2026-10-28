@@ -1335,10 +1335,11 @@ section("功能管理（隐藏模块）");
       testMinimax: () => Promise.resolve({})
     };
 
-    // Hook 顺序：0 useLocaleTick / 1 config / 2 arkKey / 3 minimaxKey / 4 notice / 5 testing。
-    // Hook 顺序：0 useLocaleTick / 1 config / 2 arkKey / 3 customKey / 4 minimaxKey /
-    //             5 notice / 6 testing / 7 workflowDraft。
-    HOOK.slots = [0, featureConfig, "", "", "", null, null, ""];
+    // Hook 顺序（位置桩）：0 useLocaleTick / 1 config / 2 arkKey / 3 customKey /
+    // 4 toapisKey / 5 minimaxKey / 6 notice / 7 testing / 8 workflowDraft /
+    // 9 comfyWorkflowDraft / 10 comfyProbe / 11 comfyCookie / 12 musicKey /
+    // 13 scorePaths / 14 sfxKey / 15 settingsTab。
+    HOOK.slots = [0, featureConfig, "", "", "", null, null, "", undefined, undefined, undefined, undefined, undefined, undefined, undefined, "image"];
     HOOK.cursor = 0;
     hookOverflow = false;
     const settings = ConfigSection({ api: configApi });
@@ -1386,6 +1387,25 @@ section("功能管理（隐藏模块）");
     check("OpenAI 协议不显示 ComfyUI 的工作流文本框（调了也没用的控件不该出现）", collect(settings, (node) => node.props?.["data-testid"] === "cfg-custom-workflow").length === 0);
     check("自定义那一组也有自己的「测试连接」", textOf(settings).includes("测试连接（会真实生成 1 张测试图"));
 
+    // ── 分类页签：六个入口、六个面板常驻挂载 ──────────────────────────────
+    const tabButtons = collect(settings, (node) => typeof node.props?.["data-testid"] === "string" && node.props["data-testid"].startsWith("cfg-tab-"));
+    const panels = collect(settings, (node) => typeof node.props?.["data-testid"] === "string" && node.props["data-testid"].startsWith("cfg-panel-"));
+    check("设置页有 6 个分类页签", tabButtons.length === 6, `${tabButtons.length} 个`);
+    check("默认停在「生图」页签", tabButtons.find((node) => node.props["data-testid"] === "cfg-tab-image")?.props?.["data-active"] === "true");
+    check("六个页签面板都常驻挂载（只是 hidden）", panels.length === 6, `${panels.length} 个`);
+    check("非当前面板被 hidden", panels.find((node) => node.props["data-testid"] === "cfg-panel-music")?.props?.hidden === true);
+    check("当前面板没有 hidden", panels.find((node) => node.props["data-testid"] === "cfg-panel-image")?.props?.hidden === false);
+    // 当前生图后端（ark）展开，另外两张折叠；内容仍在树里，方便先配置再切换。
+    const arkGroup = collect(settings, (node) => node.props?.["data-testid"] === "cfg-ark-group")[0];
+    const customGroup = collect(settings, (node) => node.props?.["data-testid"] === "cfg-custom-group")[0];
+    check("当前后端卡默认展开", arkGroup?.props?.["data-open"] === "true");
+    check("非当前后端卡默认折叠", customGroup?.props?.["data-open"] === "false");
+    check("折叠的后端仍渲染，可先配置再切换", collect(customGroup, (node) => node.props?.["data-testid"] === "cfg-custom-protocol").length === 1);
+    check("ToAPIs 视频单独成组", collect(settings, (node) => node.props?.["data-testid"] === "cfg-toapis-video").length === 1);
+    const miscPanel = panels.find((node) => node.props["data-testid"] === "cfg-panel-misc");
+    check("ffmpeg 状态归到「功能与数据」", textOf(miscPanel).includes("ffmpeg"));
+    check("数据路径也在「功能与数据」里", textOf(miscPanel).includes("所有项目"));
+
     // 切到 ComfyUI：工作流文本框与保存按钮出现（UTF-8 JSON 不能每敲一个字就提交一次）。
     const comfyConfig = {
       ...featureConfig,
@@ -1415,7 +1435,7 @@ section("功能管理（隐藏模块）");
       testCustomImage: () => Promise.resolve({ provider: "自定义 · ComfyUI API", bytes: 1 }),
       testMinimax: () => Promise.resolve({})
     };
-    HOOK.slots = [0, comfyConfig, "", "", "", null, null, null];
+    HOOK.slots = [0, comfyConfig, "", "", "", null, null, null, undefined, undefined, undefined, undefined, undefined, undefined, undefined, "image"];
     HOOK.cursor = 0;
     hookOverflow = false;
     const comfySettings = ConfigSection({ api: api2 });
@@ -1423,6 +1443,8 @@ section("功能管理（隐藏模块）");
     check("切到 ComfyUI 后出现工作流文本框", workflowBox !== undefined);
     check("工作流文本框里是已经存过的那份", workflowBox?.props?.value === '{"1":{}}', String(workflowBox?.props?.value).slice(0, 40));
     check("后端切换器选中自定义", collect(comfySettings, (node) => node.props?.["data-testid"] === "cfg-image-provider")[0]?.props?.value === "custom");
+    check("切到自定义后该卡展开", collect(comfySettings, (node) => node.props?.["data-testid"] === "cfg-custom-group")[0]?.props?.["data-open"] === "true");
+    check("非当前 Ark 卡折叠", collect(comfySettings, (node) => node.props?.["data-testid"] === "cfg-ark-group")[0]?.props?.["data-open"] === "false");
     check("后端就绪时给出「后端已就绪」而不是阻塞提示", textOf(comfySettings).includes("后端已就绪") && !textOf(comfySettings).includes("还不能开跑"));
     // NumField 是函数组件，`textOf` 展不开它，只能按 props.label 找。
     check(

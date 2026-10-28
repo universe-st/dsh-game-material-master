@@ -900,9 +900,22 @@
       "导入 DragonBones：把 export/dragonbones/skeleton_ske.json 与 atlas/skeleton_tex.json、atlas/skeleton.png 放同一目录后加载 .json 数据与纹理。": "Importing into DragonBones: put export/dragonbones/skeleton_ske.json in the same folder as atlas/skeleton_tex.json and atlas/skeleton.png, then load the .json data and textures.",
       "正在载入配置…": "Loading configuration…",
       "配置已保存": "Configuration saved",
-      "配置生图 / 生视频的模型与整条流水线的默认参数。Key 只保存在本机 DSH 数据目录下的 game-material-master/config.json（真实路径见文末「数据位置」），界面里始终脱敏显示。": "Configure the image/video models and the default parameters for the whole pipeline. Keys are stored only in game-material-master/config.json under your local DSH data directory (see \"Data location\" at the end for the real path) and are always masked in the UI.",
+      "配置生图 / 生视频的模型与整条流水线的默认参数。Key 只保存在本机 DSH 数据目录下的 game-material-master/config.json（真实路径见「功能与数据」里的「数据位置」），界面里始终脱敏显示。": "Configure the image/video models and the default parameters for the whole pipeline. Keys are stored only in game-material-master/config.json under your local DSH data directory (see \"Data location\" under \"Features & data\" for the real path) and are always masked in the UI.",
+      "生图": "Images",
+      "生视频": "Video",
+      "画面与抠像": "Canvas & keying",
+      "音乐": "Music",
+      "音效": "Sound effects",
+      "功能与数据": "Features & data",
+      "画布与抽帧": "Canvas & frames",
+      "抠像": "Keying",
+      "像素与裁切": "Pixelation & cropping",
+      "本机依赖与数据": "Local dependencies & data",
+      "ToAPIs（图片）": "ToAPIs (image)",
+      "ToAPIs（视频）": "ToAPIs (video)",
+      "图生视频三选一：MiniMax（云端，默认）、ToAPIs（云端异步）、本机 ComfyUI；勾选后两者之一会替换 MiniMax，取消勾选即回到 MiniMax。ToAPIs 的 Base URL / Key / 超时在「生图」里配置，图片与视频共用。": "Pick one video backend: MiniMax (cloud, default), ToAPIs (cloud, async) or local ComfyUI. Enabling either of the latter two replaces MiniMax; clear both to return to MiniMax. ToAPIs' Base URL, key and timeout are configured on the \"Images\" tab and shared by image and video.",
       "生图后端": "Image backend",
-      "八方向图、图片生成、骨骼动画的生图都走这里选的后端；图生视频（MiniMax）不受影响。": "Sprite sheets, image generation and rigged animation generate images through the backend selected here; image-to-video (MiniMax) is unaffected.",
+      "八方向图、图片生成、骨骼动画的生图都走这里选的后端；图生视频在「生视频」页签里单独选择。": "Sprite sheets, image generation and rigged animation generate images through the backend selected here; choose the video backend on the \"Video\" tab.",
       "当前使用": "In use",
       "火山方舟 Seedream（云端，开箱即用）": "Volcengine Ark Seedream (cloud, works out of the box)",
       "自定义生图模型（OpenAI / ComfyUI / SD WebUI）": "Custom image model (OpenAI / ComfyUI / SD WebUI)",
@@ -4042,9 +4055,31 @@
 .SPR_featureTitle{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--dsw-alias-label-primary)}
 .SPR_featureHint{font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary)}
 .SPR_featureState{font-size:11px;line-height:18px;flex:none;padding:0 8px;border-radius:999px;background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-tertiary)}
-.SPR_keyRow{display:flex;gap:8px;align-items:flex-end}
+.SPR_keyRow{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap}
 .SPR_keyRow .SPR_field{flex:1}
+.SPR_keyRow .SPR_btn{white-space:normal;text-align:left}
 .SPR_badge{font-size:11px;padding:1px 7px;border-radius:999px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-tertiary)}
+/* 设置页分类页签：宿主左侧只给插件一个入口，分类放在组件内部。 */
+.SPR_settingsNav{display:flex;gap:6px;flex-wrap:wrap;padding:4px;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;background:var(--dsw-alias-bg-layer-1)}
+.SPR_settingsTab{font:inherit;font-size:12px;line-height:18px;cursor:pointer;white-space:nowrap;border:1px solid transparent;border-radius:8px;padding:6px 12px;background:transparent;color:var(--dsw-alias-label-secondary)}
+.SPR_settingsTab:hover{background:var(--dsw-alias-bg-layer-3)}
+.SPR_settingsTab[data-active=true]{background:var(--dsw-alias-bg-layer-3);border-color:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-label-primary);box-shadow:0 0 0 1px color-mix(in srgb, var(--dsw-alias-state-business-primary) 28%, transparent)}
+.SPR_settingsTab:focus-visible,.SPR_settingsToggle:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:2px}
+.SPR_settingsPanel{display:flex;flex-direction:column;gap:14px}
+.SPR_settingsPanel[hidden]{display:none}
+.SPR_settingsGroupHead{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:4px}
+.SPR_settingsGroupHead h3{margin:0}
+.SPR_settingsToggle{font:inherit;font-size:12px;line-height:1;cursor:pointer;width:24px;height:24px;flex:none;display:inline-flex;align-items:center;justify-content:center;background:transparent;border:1px solid var(--dsw-alias-border-l2);border-radius:6px;color:var(--dsw-alias-label-secondary)}
+.SPR_settingsToggle:hover{background:var(--dsw-alias-bg-layer-1)}
+.SPR_settingsBody{display:flex;flex-direction:column;gap:10px}
+.SPR_settingsBody[hidden]{display:none}
+.SPR_settingsLead{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin:0 0 10px;font-size:12px;color:var(--dsw-alias-label-secondary)}
+.SPR_settingsLead .SPR_check{display:flex;align-items:center;gap:7px;cursor:pointer}
+.SPR_settingsSub{display:flex;flex-direction:column;gap:10px;padding-top:12px;border-top:1px dashed var(--dsw-alias-border-l2)}
+.SPR_settingsSub:first-child{padding-top:0;border-top:0}
+.SPR_settingsSub h4{margin:0;font-size:12px;font-weight:600;color:var(--dsw-alias-label-secondary)}
+.SPR_settingsWide{grid-column:1 / -1}
+.SPR_settingsPath{word-break:break-all}
 .SPR_videoWrap{position:relative;width:100%}
 .SPR_video{width:100%;border-radius:8px;display:block;background:#000}
 /* 转圈视频多半是竖屏（角色立绘比例）：按 width:100% 铺开会有上千像素高，把下面的
@@ -20390,6 +20425,56 @@
     }
 
     // ── 设置页 ───────────────────────────────────────────────────────────
+    /**
+     * 设置页卡片。
+     *
+     * 折叠只切 `hidden`、不卸载 children：NumField 的本地草稿、ComfyUI 工作流草稿
+     * 都活在子组件里，条件卸载会在切页签 / 收卡片时把用户正在输入的内容打回原形。
+     * `defaultOpen` 变化时跟着开合（切换当前后端），普通配置回包不会把它弹回去。
+     */
+    function SettingsGroup({ title, hint, badge, lead, children, collapsible, defaultOpen, testId }) {
+      const [open, setOpen] = React.useState(defaultOpen !== false);
+      React.useEffect(() => {
+        if (defaultOpen !== undefined) setOpen(defaultOpen);
+      }, [defaultOpen]);
+      const expanded = collapsible === true ? open : true;
+      return h(
+        "section",
+        {
+          className: "SPR_settingsGroup",
+          "data-testid": testId,
+          "data-collapsible": collapsible === true ? "true" : undefined,
+          "data-open": expanded ? "true" : "false"
+        },
+        h(
+          "div",
+          { className: "SPR_settingsGroupHead" },
+          h("h3", null, title, badge ? h("span", { className: "SPR_badge" }, badge) : null),
+          collapsible === true
+            ? h(
+                "button",
+                {
+                  type: "button",
+                  className: "SPR_settingsToggle",
+                  "aria-expanded": expanded,
+                  "aria-label": title,
+                  onClick: () => setOpen(!open)
+                },
+                expanded ? "▾" : "▸"
+              )
+            : null
+        ),
+        hint ? h("p", null, hint) : null,
+        lead ? h("div", { className: "SPR_settingsLead" }, lead) : null,
+        h("div", { className: "SPR_settingsBody", hidden: !expanded }, children)
+      );
+    }
+
+    /** 设置卡里的视觉小节：只分组，不折叠、不带状态。 */
+    function SettingsSubGroup({ title, children }) {
+      return h("div", { className: "SPR_settingsSub" }, title ? h("h4", null, title) : null, children);
+    }
+
     function ConfigSection(props) {
       useLocaleTick();
       const api = props?.api;
@@ -20423,6 +20508,13 @@
       const [scorePaths, setScorePaths] = React.useState(null);
       /** 音效模块的语音 API Key（单独一份，不是方舟 Key）。 */
       const [sfxKey, setSfxKey] = React.useState("");
+      /**
+       * 设置页分类页签。
+       *
+       * ⚠️ 必须留在所有既有 `useState` 之后（槽位 15）：`verify-feedback.mjs`
+       * 用位置桩喂 Hook 值，插在中间会让后面的状态读到别人的值。
+       */
+      const [settingsTab, setSettingsTab] = React.useState("image");
 
       const load = React.useCallback(async () => {
         if (api === undefined) return;
@@ -20532,11 +20624,29 @@
         void patch(values);
       };
 
+      /**
+       * 分类页签。**必须在渲染期构建**：模块级 `T()` 会在 locale 服务挂上之前求值，
+       * 之后切英文也永远停在中文（`staticTextRebuilders` 只覆盖模块级文案表）。
+       */
+      // ⚠️ 字段名用 `text` 而不是 `label`：`verify-tools.mjs` 用 `{key,label}`
+      // 正则比对骨骼角色表，这里写成 label 会被误认成多出来的角色。
+      const settingsTabs = [
+        { key: "image", text: T("生图") },
+        { key: "video", text: T("生视频") },
+        { key: "pipeline", text: T("画面与抠像") },
+        { key: "music", text: T("音乐") },
+        { key: "sfx", text: T("音效") },
+        { key: "misc", text: T("功能与数据") }
+      ];
+      const activeTab = settingsTabs.some((tab) => tab.key === settingsTab) ? settingsTab : "image";
+      /** 视频三选一的展示态，不新增配置字段：两个开关互斥，谁都没开就是 MiniMax。 */
+      const videoBackend = config.comfyVideo === true ? "comfy" : config.toapisVideo === true ? "toapis" : "minimax";
+
       return h(
         "section",
         { className: "SPR_settings" },
         h("h2", { style: { margin: 0, fontSize: 15 } }, T("游戏素材大师")),
-        h("p", { className: "SPR_hint" }, T("配置生图 / 生视频的模型与整条流水线的默认参数。Key 只保存在本机 DSH 数据目录下的 game-material-master/config.json（真实路径见文末「数据位置」），界面里始终脱敏显示。")),
+        h("p", { className: "SPR_hint" }, T("配置生图 / 生视频的模型与整条流水线的默认参数。Key 只保存在本机 DSH 数据目录下的 game-material-master/config.json（真实路径见「功能与数据」里的「数据位置」），界面里始终脱敏显示。")),
 
         notice !== null
           ? h("div", { className: "SPR_note", "data-kind": notice.kind }, notice.text)
@@ -20544,12 +20654,46 @@
 
         h(
           "div",
-          { className: "SPR_settingsGroup" },
-          h("h3", null, T("生图后端")),
-          h("p", null, T("八方向图、图片生成、骨骼动画的生图都走这里选的后端；图生视频（MiniMax）不受影响。")),
+          { className: "SPR_settingsNav", role: "tablist", "aria-label": T("游戏素材大师") },
+          settingsTabs.map((tab) =>
+            h(
+              "button",
+              {
+                key: tab.key,
+                type: "button",
+                role: "tab",
+                id: `cfg-tab-${tab.key}`,
+                className: "SPR_settingsTab",
+                "data-testid": `cfg-tab-${tab.key}`,
+                "data-active": activeTab === tab.key ? "true" : "false",
+                "aria-selected": activeTab === tab.key,
+                "aria-controls": `cfg-panel-${tab.key}`,
+                onClick: () => setSettingsTab(tab.key)
+              },
+              tab.text
+            )
+          )
+        ),
+
+        h(
+          "div",
+          {
+            className: "SPR_settingsPanel",
+            role: "tabpanel",
+            id: "cfg-panel-image",
+            "data-testid": "cfg-panel-image",
+            "aria-labelledby": "cfg-tab-image",
+            hidden: activeTab !== "image"
+          },
           h(
-            "div",
-            { className: "SPR_fields" },
+            SettingsGroup,
+            {
+              title: T("生图后端"),
+              hint: T("八方向图、图片生成、骨骼动画的生图都走这里选的后端；图生视频在「生视频」页签里单独选择。")
+            },
+            h(
+              "div",
+              { className: "SPR_fields" },
             h(
               "label",
               { className: "SPR_field" },
@@ -20575,10 +20719,14 @@
         ),
 
         h(
-          "div",
-          { className: "SPR_settingsGroup" },
-          h("h3", null, T("火山方舟（生图）"), imageProvider === "ark" ? h("span", { className: "SPR_badge" }, T("当前使用")) : null),
-          h("p", null, config.ffmpeg?.ok === true ? T("ffmpeg 可用：{n0}", { n0: config.ffmpeg.version }) : T("ffmpeg 不可用：{n0}", { n0: config.ffmpeg?.error ?? T("未知") })),
+          SettingsGroup,
+          {
+            title: T("火山方舟（生图）"),
+            badge: imageProvider === "ark" ? T("当前使用") : null,
+            collapsible: true,
+            defaultOpen: imageProvider === "ark",
+            testId: "cfg-ark-group"
+          },
           h(
             "div",
             { className: "SPR_keyRow" },
@@ -20657,7 +20805,7 @@
             ),
             h(
               "label",
-              { className: "SPR_field" },
+              { className: "SPR_field SPR_settingsWide" },
               h("span", { className: "SPR_fieldLabel" }, "Base URL"),
               h("input", {
                 className: "SPR_input",
@@ -20687,26 +20835,105 @@
         ),
 
 
-        h("div", {className:"SPR_settingsGroup", "data-testid":"cfg-toapis"},
-          h("h3",null,"ToAPIs"),
-          h("p",null,T("ToAPIs：图片和视频使用独立的异步协议；每次生成会计费。")),
-          ...[ ["toapisBaseUrl","Base URL"], ["toapisImageModel",T("ToAPIs 图片模型")],
-               ["toapisImageSize",T("ToAPIs 图片尺寸")], ["toapisImageQuality",T("ToAPIs 图片质量")],
-               ["toapisVideoModel",T("ToAPIs 视频模型")], ["toapisVideoResolution",T("ToAPIs 视频分辨率")] ].map(([key,label])=>
-            h("label",{className:"SPR_field"},h("span",{className:"SPR_fieldLabel"},label),h("input",{className:"SPR_input",value:config[key] ?? "",onChange:(event)=>void patch({[key]:event.target.value})}))),
-          h("label",{className:"SPR_field"},h("span",{className:"SPR_fieldLabel"},T("ToAPIs 图片背景（GPT Image）")),h("select",{className:"SPR_input","data-testid":"cfg-toapis-background",value:config.toapisImageBackground ?? "auto",onChange:(event)=>void patch({toapisImageBackground:event.target.value})},h("option",{value:"auto"},T("自动背景")),h("option",{value:"transparent"},T("原生透明背景")),h("option",{value:"opaque"},T("不透明背景")))),
-          h("p",null,T("透明PNG无需绿幕抠像；MP4视频没有透明通道，视频抽帧仍需背景处理。")),
-          h("p",null,T("国内地址 https://toapis.cn/v1；国际地址 https://toapis.com/v1。")),
-          h("p",null,T("ToAPIs 视频参数独立于 MiniMax；目前仅支持文生视频或一张首帧，不支持尾帧及多模态参考。")),
-          h(NumField,{label:T("超时（秒）"),value:Math.round((config.toapisTimeoutMs ?? 600000)/1000),min:10,max:3600,onChange:(value)=>void patch({toapisTimeoutMs:value*1000})}),
-          h("label",{className:"SPR_field"},h("span",{className:"SPR_fieldLabel"},T("ToAPIs 视频比例")),h("select",{className:"SPR_input","data-testid":"cfg-toapis-video-ratio",value:config.toapisVideoAspectRatio ?? "16:9",onChange:(event)=>void patch({toapisVideoAspectRatio:event.target.value})},...["16:9","9:16","1:1","4:3","3:4","21:9"].map(value=>h("option",{key:value,value},value)))),
-          h("p",null,T("角色首帧为方形时建议1:1，避免宽屏裁掉头脚；MP4抽帧仍需去背景。")),
-          h(NumField,{label:T("ToAPIs 视频时长（秒）"),value:config.toapisVideoDuration ?? 4,min:4,max:15,onChange:(value)=>void patch({toapisVideoDuration:value})}),
-          h("label",{className:"SPR_check"},h("input",{type:"checkbox",checked:config.toapisVideo === true,onChange:(event)=>void patch({toapisVideo:event.target.checked,...(event.target.checked?{comfyVideo:false}:{})})}),h("span",null,T("使用 ToAPIs 生成视频"))),
-          h("p",null,config.toapisApiKeySet ? T("ToAPIs Key 已配置") : T("ToAPIs Key 未配置")),
-          h("input",{className:"SPR_input",type:"password",value:toapisKey,onChange:(event)=>setToapisKey(event.target.value),placeholder:T("留空表示不修改")}),
-          h(Btn,{onClick:()=>run(async()=>{await api.saveConfig({toapisApiKey:toapisKey});setToapisKey("");},T("ToAPIs Key 已保存"))},T("保存 Key")),
-          h(Btn,{disabled:!config.toapisApiKeySet,onClick:()=>run(()=>api.saveConfig({clearToapisApiKey:true}),T("已清除 ToAPIs Key"))},T("清除"))
+        h(
+          SettingsGroup,
+          {
+            title: T("ToAPIs（图片）"),
+            hint: T("ToAPIs：图片和视频使用独立的异步协议；每次生成会计费。"),
+            badge: imageProvider === "toapis" ? T("当前使用") : null,
+            collapsible: true,
+            defaultOpen: imageProvider === "toapis",
+            testId: "cfg-toapis"
+          },
+          h(
+            "div",
+            { className: "SPR_fields" },
+            h(
+              "label",
+              { className: "SPR_field SPR_settingsWide" },
+              h("span", { className: "SPR_fieldLabel" }, "Base URL"),
+              h("input", {
+                className: "SPR_input",
+                value: config.toapisBaseUrl ?? "",
+                onChange: (event) => void patch({ toapisBaseUrl: event.target.value })
+              })
+            ),
+            h(
+              "label",
+              { className: "SPR_field" },
+              h("span", { className: "SPR_fieldLabel" }, T("ToAPIs 图片模型")),
+              h("input", {
+                className: "SPR_input",
+                value: config.toapisImageModel ?? "",
+                onChange: (event) => void patch({ toapisImageModel: event.target.value })
+              })
+            ),
+            h(
+              "label",
+              { className: "SPR_field" },
+              h("span", { className: "SPR_fieldLabel" }, T("ToAPIs 图片尺寸")),
+              h("input", {
+                className: "SPR_input",
+                value: config.toapisImageSize ?? "",
+                onChange: (event) => void patch({ toapisImageSize: event.target.value })
+              })
+            ),
+            h(
+              "label",
+              { className: "SPR_field" },
+              h("span", { className: "SPR_fieldLabel" }, T("ToAPIs 图片质量")),
+              h("input", {
+                className: "SPR_input",
+                value: config.toapisImageQuality ?? "",
+                onChange: (event) => void patch({ toapisImageQuality: event.target.value })
+              })
+            ),
+            h(
+              "label",
+              { className: "SPR_field" },
+              h("span", { className: "SPR_fieldLabel" }, T("ToAPIs 图片背景（GPT Image）")),
+              h(
+                "select",
+                {
+                  className: "SPR_input",
+                  "data-testid": "cfg-toapis-background",
+                  value: config.toapisImageBackground ?? "auto",
+                  onChange: (event) => void patch({ toapisImageBackground: event.target.value })
+                },
+                h("option", { value: "auto" }, T("自动背景")),
+                h("option", { value: "transparent" }, T("原生透明背景")),
+                h("option", { value: "opaque" }, T("不透明背景"))
+              )
+            ),
+            h(NumField, {
+              label: T("超时（秒）"),
+              value: Math.round((config.toapisTimeoutMs ?? 600000) / 1000),
+              min: 10,
+              max: 3600,
+              onChange: (value) => void patch({ toapisTimeoutMs: value * 1000 })
+            })
+          ),
+          h("p", null, T("透明PNG无需绿幕抠像；MP4视频没有透明通道，视频抽帧仍需背景处理。")),
+          h("p", null, T("国内地址 https://toapis.cn/v1；国际地址 https://toapis.com/v1。")),
+          h(
+            "div",
+            { className: "SPR_keyRow" },
+            h(
+              "label",
+              { className: "SPR_field" },
+              h("span", { className: "SPR_fieldLabel" }, T("API Key")),
+              h("input", {
+                className: "SPR_input",
+                type: "password",
+                value: toapisKey,
+                onChange: (event) => setToapisKey(event.target.value),
+                placeholder: config.toapisApiKeySet ? T("留空表示不修改") : "ToAPIs API Key"
+              })
+            ),
+            h(Btn, { onClick: () => run(async () => { await api.saveConfig({ toapisApiKey: toapisKey }); setToapisKey(""); }, T("ToAPIs Key 已保存")) }, T("保存 Key")),
+            h(Btn, { disabled: !config.toapisApiKeySet, onClick: () => run(() => api.saveConfig({ clearToapisApiKey: true }), T("已清除 ToAPIs Key")) }, T("清除"))
+          ),
+          h("p", { className: "SPR_hint" }, config.toapisApiKeySet ? T("ToAPIs Key 已配置") : T("ToAPIs Key 未配置"))
         ),
 
         /**
@@ -20717,10 +20944,15 @@
          * 反而不知道哪些是共通的。
          */
         h(
-          "div",
-          { className: "SPR_settingsGroup" },
-          h("h3", null, T("自定义生图模型"), imageProvider === "custom" ? h("span", { className: "SPR_badge" }, T("当前使用")) : null),
-          h("p", null, T("填「主机根地址」即可，具体端点由插件按协议拼；本地服务通常不需要 API Key。")),
+          SettingsGroup,
+          {
+            title: T("自定义生图模型"),
+            hint: T("填「主机根地址」即可，具体端点由插件按协议拼；本地服务通常不需要 API Key。"),
+            badge: imageProvider === "custom" ? T("当前使用") : null,
+            collapsible: true,
+            defaultOpen: imageProvider === "custom",
+            testId: "cfg-custom-group"
+          },
           h(
             "div",
             { className: "SPR_fields" },
@@ -20744,18 +20976,6 @@
                       h("option", { key: "sdwebui", value: "sdwebui" }, "Stable Diffusion WebUI API")
                     ]
               )
-            ),
-            h(
-              "label",
-              { className: "SPR_field" },
-              h("span", { className: "SPR_fieldLabel" }, "Base URL"),
-              h("input", {
-                className: "SPR_input",
-                "data-testid": "cfg-custom-base-url",
-                value: config.customBaseUrl ?? "",
-                placeholder: protocolInfo?.baseUrl ?? "",
-                onChange: (event) => void patch({ customBaseUrl: event.target.value })
-              })
             ),
             h(
               "label",
@@ -20785,7 +21005,19 @@
                 placeholder: "1024x1024",
                 onChange: (event) => void patch({ customSize: event.target.value })
               })
-            )
+            ),
+            h(
+              "label",
+              { className: "SPR_field SPR_settingsWide" },
+              h("span", { className: "SPR_fieldLabel" }, "Base URL"),
+              h("input", {
+                className: "SPR_input",
+                "data-testid": "cfg-custom-base-url",
+                value: config.customBaseUrl ?? "",
+                placeholder: protocolInfo?.baseUrl ?? "",
+                onChange: (event) => void patch({ customBaseUrl: event.target.value })
+              })
+            ),
           ),
           h("p", { className: "SPR_hint" }, T("请求端点：{n0}", { n0: protocolInfo?.hint ?? "" })),
           h(
@@ -20939,15 +21171,32 @@
             )
           )
         ),
+        ),
 
         h(
           "div",
-          { className: "SPR_settingsGroup" },
-          h("h3", null, T("MiniMax（图生视频）")),
-          h("p", null, T("视频阶段使用图生视频（I2V）。建议用 MiniMax-Hailuo-02，镜头稳定性最好。")),
+          {
+            className: "SPR_settingsPanel",
+            role: "tabpanel",
+            id: "cfg-panel-video",
+            "data-testid": "cfg-panel-video",
+            "aria-labelledby": "cfg-tab-video",
+            hidden: activeTab !== "video"
+          },
+          h("p", { className: "SPR_hint" }, T("图生视频三选一：MiniMax（云端，默认）、ToAPIs（云端异步）、本机 ComfyUI；勾选后两者之一会替换 MiniMax，取消勾选即回到 MiniMax。ToAPIs 的 Base URL / Key / 超时在「生图」里配置，图片与视频共用。")),
           h(
-            "div",
-            { className: "SPR_keyRow" },
+            SettingsGroup,
+            {
+              title: T("MiniMax（图生视频）"),
+              hint: T("视频阶段使用图生视频（I2V）。建议用 MiniMax-Hailuo-02，镜头稳定性最好。"),
+              badge: videoBackend === "minimax" ? T("当前使用") : null,
+              collapsible: true,
+              defaultOpen: videoBackend === "minimax",
+              testId: "cfg-minimax-group"
+            },
+            h(
+              "div",
+              { className: "SPR_keyRow" },
             h(
               "label",
               { className: "SPR_field" },
@@ -21026,7 +21275,7 @@
             ),
             h(
               "label",
-              { className: "SPR_field" },
+              { className: "SPR_field SPR_settingsWide" },
               h(
                 "span",
                 { className: "SPR_fieldLabel" },
@@ -21074,26 +21323,101 @@
         ),
 
         h(
-          "div",
-          { className: "SPR_settingsGroup" },
-          h("h3", null, T("本地 ComfyUI（图生视频）")),
-          h("p", null, T("勾选后，视频阶段改由本机 ComfyUI 生成，不再调用 MiniMax。工作流贴「导出（API 格式）」的那份 JSON；插件只负责把提示词、首帧图、尺寸、时长、种子注入进去，其余节点原样提交。")),
-          h(
-            "label",
-            { className: "SPR_check" },
-            h("input", {
-              type: "checkbox",
-              checked: config.comfyVideo === true,
-              onChange: (event) => void patch({ comfyVideo: event.target.checked, ...(event.target.checked ? {toapisVideo:false} : {}) })
-            }),
-            h("span", null, T("用本机 ComfyUI 生成视频（替代 MiniMax）"))
-          ),
+          SettingsGroup,
+          {
+            title: T("ToAPIs（视频）"),
+            hint: T("ToAPIs 视频参数独立于 MiniMax；目前仅支持文生视频或一张首帧，不支持尾帧及多模态参考。"),
+            badge: videoBackend === "toapis" ? T("当前使用") : null,
+            collapsible: true,
+            defaultOpen: videoBackend === "toapis",
+            testId: "cfg-toapis-video",
+            lead: h(
+              "label",
+              { className: "SPR_check" },
+              h("input", {
+                type: "checkbox",
+                checked: config.toapisVideo === true,
+                onChange: (event) => void patch({ toapisVideo: event.target.checked, ...(event.target.checked ? { comfyVideo: false } : {}) })
+              }),
+              h("span", null, T("使用 ToAPIs 生成视频"))
+            )
+          },
           h(
             "div",
             { className: "SPR_fields" },
             h(
               "label",
               { className: "SPR_field" },
+              h("span", { className: "SPR_fieldLabel" }, T("ToAPIs 视频模型")),
+              h("input", {
+                className: "SPR_input",
+                value: config.toapisVideoModel ?? "",
+                onChange: (event) => void patch({ toapisVideoModel: event.target.value })
+              })
+            ),
+            h(
+              "label",
+              { className: "SPR_field" },
+              h("span", { className: "SPR_fieldLabel" }, T("ToAPIs 视频分辨率")),
+              h("input", {
+                className: "SPR_input",
+                value: config.toapisVideoResolution ?? "",
+                onChange: (event) => void patch({ toapisVideoResolution: event.target.value })
+              })
+            ),
+            h(
+              "label",
+              { className: "SPR_field" },
+              h("span", { className: "SPR_fieldLabel" }, T("ToAPIs 视频比例")),
+              h(
+                "select",
+                {
+                  className: "SPR_input",
+                  "data-testid": "cfg-toapis-video-ratio",
+                  value: config.toapisVideoAspectRatio ?? "16:9",
+                  onChange: (event) => void patch({ toapisVideoAspectRatio: event.target.value })
+                },
+                ...["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"].map((value) => h("option", { key: value, value }, value))
+              )
+            ),
+            h(NumField, {
+              label: T("ToAPIs 视频时长（秒）"),
+              value: config.toapisVideoDuration ?? 4,
+              min: 4,
+              max: 15,
+              onChange: (value) => void patch({ toapisVideoDuration: value })
+            })
+          ),
+          h("p", null, T("角色首帧为方形时建议1:1，避免宽屏裁掉头脚；MP4抽帧仍需去背景。")),
+          h("p", { className: "SPR_hint" }, config.toapisApiKeySet ? T("ToAPIs Key 已配置") : T("ToAPIs Key 未配置"))
+        ),
+
+        h(
+          SettingsGroup,
+          {
+            title: T("本地 ComfyUI（图生视频）"),
+            hint: T("勾选后，视频阶段改由本机 ComfyUI 生成，不再调用 MiniMax。工作流贴「导出（API 格式）」的那份 JSON；插件只负责把提示词、首帧图、尺寸、时长、种子注入进去，其余节点原样提交。"),
+            badge: videoBackend === "comfy" ? T("当前使用") : null,
+            collapsible: true,
+            defaultOpen: videoBackend === "comfy",
+            testId: "cfg-comfy-video-group",
+            lead: h(
+              "label",
+              { className: "SPR_check" },
+              h("input", {
+                type: "checkbox",
+                checked: config.comfyVideo === true,
+                onChange: (event) => void patch({ comfyVideo: event.target.checked, ...(event.target.checked ? {toapisVideo:false} : {}) })
+              }),
+              h("span", null, T("用本机 ComfyUI 生成视频（替代 MiniMax）"))
+            )
+          },
+          h(
+            "div",
+            { className: "SPR_fields" },
+            h(
+              "label",
+              { className: "SPR_field SPR_settingsWide" },
               h("span", { className: "SPR_fieldLabel" }, T("ComfyUI 地址（本机默认 http://127.0.0.1:8188）")),
               h("input", {
                 className: "SPR_input",
@@ -21225,123 +21549,167 @@
                 (comfyProbe.notes ?? []).map((note, index) => h("div", { key: index }, note))
               )
         ),
+        ),
 
         h(
           "div",
-          { className: "SPR_settingsGroup" },
-          h("h3", null, T("新建项目的默认参数")),
-          h("p", null, T("这些值会成为每个新项目的初始设置，之后可在项目里单独调整。")),
+          {
+            className: "SPR_settingsPanel",
+            role: "tabpanel",
+            id: "cfg-panel-pipeline",
+            "data-testid": "cfg-panel-pipeline",
+            "aria-labelledby": "cfg-tab-pipeline",
+            hidden: activeTab !== "pipeline"
+          },
           h(
-            "div",
-            { className: "SPR_fields" },
-            h(NumField, {
-              label: T("单格宽（px）"),
-              value: config.cellWidth,
-              min: 16,
-              max: 2048,
-              onChange: (value) => void patch({ cellWidth: value })
-            }),
-            h(NumField, {
-              label: T("单格高（px）"),
-              value: config.cellHeight,
-              min: 16,
-              max: 2048,
-              onChange: (value) => void patch({ cellHeight: value })
-            }),
-            h(NumField, {
-              label: T("每段视频抽帧数"),
-              value: config.frameCount,
-              min: 1,
-              max: 64,
-              onChange: (value) => void patch({ frameCount: value })
-            }),
-            h(NumField, {
-              label: T("并发数"),
-              value: config.concurrency,
-              min: 1,
-              max: 8,
-              onChange: (value) => void patch({ concurrency: value })
-            }),
-            h(KeyColorField, { label: T("抠像背景色（全局默认）"), value: config.keyColor, onChange: (value) => void patch({ keyColor: value }) }),
-            h(NumField, {
-              label: T("抠像下限"),
-              value: config.keyLow,
-              min: 0,
-              max: 255,
-              onChange: (value) => void patch({ keyLow: value })
-            }),
-            h(NumField, {
-              label: T("抠像上限"),
-              value: config.keyHigh,
-              min: 1,
-              max: 255,
-              onChange: (value) => void patch({ keyHigh: value })
-            }),
-            h(NumField, {
-              label: T("去绿溢出"),
-              value: config.despill,
-              min: 0,
-              max: 1,
-              step: 0.05,
-              onChange: (value) => void patch({ despill: value })
-            }),
-            h(NumField, {
-              label: T("边缘收缩（px）"),
-              value: config.edgeShrink,
-              min: 0,
-              max: 8,
-              onChange: (value) => void patch({ edgeShrink: value })
-            }),
-            h(NumField, {
-              label: T("背景分割容差（0 = 只认背景色）"),
-              value: config.bgTolerance,
-              min: 0,
-              max: 160,
-              onChange: (value) => void patch({ bgTolerance: value })
-            }),
-            h(NumField, {
-              label: T("抽帧工作尺寸（长边 px）"),
-              value: config.workingLongEdge,
-              min: 128,
-              max: 2048,
-              onChange: (value) => void patch({ workingLongEdge: value })
-            }),
-            h(NumField, {
-              label: T("像素块边长（0/1 = 关闭）"),
-              value: config.pixelSize,
-              min: 0,
-              max: 32,
-              onChange: (value) => void patch({ pixelSize: value })
-            }),
-            h(NumField, {
-              label: T("自动裁剪填充比例"),
-              value: config.fillRatio,
-              min: 0.5,
-              max: 1,
-              step: 0.02,
-              onChange: (value) => void patch({ fillRatio: value })
-            }),
-            h(NumField, {
-              label: T("底部留白（px）"),
-              value: config.bottomMargin,
-              min: 0,
-              max: 64,
-              onChange: (value) => void patch({ bottomMargin: value })
-            })
+            SettingsGroup,
+            {
+              title: T("新建项目的默认参数"),
+              hint: T("这些值会成为每个新项目的初始设置，之后可在项目里单独调整。")
+            },
+            h(
+              SettingsSubGroup,
+              { title: T("画布与抽帧") },
+              h(
+                "div",
+                { className: "SPR_fields" },
+                h(NumField, {
+                  label: T("单格宽（px）"),
+                  value: config.cellWidth,
+                  min: 16,
+                  max: 2048,
+                  onChange: (value) => void patch({ cellWidth: value })
+                }),
+                h(NumField, {
+                  label: T("单格高（px）"),
+                  value: config.cellHeight,
+                  min: 16,
+                  max: 2048,
+                  onChange: (value) => void patch({ cellHeight: value })
+                }),
+                h(NumField, {
+                  label: T("每段视频抽帧数"),
+                  value: config.frameCount,
+                  min: 1,
+                  max: 64,
+                  onChange: (value) => void patch({ frameCount: value })
+                }),
+                h(NumField, {
+                  label: T("并发数"),
+                  value: config.concurrency,
+                  min: 1,
+                  max: 8,
+                  onChange: (value) => void patch({ concurrency: value })
+                }),
+                h(NumField, {
+                  label: T("抽帧工作尺寸（长边 px）"),
+                  value: config.workingLongEdge,
+                  min: 128,
+                  max: 2048,
+                  onChange: (value) => void patch({ workingLongEdge: value })
+                })
+              )
+            ),
+            h(
+              SettingsSubGroup,
+              { title: T("抠像") },
+              h(
+                "div",
+                { className: "SPR_fields" },
+                h(KeyColorField, { label: T("抠像背景色（全局默认）"), value: config.keyColor, onChange: (value) => void patch({ keyColor: value }) }),
+                h(NumField, {
+                  label: T("抠像下限"),
+                  value: config.keyLow,
+                  min: 0,
+                  max: 255,
+                  onChange: (value) => void patch({ keyLow: value })
+                }),
+                h(NumField, {
+                  label: T("抠像上限"),
+                  value: config.keyHigh,
+                  min: 1,
+                  max: 255,
+                  onChange: (value) => void patch({ keyHigh: value })
+                }),
+                h(NumField, {
+                  label: T("去绿溢出"),
+                  value: config.despill,
+                  min: 0,
+                  max: 1,
+                  step: 0.05,
+                  onChange: (value) => void patch({ despill: value })
+                }),
+                h(NumField, {
+                  label: T("边缘收缩（px）"),
+                  value: config.edgeShrink,
+                  min: 0,
+                  max: 8,
+                  onChange: (value) => void patch({ edgeShrink: value })
+                }),
+                h(NumField, {
+                  label: T("背景分割容差（0 = 只认背景色）"),
+                  value: config.bgTolerance,
+                  min: 0,
+                  max: 160,
+                  onChange: (value) => void patch({ bgTolerance: value })
+                })
+              )
+            ),
+            h(
+              SettingsSubGroup,
+              { title: T("像素与裁切") },
+              h(
+                "div",
+                { className: "SPR_fields" },
+                h(NumField, {
+                  label: T("像素块边长（0/1 = 关闭）"),
+                  value: config.pixelSize,
+                  min: 0,
+                  max: 32,
+                  onChange: (value) => void patch({ pixelSize: value })
+                }),
+                h(NumField, {
+                  label: T("自动裁剪填充比例"),
+                  value: config.fillRatio,
+                  min: 0.5,
+                  max: 1,
+                  step: 0.02,
+                  onChange: (value) => void patch({ fillRatio: value })
+                }),
+                h(NumField, {
+                  label: T("底部留白（px）"),
+                  value: config.bottomMargin,
+                  min: 0,
+                  max: 64,
+                  onChange: (value) => void patch({ bottomMargin: value })
+                })
+              )
+            )
           )
         ),
 
         h(
           "div",
-          { className: "SPR_settingsGroup" },
-          h("h3", null, T("音乐生成（谱乐 AI）")),
-          h("p", null, T("「音乐生成编辑」用谱乐 AI 的开放 API。Key 只保存在本机配置文件里，界面始终脱敏显示；生成按平台积分计费，插件不代收。目前只支持谱乐 AI（YourMusic）。")),
+          {
+            className: "SPR_settingsPanel",
+            role: "tabpanel",
+            id: "cfg-panel-music",
+            "data-testid": "cfg-panel-music",
+            "aria-labelledby": "cfg-tab-music",
+            hidden: activeTab !== "music"
+          },
+          h(
+            SettingsGroup,
+            {
+              title: T("音乐生成（谱乐 AI）"),
+              hint: T("「音乐生成编辑」用谱乐 AI 的开放 API。Key 只保存在本机配置文件里，界面始终脱敏显示；生成按平台积分计费，插件不代收。目前只支持谱乐 AI（YourMusic）。")
+            },
           config.musicBlocker !== null && config.musicBlocker !== undefined
             ? h("div", { className: "SPR_note", "data-kind": "error" }, config.musicBlocker)
             : null,
           h(
             "div",
-            { className: "SPR_fields" },
+            { className: "SPR_keyRow" },
             h(
               "label",
               { className: "SPR_field" },
@@ -21356,16 +21724,16 @@
                 onChange: (event) => setMusicKey(event.target.value)
               })
             ),
-            h(
-              "div",
-              { className: "SPR_toolbar" },
-              h(Btn, { primary: true, disabled: musicKey.trim() === "", onClick: () => void run(async () => { await api.saveConfig({ musicApiKey: musicKey }); setMusicKey(""); }, T("音乐 API Key 已保存")) }, T("保存 Key")),
-              h(Btn, { disabled: config.musicApiKeySet !== true, onClick: () => void run(() => api.saveConfig({ clearMusicApiKey: true }), T("已清除音乐 API Key")) }, T("清除 Key")),
-              h(Btn, { onClick: () => void run(() => api.testMusic(), (value) => value.warning ?? T("连接正常：{n0}", { n0: value.message ?? "" })) }, T("测试连接"))
-            ),
+            h(Btn, { primary: true, disabled: musicKey.trim() === "", onClick: () => void run(async () => { await api.saveConfig({ musicApiKey: musicKey }); setMusicKey(""); }, T("音乐 API Key 已保存")) }, T("保存 Key")),
+            h(Btn, { disabled: config.musicApiKeySet !== true, onClick: () => void run(() => api.saveConfig({ clearMusicApiKey: true }), T("已清除音乐 API Key")) }, T("清除 Key")),
+            h(Btn, { onClick: () => void run(() => api.testMusic(), (value) => value.warning ?? T("连接正常：{n0}", { n0: value.message ?? "" })) }, T("测试连接"))
+          ),
+          h(
+            "div",
+            { className: "SPR_fields" },
             h(
               "label",
-              { className: "SPR_field" },
+              { className: "SPR_field SPR_settingsWide" },
               h("span", { className: "SPR_fieldLabel" }, T("API 地址")),
               h("input", {
                 className: "SPR_input",
@@ -21413,10 +21781,11 @@
         ),
 
         h(
-          "div",
-          { className: "SPR_settingsGroup" },
-          h("h3", null, T("谱曲模式（本地 MIDI）")),
-          h("p", null, T("谱曲模式在对话里先分析想法、给出方案，再用 scoremill 把方案写成 MIDI；宿主在本机渲染试听。谱曲、试听、导出全部免费；只有最后「交给 Suno」会消耗谱乐 AI 积分。")),
+          SettingsGroup,
+          {
+            title: T("谱曲模式（本地 MIDI）"),
+            hint: T("谱曲模式在对话里先分析想法、给出方案，再用 scoremill 把方案写成 MIDI；宿主在本机渲染试听。谱曲、试听、导出全部免费；只有最后「交给 Suno」会消耗谱乐 AI 积分。")
+          },
           h("p", null, T("依赖：Python 3 + scoremill（写 MIDI）、FluidSynth + SoundFont（更好的试听，可选）、ffmpeg（转 MP3/导出）。没有 FluidSynth 时插件会退回内置简易音源；没有 scoremill 时无法谱曲。")),
           config.musicScoreStatus === undefined || config.musicScoreStatus === null
             ? h("p", { className: "SPR_hint" }, T("正在检测谱曲依赖…"))
@@ -21496,18 +21865,30 @@
           h("p", { className: "SPR_hint" }, T("安装提示：python3 -m pip install scoremill；macOS 可 brew install fluid-synth；SoundFont 放到 ~/Library/Audio/SoundFonts/FluidR3_GM.sf2。")),
           h("p", { className: "SPR_hint" }, T("谱曲模式参考：scoremill（MIT，https://github.com/CharlesCNorton/scoremill）与 Midra 的 prompt-to-code MIDI 思路；只吸收方法论，未打包其代码或音源。"))
         ),
+        ),
 
         h(
           "div",
-          { className: "SPR_settingsGroup" },
-          h("h3", null, T("音效生成（火山引擎 Seed-Audio）")),
-          h("p", null, T("用豆包语音的生成式音频模型做游戏音效：撞击 / 环境音 / UI 声 / 生物吼叫 / 角色配音。单次最长 120 秒。Key 是语音控制台的 API Key（请求头 X-Api-Key），不是火山方舟的 ARK_API_KEY；模型需要在语音控制台开通。")),
+          {
+            className: "SPR_settingsPanel",
+            role: "tabpanel",
+            id: "cfg-panel-sfx",
+            "data-testid": "cfg-panel-sfx",
+            "aria-labelledby": "cfg-tab-sfx",
+            hidden: activeTab !== "sfx"
+          },
+          h(
+            SettingsGroup,
+            {
+              title: T("音效生成（火山引擎 Seed-Audio）"),
+              hint: T("用豆包语音的生成式音频模型做游戏音效：撞击 / 环境音 / UI 声 / 生物吼叫 / 角色配音。单次最长 120 秒。Key 是语音控制台的 API Key（请求头 X-Api-Key），不是火山方舟的 ARK_API_KEY；模型需要在语音控制台开通。")
+            },
           config.sfxBlocker !== null && config.sfxBlocker !== undefined
             ? h("div", { className: "SPR_note", "data-kind": "error" }, config.sfxBlocker)
             : null,
           h(
             "div",
-            { className: "SPR_fields" },
+            { className: "SPR_keyRow" },
             h(
               "label",
               { className: "SPR_field" },
@@ -21522,29 +21903,29 @@
                 onChange: (event) => setSfxKey(event.target.value)
               })
             ),
+            h(Btn, { primary: true, disabled: sfxKey.trim() === "", onClick: () => void run(async () => { await api.saveConfig({ sfxApiKey: sfxKey }); setSfxKey(""); }, T("音效 API Key 已保存")) }, T("保存 Key")),
+            h(Btn, { disabled: config.sfxApiKeySet !== true, onClick: () => void run(() => api.saveConfig({ clearSfxApiKey: true }), T("已清除音效 API Key")) }, T("清除 Key")),
             h(
-              "div",
-              { className: "SPR_toolbar" },
-              h(Btn, { primary: true, disabled: sfxKey.trim() === "", onClick: () => void run(async () => { await api.saveConfig({ sfxApiKey: sfxKey }); setSfxKey(""); }, T("音效 API Key 已保存")) }, T("保存 Key")),
-              h(Btn, { disabled: config.sfxApiKeySet !== true, onClick: () => void run(() => api.saveConfig({ clearSfxApiKey: true }), T("已清除音效 API Key")) }, T("清除 Key")),
-              h(
-                BusyBtn,
-                {
-                  busy: testing === "sfx",
-                  busyText: T("正在生成测试音效…"),
-                  disabled: testing !== null || config.sfxApiKeySet !== true,
-                  onClick: async () => {
-                    setTesting("sfx");
-                    await run(() => api.testSfx(), (value) => T("连接正常：{n0}", { n0: value.message ?? "" }));
-                    setTesting(null);
-                  }
-                },
-                T("测试连接（会真实生成一条极短音效，产生少量费用）")
-              )
-            ),
+              BusyBtn,
+              {
+                busy: testing === "sfx",
+                busyText: T("正在生成测试音效…"),
+                disabled: testing !== null || config.sfxApiKeySet !== true,
+                onClick: async () => {
+                  setTesting("sfx");
+                  await run(() => api.testSfx(), (value) => T("连接正常：{n0}", { n0: value.message ?? "" }));
+                  setTesting(null);
+                }
+              },
+              T("测试连接（会真实生成一条极短音效，产生少量费用）")
+            )
+          ),
+          h(
+            "div",
+            { className: "SPR_fields" },
             h(
               "label",
-              { className: "SPR_field" },
+              { className: "SPR_field SPR_settingsWide" },
               h("span", { className: "SPR_fieldLabel" }, T("API 地址")),
               h("input", {
                 className: "SPR_input",
@@ -21601,13 +21982,23 @@
             config.sfxConsoleUrl ? h("a", { className: "SPR_link", href: config.sfxConsoleUrl, target: "_blank", rel: "noreferrer" }, config.sfxConsoleUrl) : null
           )
         ),
+        ),
 
         h(
           "div",
-          { className: "SPR_settingsGroup" },
-          h("h3", null, T("功能管理")),
-          h("p", null, T("隐藏不用的功能。隐藏后界面里不再出现它的页签与侧栏菜单项，对话里的 AI 也无法调用它（工具会直接报错）。随时可以再打开，已有的项目数据不会被删除。")),
+          {
+            className: "SPR_settingsPanel",
+            role: "tabpanel",
+            id: "cfg-panel-misc",
+            "data-testid": "cfg-panel-misc",
+            "aria-labelledby": "cfg-tab-misc",
+            hidden: activeTab !== "misc"
+          },
           h(
+            SettingsGroup,
+            { title: T("功能管理") },
+            h("p", null, T("隐藏不用的功能。隐藏后界面里不再出现它的页签与侧栏菜单项，对话里的 AI 也无法调用它（工具会直接报错）。随时可以再打开，已有的项目数据不会被删除。")),
+            h(
             "div",
             { className: "SPR_featureList" },
             MODULES.map((entry) => {
@@ -21655,20 +22046,25 @@
         ),
 
         h(
-          "div",
-          { className: "SPR_settingsGroup" },
-          h("h3", null, T("数据位置")),
+          SettingsGroup,
+          { title: T("本机依赖与数据") },
+          h("p", null, config.ffmpeg?.ok === true ? T("ffmpeg 可用：{n0}", { n0: config.ffmpeg.version }) : T("ffmpeg 不可用：{n0}", { n0: config.ffmpeg?.error ?? T("未知") })),
           h(
-            "p",
-            null,
-            T("所有项目（源图、绿幕图、视频、序列帧、整图）都保存在：") ,
-            h("code", null, config.dataRoot)
-          ),
-          h(
-            "div",
-            { className: "SPR_toolbar" },
-            h(Btn, { onClick: () => void run(() => api.saveConfig({}), T("已刷新")) }, T("重新读取配置"))
+            SettingsSubGroup,
+            { title: T("数据位置") },
+            h(
+              "p",
+              null,
+              T("所有项目（源图、绿幕图、视频、序列帧、整图）都保存在："),
+              h("code", { className: "SPR_settingsPath" }, config.dataRoot)
+            ),
+            h(
+              "div",
+              { className: "SPR_toolbar" },
+              h(Btn, { onClick: () => void run(() => api.saveConfig({}), T("已刷新")) }, T("重新读取配置"))
+            )
           )
+        )
         )
       );
     }
