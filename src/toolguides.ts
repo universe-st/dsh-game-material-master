@@ -380,7 +380,17 @@ const MODULE_TEXTS: Record<StudioModule, string> = {
     "- `recomposeMapTileset({projectId,tilesetId,files,clarity?})`【原地重烘一张素材：保留素材 id 与图块序号，已经画好的格子不用重画；删掉重导会清空它画过的格子】",
     "- `saveMapTileset({projectId,tilesetId,name?,cell?,shape?,animRows?,fps?})` / `removeMapTileset({projectId,tilesetId})`",
     "- `saveMapDoc({projectId,name?,cols?,rows?,layers?,addLayer?,removeLayerId?,moveLayer?,clearLayerId?,wrap?})`【地图只有一张：改尺寸/图层/环绕都走它】",
-    "- `applyMapOps({projectId,ops,stroke?,have?,dryRun?,ifRevision?})`【agent 也能画：ops = [{kind:'paint',layerId,cells:[{r,c,tile}]}, {kind:'fill',...}, {kind:'rect',...}, {kind:'replace',...}, {kind:'marker',op:'add'|'remove'|'move'|'rename'|'update',...}, {kind:'stampPlace'|'stampRemove'|'stampMove'|'stampRotate',...}]；标记新增用 `markerKind` / color / note / tags，更新用 `{op:'update',patch:{kind,color,note,tags}}`；tile 取 `getMapProject` 的 `view.tilesets[].palette[].index`（1 起，0 = 空）；先 dryRun 验证】",
+    "- `applyMapOps({projectId,ops,stroke?,have?,dryRun?,ifRevision?})`【agent 也能画：ops = [" +
+      "{kind:'paint',layerId,cells:[{r,c,tile}]}, " +
+      "{kind:'fill',layerId,r,c,tile}（**连通区填充**：从 (r,c) 涨满整片同值区域，没有边界参数，铺地板常等于铺全图）, " +
+      "{kind:'rect',layerId,r0,c0,r1,c1,tile,filled?}（**两角**：左上 r0,c0 + 右下 r1,c1，filled:false 只画边框；字段名写错会报 `越界格 (undefined,undefined)`，别写成 r1/c1/r2/c2）, " +
+      "{kind:'replace',layerId,from,to}, " +
+      "{kind:'marker',op:'add'|'remove'|'move'|'rename'|'update',...}, " +
+      "{kind:'stampPlace'|'stampRemove'|'stampMove'|'stampRotate',...}]；" +
+      "标记新增用 `markerKind` / color / note / tags，更新用 `{op:'update',patch:{kind,color,note,tags}}`；" +
+      "tile 取 `getMapProject` 的 `view.tilesets[].palette[].index`（1 起，0 = 空）；先 dryRun 验证】",
+    "  - 整图（stamp）落位两条硬规则：**①占格必须完整落在地图内**（不能跨右/下边界，越界会进 `skipped` 并且不落）；**②同一图层里整图不能互相压格**——后放的会把先放的顶掉，`skipped` 里会写「同层整图被覆盖（新图与 s1 有格子重叠）」。墙角这种天然重叠的部件（北墙 0–10 行 × 西墙 3–50 行）要分到不同图层，或裁成不重叠的块。",
+    "  - 整图的 `rot` 缺省按 0 处理（0..3 顺时针档数）；不传 `rot` 也不会再写出坏数据。",
     "- `mapUndo({projectId,have?})` / `mapRedo({projectId,have?})` / `mapInspect({projectId,region?,layerIds?,include?,format?,maxCells?,maxItems?})`【读逐格 / 标记 / 整图 / 通行性；不要拿 mapPlan 当状态查询】 / `mapPlan({projectId,view:{x,y,width,height},have?,layerIds?})`",
     "- `mapRender({projectId,region?,scale?,layerIds?,frame?,background?,overlay?,maxPixels?,name?})`【同步出检查图，返回 localPath / url；overlay 可开 markers/grid/axes/pass/outlines，交给 read_image 看】",
     "- `runMapGenerate({projectId,kind:'random'|'maze'|'continent',tiles?,seed?,layerId?})` / `runMapPreview({projectId})` / `runMapExport({projectId,scale?,formats?})`",
