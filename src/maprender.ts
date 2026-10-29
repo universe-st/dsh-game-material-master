@@ -413,6 +413,20 @@ function stampKey(frame: number, rot: number, r: number, c: number): string {
   return `${frame}|${rot}|${r}|${c}`;
 }
 
+/**
+ * 整图旋转档数归一成 0..3 的整数。
+ *
+ * `MapStamp.rot` 声明是 `number`，但存档里确实出现过 `null`（老版本把缺省值序列化成 null）
+ * 和 `NaN`（`stampPlace` 不带 rot 时 `Math.round(Number(undefined))` 就是 NaN）。
+ * 直接拼进 `stampKey` 会得到 `0|null|0|0` / `0|NaN|0|0`，跟素材索引里的 `0|0|0|0` 对不上，
+ * 于是整张整图被当成「素材不见了」跳过——**图一块都不画，只有一句素材没了**。
+ * 渲染端必须自己兜底，别让脏数据决定画不画。
+ */
+function stampRotOf(rot: unknown): number {
+  const turn = Math.round(Number(rot));
+  return Number.isFinite(turn) ? ((turn % 4) + 4) % 4 : 0;
+}
+
 /** 一张整图素材的索引：`frame|rot|r|c` → **1-based 全局序号**（`base` = 该素材在 flatTiles 里的起点）。 */
 function stampTileIndex(tileset: MapTileset, base: number): Map<string, number> {
   const index = new Map<string, number>();
@@ -448,7 +462,7 @@ export function stampCellsOf(
   const tileset = context.tilesets.find((entry) => entry.id === stamp.tilesetId);
   const spec = tileset?.stamp;
   if (spec === undefined) return [];
-  const span = stampSpan(spec, stamp.rot);
+  const span = stampSpan(spec, stampRotOf(stamp.rot));
   const out: Array<{ r: number; c: number; pass: number }> = [];
   for (let dr = 0; dr < span.rows; dr++) {
     for (let dc = 0; dc < span.cols; dc++) {
@@ -529,7 +543,8 @@ export function buildPlan(
         env.sink.missingStamp.add(stamp.tilesetId);
         continue;
       }
-      const span = stampSpan(spec, stamp.rot);
+      const rot = stampRotOf(stamp.rot);
+      const span = stampSpan(spec, rot);
       const base = env.baseIndex.get(tileset.id) ?? 0;
       const index = stampTileIndex(tileset, base);
       /** 一格的帧序（frames > 1 时才展开）。 */
@@ -537,7 +552,7 @@ export function buildPlan(
         if (spec.frames <= 1) return undefined;
         const frames: number[] = [];
         for (let frame = 0; frame < spec.frames; frame++) {
-          const tile = index.get(stampKey(frame, stamp.rot, r, c));
+          const tile = index.get(stampKey(frame, rot, r, c));
           if (tile === undefined) break;
           frames.push(tile);
         }
@@ -551,7 +566,7 @@ export function buildPlan(
           const cell = wrapCell(env.layout, rr, cc);
           if (cell.r < 0 || cell.c < 0 || cell.r >= doc.rows || cell.c >= doc.cols) continue;
           const cycle = cycleOf(dr, dc);
-          const first = index.get(stampKey(0, stamp.rot, dr, dc));
+          const first = index.get(stampKey(0, rot, dr, dc));
           if (first === undefined && cycle === undefined) {
             env.sink.missingStamp.add(stamp.tilesetId);
             continue;
