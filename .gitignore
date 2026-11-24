@@ -44,3 +44,6 @@ desktop.ini
 # Python 缓存（research/tools 下的脚本）
 __pycache__/
 *.pyc
+
+# meow-memory 的记忆库（每个工作区一份，含 SQLite WAL/SHM；误删不可恢复，别入库）
+.dsh-meow/

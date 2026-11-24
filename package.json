@@ -44,8 +44,8 @@
     "verify:rig:runtime": "node scripts/verify-rig-runtime.mjs"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "~4.0.5",
-    "@deepseek-ai/dsh-typert-protocol": "^0.2.1-rc.2",
+    "@deepseek-ai/cordis": "4.2.0-alpha.1",
+    "@deepseek-ai/dsh-typert-protocol": "0.2.3-alpha.2",
     "@esotericsoftware/spine-core": "4.2.120",
     "@types/node": "^26.2.0",
     "typescript": "^7.0.2",
