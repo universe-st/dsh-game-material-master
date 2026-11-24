@@ -12,7 +12,13 @@ third-party service.
 [![npm](https://img.shields.io/npm/v/dsh-game-material-master?color=blue)](https://www.npmjs.com/package/dsh-game-material-master)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-> **🆕 0.11.2 update**: image-size and key-color fixes — an image task now **follows the global size** by default,
+> **🆕 0.11.3 update**: DSH 0.2.3 compatibility — dev dependencies now match `cordis 4.2.0-alpha.1` /
+> `dsh-typert-protocol 0.2.3-alpha.2`. Fixes the host half failing to mount after a DSH upgrade, which surfaced as
+> `gameStudio/listProjects … HTTP 404` in the panel (with `link:` installs the old protocol read `ctx.root`, which
+> cordis 4.2 rejects, leaving the whole `gameStudio` service unregistered). No business-code or data-format changes;
+> restart DSH after upgrading.
+>
+> **0.11.2 update**: image-size and key-color fixes — an image task now **follows the global size** by default,
 > or can switch to **Custom** to pin its own dimensions; global size accepts `1K` / `2K` / `4K` or explicit
 > `width x height`, and hard-coded `Empty*` sizes in a ComfyUI workflow are injected automatically.
 > A configurable **key background color** (green / blue / magenta / cyan / yellow / red / white / black + custom)
@@ -410,7 +416,7 @@ dsh plugin --profile web add /path/to/dsh-game-material-master
 ```
 
 The package is published to npm: [dsh-game-material-master](https://www.npmjs.com/package/dsh-game-material-master)
-(currently `0.11.2`, `latest`). It has no runtime dependencies, so `dsh plugin add` is all you need.
+(currently `0.11.3`, `latest`). It has no runtime dependencies, so `dsh plugin add` is all you need.
 
 **DSH version**: `>=0.2.0-rc.2 <0.3.0` (the `engines.dsh` field; since DSH 0.2.1 the plugin manager checks it first).
 When a Web deployment uses `--public-url https://host/prefix/`, deep links and asset URLs include that path prefix.

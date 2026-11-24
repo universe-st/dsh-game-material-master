@@ -10,7 +10,11 @@
 [![npm](https://img.shields.io/npm/v/dsh-game-material-master?color=blue)](https://www.npmjs.com/package/dsh-game-material-master)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-> **🆕 0.11.2 更新**：生图尺寸与抠像底色修复 —— 图片任务默认**跟随全局尺寸**，也可切「**自定义**」只影响本任务；
+> **🆕 0.11.3 更新**：适配 **DSH 0.2.3** —— 开发依赖对齐到 `cordis 4.2.0-alpha.1` / `dsh-typert-protocol 0.2.3-alpha.2`。
+> 修复升级 DSH 后插件宿主半区未挂载、面板报 `gameStudio/listProjects … HTTP 404` 的问题（`link:` 安装时旧 protocol 会读 `ctx.root`，
+> 新 cordis 直接拒绝，导致整个 `gameStudio` 服务没注册）。业务代码与数据格式无变化；升级后重启 DSH 即可。
+>
+> **0.11.2 更新**：生图尺寸与抠像底色修复 —— 图片任务默认**跟随全局尺寸**，也可切「**自定义**」只影响本任务；
 > 全局尺寸支持 `1K` / `2K` / `4K` 与精确宽高，ComfyUI 工作流里写死的 `Empty*` 尺寸也会被自动注入。
 > 新增可配置**抠像背景色**（绿 / 蓝 / 品红 / 青 / 黄 / 红 / 白 / 黑 + 自定义），图片、序列帧、八方向、地图整图、
 > 45° 物件与两套 AI 生成素材入口都可选；默认提示词里的「绿幕 / #00FF00」会跟着底色替换，用户手写原文不改。
@@ -343,7 +347,7 @@ dsh plugin --profile web add /path/to/dsh-game-material-master
 ```
 
 包已发布到 npm：[dsh-game-material-master](https://www.npmjs.com/package/dsh-game-material-master)
-（当前 `0.11.2`，`latest`）。本包没有运行时依赖，`dsh plugin add` 拉下来即可用。
+（当前 `0.11.3`，`latest`）。本包没有运行时依赖，`dsh plugin add` 拉下来即可用。
 
 **DSH 版本**：`>=0.2.0-rc.2 <0.3.0`（`package.json` 的 `engines.dsh`；DSH 0.2.1 起插件管理器优先按它判断兼容性）。
 Web 部署用 `--public-url https://host/prefix/` 时，深链接与产物地址会跟着补路径前缀。
