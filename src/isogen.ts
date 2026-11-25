@@ -747,7 +747,8 @@ export async function importIsoTileset(
       const screen = keyScreenName(keyColor, "zh");
       const keyed = keyStampBackground(bitmap, (rgba, width, height) => keyGreen(rgba, width, height, { ...STAMP_KEY_OPTIONS, keyColor }));
       bitmap = keyed.bitmap;
-      if (keyed.keyed === 0) warnings.push(`没有检测到${screen}背景，按原图用了。`);
+      if (keyed.alpha === true) warnings.push("源图已带透明通道，跳过绿幕抠像。");
+      else if (keyed.keyed === 0) warnings.push(`没有检测到${screen}背景，按原图用了。`);
     }
     const targetWidth = Math.max(1, Math.round(footprint.cols * project.cell.width * (objectScale ?? 1)));
     stored = objectSheet(bitmap, sourceCell, frames, targetWidth, clarity);

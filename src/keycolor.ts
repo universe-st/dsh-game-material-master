@@ -18,6 +18,28 @@
 /** 默认抠像底色：标准 chroma key 绿。 */
 export const DEFAULT_KEY_COLOR = "#00FF00";
 
+/**
+ * 幕布类型。
+ *
+ * - `color`：画一块纯色幕布（默认），生成后在本机抠掉；
+ * - `transparent`：让模型**直接**输出带 Alpha 通道的 RGBA PNG（目前只有火山方舟
+ *   Seedream 5.5 支持）。生成后不需要抠像，透明通道本身就是背景。
+ *
+ * 它只影响**生图**：MP4 视频没有透明通道，图生视频那条线仍按纯色幕布处理。
+ */
+export type BackdropMode = "color" | "transparent";
+
+export const BACKDROP_MODES: BackdropMode[] = ["color", "transparent"];
+
+/** 任意输入 → 合法幕布类型；认不出来按纯色幕布。 */
+export function normalizeBackdropMode(value: unknown): BackdropMode {
+  return value === "transparent" ? "transparent" : "color";
+}
+
+export function isTransparentBackdrop(value: unknown): boolean {
+  return normalizeBackdropMode(value) === "transparent";
+}
+
 export type KeyColorLang = "zh" | "en";
 
 export interface KeyColorPreset {
@@ -183,6 +205,156 @@ export function backgroundClause(hex: string, lang: KeyColorLang = "zh", variant
   return lang === "en"
     ? `${screenClause} (${color}), the whole background is a completely uniform single color, with no shadows, gradients or noise of any kind.`
     : `${screenClause}，颜色是 ${color}，整幅背景颜色完全均匀一致，不要任何阴影、渐变或噪点。`;
+}
+
+/**
+ * 透明幕布那一句话。
+ *
+ * ⚠️ 它必须显式说「不要画绿幕 / 纯色 / 棋盘格」：只写「透明背景」时，生图模型
+ * 经常画成一块绿色或灰白棋盘格来「表示」透明 —— 那正好与透明通道相反。
+ * 这一段会**真的发给模型**，所以中英各一份、逐句对应。
+ */
+export function transparentBackgroundClause(lang: KeyColorLang = "zh", variant: "image" | "turn" = "image"): string {
+  if (variant === "turn") {
+    return lang === "en"
+      ? "Transparent background (a real RGBA alpha channel): the whole background is fully transparent and stays transparent the whole time; no color, backdrop, shadows, gradients, ground or cast shadow."
+      : "透明背景（真实 RGBA 透明通道）：整幅背景完全透明、全程保持透明，不要任何颜色、幕布、阴影、渐变、地面或投影。";
+  }
+  return lang === "en"
+    ? "Transparent background (a real RGBA alpha channel): the background must be fully transparent with no color, pattern or backdrop at all; do not paint a green screen, a solid color or a checkerboard to represent transparency, and no shadows, gradients or noise of any kind."
+    : "透明背景（真实 RGBA 透明通道）：背景必须完全透明，没有任何颜色、图案或幕布，不要为了让透明可见而画成绿幕、纯色或棋盘格；不要任何阴影、渐变或噪点。";
+}
+
+/** 按幕布类型给出「整幅背景」那句话（唯一入口）。 */
+export function backgroundClauseFor(
+  mode: BackdropMode,
+  hex: string,
+  lang: KeyColorLang = "zh",
+  variant: "image" | "turn" = "image"
+): string {
+  return normalizeBackdropMode(mode) === "transparent"
+    ? transparentBackgroundClause(lang, variant)
+    : backgroundClause(hex, lang, variant);
+}
+
+/**
+ * 把整句的背景描述换成目标幕布，换成 token（先把整段保护起来，短称呼替换才不会
+ * 把新写进去的「不要画成绿幕」再改成「不要画成透明背景」）。
+ */
+const BACKDROP_TOKEN_IMAGE = "\u0000BDIMG\u0000";
+const BACKDROP_TOKEN_TURN = "\u0000BDTURN\u0000";
+
+function tokenizeBackgroundSentences(text: string, mode: BackdropMode, hex: string, lang: KeyColorLang): string {
+  const target = normalizeBackdropMode(mode);
+  const colors = new Set<string>([normalizeKeyColor(hex), ...KEY_COLOR_PRESETS.map((preset) => preset.hex)]);
+  let out = text;
+  for (const variant of ["image", "turn"] as const) {
+    const token = variant === "image" ? BACKDROP_TOKEN_IMAGE : BACKDROP_TOKEN_TURN;
+    // **两种幕布的整句都保护**：透明 prompt 再跑一次透明迁移时必须幂等，
+    // 否则「不要画成绿幕」会被短称呼替换改成「不要画成透明背景」。
+    const transparentClause = transparentBackgroundClause(lang, variant);
+    out = out.split(transparentClause).join(token);
+    for (const color of colors) {
+      out = out.split(backgroundClauseFor("color", color, lang, variant)).join(token);
+    }
+  }
+  // 自定义颜色 / 自定义透明句（不是任何内置预设）：按句式整句换成 token。
+  if (target === "transparent") {
+    if (lang === "zh") {
+      out = out.replace(/纯色[^，。\n]*，颜色是 #[0-9A-Fa-f]{6}，整幅背景颜色完全均匀一致，不要[^。\n]*。/gu, BACKDROP_TOKEN_IMAGE);
+      out = out.replace(/纯色[^，。\n]*，颜色是 #[0-9A-Fa-f]{6}，[^。\n]*全程保持[^。\n]*。/gu, BACKDROP_TOKEN_TURN);
+    } else {
+      out = out.replace(/Solid [^,\n]*#[0-9A-Fa-f]{6}[^,\n]*, the whole background is a completely uniform single color, pure [^.]*\./gu, BACKDROP_TOKEN_TURN);
+      out = out.replace(/Solid [^,\n]*#[0-9A-Fa-f]{6}[^,\n]*, the whole background is a completely uniform single color, with no [^.]*\./gu, BACKDROP_TOKEN_IMAGE);
+    }
+  }
+  return out;
+}
+
+function restoreBackgroundSentences(text: string, mode: BackdropMode, hex: string, lang: KeyColorLang): string {
+  const target = normalizeBackdropMode(mode);
+  return text
+    .split(BACKDROP_TOKEN_IMAGE).join(backgroundClauseFor(target, hex, lang, "image"))
+    .split(BACKDROP_TOKEN_TURN).join(backgroundClauseFor(target, hex, lang, "turn"));
+}
+
+/**
+ * 把句子里的「绿幕 / 蓝幕…」短称呼换成透明说法。
+ *
+ * 只换**幕布名**（绿幕 / 蓝幕 / white screen…），不动单个颜色字：`绿色衣服`
+ * 这类描述是用户原文，换成「透明衣服」就彻底毁了。
+ */
+function transparentizeScreenWords(text: string, lang: KeyColorLang): string {
+  let out = text;
+  const screens = KEY_COLOR_PRESETS.map((preset) => (lang === "en" ? preset.en : preset.zh));
+  for (const screen of screens) {
+    const short = lang === "en" ? screen.replace(/\s+screen$/u, "") : screen.replace(/幕$/u, "");
+    if (lang === "zh") {
+      out = out.split(`不要用${screen}背景`).join("不要画任何背景");
+      out = out.split(`不要用${screen}`).join("不要画任何背景");
+      out = out.split(`纯${screen}`).join("完全透明");
+      out = out.split(`${screen}背景`).join("透明背景");
+      out = out.split(`干净的${screen}`).join("干净的透明背景");
+      out = out.split(`没检测到${screen}`).join("没检测到透明通道");
+      out = out.split(`抠掉${screen}背景`).join("去掉背景");
+      out = out.split(`抠${screen}`).join("去掉背景");
+      out = out.split(`${screen}会由插件自动抠成透明`).join("插件会直接使用它的透明通道");
+      out = out.split(`同一片${short}`).join("同一片透明背景");
+      out = out.split(`${short}色描边`).join("色边");
+      out = out.split(`${short}色外发光`).join("外发光");
+      out = out.split(screen).join("透明背景");
+    } else {
+      out = out.split(`no ${screen} background`).join("no background at all");
+      out = out.split(`pure ${screen}`).join("fully transparent background");
+      out = out.split(`${screen} background`).join("transparent background");
+      out = out.split(`clean ${screen}`).join("clean transparent background");
+      out = out.split(`no ${short} background`).join("no background at all");
+      out = out.split(`the same ${short} background`).join("the same transparent background");
+      out = out.split(`${short} outline`).join("outline");
+      out = out.split(`${short} glow`).join("glow");
+      out = out.split(screen).join("transparent background");
+    }
+  }
+  return out;
+}
+
+/**
+ * 把一个提示词里的背景描述换成目标幕布。
+ *
+ * 与 `applyKeyColorToPrompt` 的分工：这里是**唯一真源**（颜色 / 透明都走它），
+ * `color` 模式内部直接复用旧的换色逻辑，所以旧项目的逐字行为完全不变。
+ */
+export function applyBackdropToPrompt(
+  text: string,
+  mode: BackdropMode,
+  hex: string,
+  lang: KeyColorLang = "zh"
+): string {
+  if (typeof text !== "string" || text === "") return text;
+  const target = normalizeBackdropMode(mode);
+  let out = text;
+  /**
+   * 自愈：先换底色、再换幕布时，换色逻辑可能把透明句里的「绿幕」改成「蓝幕」。
+   * 这里把任何以透明句开头的整行还原成标准句，避免「蓝色幕布」残留在透明 prompt 里。
+   */
+  if (target === "transparent") {
+    out = out.replace(/透明背景（真实 RGBA 透明通道）：[^\n]*/gu, (line) =>
+      line.includes("全程保持透明") ? transparentBackgroundClause("zh", "turn") : transparentBackgroundClause("zh", "image")
+    );
+    out = out.replace(/Transparent background \(a real RGBA alpha channel\):[^\n]*/gu, (line) =>
+      line.includes("stays transparent the whole time") ? transparentBackgroundClause("en", "turn") : transparentBackgroundClause("en", "image")
+    );
+  }
+  out = tokenizeBackgroundSentences(out, target, hex, lang);
+  // token 保护的整句不受短称呼替换影响；这里只处理句子里的「绿幕背景」这类短称呼。
+  if (target === "transparent") out = transparentizeScreenWords(out, lang);
+  out = restoreBackgroundSentences(out, target, hex, lang);
+  return target === "transparent" ? out : applyKeyColorToPrompt(out, hex, lang);
+}
+
+/** 中英各跑一遍：宿主在生成时不知道项目提示词是哪种语言。 */
+export function applyBackdropToPromptAuto(text: string, mode: BackdropMode, hex: string): string {
+  return applyBackdropToPrompt(applyBackdropToPrompt(text, mode, hex, "zh"), mode, hex, "en");
 }
 
 /**

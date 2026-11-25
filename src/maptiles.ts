@@ -31,7 +31,7 @@
  *   渲染端（`maprender.ts`）按这个对应关系挑象限块，别自己另立一套顺序。
  */
 
-import { pngSize, type Bitmap } from "./bitmap.js";
+import { pngSize, transparentFraction, type Bitmap } from "./bitmap.js";
 import type { KeyOptions } from "./chroma.js";
 import { A2_SHAPES } from "./mapauto.js";
 
@@ -1203,7 +1203,15 @@ export const STAMP_KEY_OPTIONS: KeyOptions = {
   bgTolerance: 0
 };
 
-export function keyStampBackground(frame: Bitmap, keyGreenFn?: (rgba: Buffer, width: number, height: number) => { rgba: Buffer; backgroundFraction: number }): { bitmap: Bitmap; keyed: number } {
+export function keyStampBackground(
+  frame: Bitmap,
+  keyGreenFn?: (rgba: Buffer, width: number, height: number) => { rgba: Buffer; backgroundFraction: number }
+): { bitmap: Bitmap; keyed: number; alpha?: boolean } {
+  /**
+   * 图已经带透明通道（Seedream 5.5 的透明幕布、或用户自己导的透明 PNG）：
+   * 背景已经抠好了。再按「某个颜色」去找背景，既找不到、又可能把同色的角色细节吃掉。
+   */
+  if (transparentFraction(frame) >= 0.02) return { bitmap: frame, keyed: 0, alpha: true };
   if (keyGreenFn === undefined) return { bitmap: frame, keyed: 0 };
   const result = keyGreenFn(frame.rgba, frame.width, frame.height);
   const fraction = result.backgroundFraction;

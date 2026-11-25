@@ -84,7 +84,7 @@ function cropOpaque(source: Bitmap): Bitmap {
 }
 
 /** 读一张原图、抠绿、裁到内容边界；返回可直接缩放的帧。 */
-async function readFrame(file: string, keyGreen: boolean, keyColor: string): Promise<{ bitmap: Bitmap; keyed: number }> {
+async function readFrame(file: string, keyGreen: boolean, keyColor: string): Promise<{ bitmap: Bitmap; keyed: number; alpha: boolean }> {
   let info;
   try {
     info = await stat(file);
@@ -102,6 +102,7 @@ async function readFrame(file: string, keyGreen: boolean, keyColor: string): Pro
     throw new Error(`读不出帧文件 ${file}：${messageOf(error)}`);
   }
   let keyed = 0;
+  let alpha = false;
   if (keyGreen) {
     const result = keyStampBackground(bitmap, (rgba, width, height) => {
       // 与「整图」同一条严格绿幕参数：只认饱和纯绿，避免把草地 / 深色阴影误判成背景。
@@ -109,8 +110,9 @@ async function readFrame(file: string, keyGreen: boolean, keyColor: string): Pro
     });
     bitmap = result.bitmap;
     keyed = result.keyed;
+    alpha = result.alpha === true;
   }
-  return { bitmap: cropOpaque(bitmap), keyed };
+  return { bitmap: cropOpaque(bitmap), keyed, alpha };
 }
 
 /**
@@ -239,8 +241,12 @@ export async function composeIsoFrames(input: ComposeIsoFramesInput): Promise<Co
   const keyedValues = read.map((entry) => entry.keyed);
   const keyedCount = keyedValues.filter((value) => value > 0).length;
   const keyed = keyedValues.length === 0 ? 0 : keyedValues.reduce((sum, value) => sum + value, 0) / keyedValues.length;
+  const transparentCount = read.filter((entry) => entry.alpha).length;
   const screen = keyScreenName(keyColor, "zh");
-  if (keyGreen && keyedCount === 0) {
+  if (keyGreen && transparentCount > 0) {
+    notes.push(`源图已带透明通道（${transparentCount}/${read.length} 张）：跳过绿幕抠像，直接使用 Alpha 通道。`);
+  }
+  if (keyGreen && keyedCount === 0 && transparentCount === 0) {
     notes.push(`没检测到${screen}背景：这次按原图用了。想要透明背景，让模型把背景画成纯色 ${keyColor}（不要渐变 / 阴影）。`);
   } else if (keyedCount > 0) {
     notes.push(`已抠掉${screen}背景（平均 ${Math.round(keyed * 100)}% 的像素变成透明）。`);

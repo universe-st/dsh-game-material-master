@@ -39,7 +39,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { appendJobLog, messageOf, readJson, sweepTempFiles, writeJsonAtomic, type JobLogEntry } from "./jsonio.js";
 import { dataRoot } from "./config.js";
-import { decodeFile, encodeBitmap, pngSize, probeImageSize, sniffImageExt, type Bitmap } from "./bitmap.js";
+import { decodeFile, encodeBitmap, pngSize, probeImageSize, sniffImageExt, transparentFraction, type Bitmap } from "./bitmap.js";
 import { keyGreen, DEFAULT_KEY_OPTIONS } from "./chroma.js";
 import { keyScreenName, normalizeKeyColor } from "./keycolor.js";
 import {
@@ -1285,6 +1285,8 @@ export async function composeMapAsset(input: ComposeMapAssetInput): Promise<Comp
   const trimmedAmounts: Array<{ file: string; left: number; top: number; right: number; bottom: number }> = [];
   /** 整图抠背景的结果（keyed = 被判成背景的像素占比；0 = 没抠）。 */
   const keyedAmounts: number[] = [];
+  /** 源图本来就带透明通道的张数（Seedream 5.5 透明幕布 / 用户自备透明 PNG）。 */
+  let transparentSources = 0;
   const keyColor = normalizeKeyColor(input.keyColor);
   const screen = keyScreenName(keyColor, "zh");
   for (const file of files) {
@@ -1308,9 +1310,13 @@ export async function composeMapAsset(input: ComposeMapAssetInput): Promise<Comp
      * 留着会在地图上出现一块绿框，而且把本该空着的角落也涂满。
      * 其它形态不抠（它们的背景就是材质本身）。
      */
-    const keyed = shape === "stamp" ? keyStampBackground(await decodeFile(file), (rgba, width, height) => keyGreen(rgba, width, height, { ...STAMP_KEY_OPTIONS, keyColor })) : undefined;
-    if (keyed !== undefined) keyedAmounts.push(keyed.keyed);
-    const trimmed = trimUniformBorder(keyed === undefined ? (keyed === undefined ? await decodeFile(file) : keyed.bitmap) : keyed.bitmap);
+    const original = await decodeFile(file);
+    const keyed = shape === "stamp"
+      ? keyStampBackground(original, (rgba, width, height) => keyGreen(rgba, width, height, { ...STAMP_KEY_OPTIONS, keyColor }))
+      : undefined;
+    if (keyed?.alpha === true) transparentSources++;
+    if (keyed !== undefined && keyed.alpha !== true) keyedAmounts.push(keyed.keyed);
+    const trimmed = trimUniformBorder(keyed === undefined ? original : keyed.bitmap);
     trimmedAmounts.push({ file, left: trimmed.left, top: trimmed.top, right: trimmed.right, bottom: trimmed.bottom });
     frames.push(trimmed.bitmap);
   }
@@ -1342,13 +1348,18 @@ export async function composeMapAsset(input: ComposeMapAssetInput): Promise<Comp
   const notes: string[] = [];
   if (shape === "stamp") {
     const keyedCount = keyedAmounts.filter((fraction) => fraction > 0).length;
+    if (transparentSources > 0) {
+      notes.push(
+        `源图已带透明通道（${transparentSources}/${frames.length} 张），**跳过绿幕抠像**：透明背景本身就是 Alpha 通道，再按颜色找背景会把同色细节一起吃掉。`
+      );
+    }
     if (keyedCount > 0) {
       const average = keyedAmounts.reduce((sum, value) => sum + value, 0) / keyedAmounts.length;
       notes.push(
         `已抠掉${screen}背景（平均 ${Math.round(average * 100)}% 的像素变成透明${keyedCount < frames.length ? `，${keyedCount}/${frames.length} 张抠掉了` : ""}）：` +
           `整图是「立在格子上的物件」，背景要透明才看得见地砖；留着背景的话地图上会多出一块色块。`
       );
-    } else {
+    } else if (transparentSources === 0) {
       notes.push(
         `**没检测到${screen}背景**：这次按原图用了（画面会连背景一起印到地图上）。想要背景透明，让模型把背景画成**纯色 ${keyColor}**（不要渐变 / 阴影），或者自己用透明 PNG。`
       );
@@ -1498,7 +1509,10 @@ async function registerTileset(projectId: string, input: RegisterInput, warnings
     const keyColor = normalizeKeyColor(input.overrides?.keyColor);
     if (stamp !== undefined && stampCell !== undefined) {
       const rawSource = await decodeFile(target);
-      const source = keyedSource ? keyStampBackground(rawSource, (rgba, width, height) => keyGreen(rgba, width, height, { ...STAMP_KEY_OPTIONS, keyColor })).bitmap : rawSource;
+      // 已经带透明通道的图不需要再按颜色抠；硬抠只会把同色细节一起吃掉。
+      const source = keyedSource && transparentFraction(rawSource) < 0.02
+        ? keyStampBackground(rawSource, (rgba, width, height) => keyGreen(rgba, width, height, { ...STAMP_KEY_OPTIONS, keyColor })).bitmap
+        : rawSource;
       if (keyedSource) {
         // 抠完的源图要写回去：下面 resample + 烘焙读的是盘上这份（也便于排查）。
         storedBytes = encodeBitmap(source);

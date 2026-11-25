@@ -49,6 +49,7 @@ DSH 插件「游戏素材大师」：从一张角色设定图出发批量产出�
 | **后台轮询刷新项目 / 任务时，不许用宿主的值整份覆盖编辑草稿** | 有任务在跑时每 2.5~5 秒拉一次 `getProject` / `getImageJob` / `getSequenceJob` / `getRigJob`；无条件覆盖草稿会让用户正在长文本框里替换的提示词一两秒后被打回原形（真机：「我替换的时候它一秒钟又换回来」）。所有 load 走 `mergeDrafts()`：只有「草稿 === 上一次宿主值」的字段才跟着宿主更新；换项目 / 换任务 / 点「重置为默认」才 `force`。`verify-feedback.mjs` 有合并用例，`verify-client.mjs` 逐模块钉住调用点 |
 | 本地自选视频必须与远端生成的产物**同形**，且导入时作废该槽位已有的下游产物 | 两条路只差 `origin` / `originalName` 两个字段，阶段③④才不用改。不作废（尤其是 `frames/<方向>/raw.bin`）就会拿上一段视频的帧去合成——界面看着完全正常，只是动作 / 朝向对不上；同理，导入时要摘掉在跑的远端 `taskId`，否则它稍后会把本地视频覆盖掉。`verify-host.mjs` 的 9d 段逐条钉住这几条 |
 | 生图一律走 `imageprovider.generateImageWithProvider`，模块里不许自己判 `imageProvider` | 分发只在一个地方，漏掉的那一处**不报错**，只是偷偷继续用另一家模型（用户以为换成了自己的服务，其实还在扣火山方舟的钱）。`verify-custom-image.mjs` 会打一台本地假服务端核对端点真的换了 |
+| 透明幕布（`keyBackdrop=transparent`）**只对生图生效，且只有 Seedream 5.5 能开**：`background` 是逐调用点 opt-in，视频 / 转圈提示词保持纯色，透明首帧喂视频前必须先按幕布色铺底 | 全局硬套会打穿两条链路：① 骨骼拆件按「白底 / 颜色距离」分割，突然改成透明会让深色部件被判成背景；② MP4 没有 alpha，透明首帧直接交给视频模型会被压成黑底。`verify-host` 的 2b-2 段钉住请求体、提示词与拒绝路径；`media.toJpegDataUri` 的 matte 支持十六进制色 |
 | 音乐模块：**Key 是凭据**，不进 `saveConfig` 的 `directKeys` | `musicApiKey` 与 `arkApiKey` / `minimaxApiKey` 同一档：`saveConfig` 函数体里 trim 后写入、`maskConfig` 只回 `musicApiKeySet` / hint。加进白名单会原样透传、绕过归一化，而且看起来「保存成功」 |
 | 音乐模块：**新增 payload 字段必须写进 `src/wire.ts`** | typert 会把 schema 外的键静默丢掉。`renderMusicEdit.ops.*` / `runMusicGeneration.params.*` / `saveMusicJob.source.adapted*` / `getMusicJob.lang` 都踩得到；`verify-music-gateway.mjs` 逐键比对 schema 解析结果 |
 | 音乐模块：**下载音频必须按文件头校验，不能只信 `Content-Type`** | Suno 的音频 URL 偶尔会先返回未完成 / 加密的临时对象，`Content-Type` 仍可能是 `audio/mpeg`；只信它会把随机字节落成 `.mp3`，表现是「有歌名但第一首放不了」。`downloadToFile({requireAudio:true})` 用 `sniffBinary` 校验；`ensureLocalSong` 对坏本地文件删除重下（一次重试）；`musicSnapshot` 对坏文件回退远端 URL 并提示刷新。`verify-music` 有「伪音频 + 坏文件修复」两条回归 |
@@ -106,11 +107,11 @@ npm run typecheck    # 只做类型检查
 纯本地自检（不联网、不花钱），改完代码**至少跑这几个**：
 
 ```bash
-node scripts/verify-host.mjs       # 宿主全链路（387 项）
+node scripts/verify-host.mjs       # 宿主全链路（418 项）
 node scripts/verify-client.mjs     # 浏览器半区契约（362 项）
 node scripts/verify-tools.mjs      # 对话调用面（196 项，含常驻工具面 ≤6,000 B 预算）
-node scripts/verify-pipeline.mjs   # 抽帧 / 抠像 / 合成（40 项）
-node scripts/verify-feedback.mjs   # 浏览器半区真渲染（217 项，含功能管理、侧栏菜单、生图后端设置页、语义保存错误与草稿合并）
+node scripts/verify-pipeline.mjs   # 抽帧 / 抠像 / 合成（47 项）
+node scripts/verify-feedback.mjs   # 浏览器半区真渲染（239 项，含功能管理、侧栏菜单、生图后端设置页、语义保存错误与草稿合并）
 node scripts/verify-i18n.mjs       # 中英词条表契约（9 项）
 node scripts/verify-comfy.mjs      # 本地 ComfyUI 后端（124 项，自起 mock ComfyUI，纯本地、不用装 ComfyUI）
 node scripts/verify-custom-image.mjs  # 自定义生图后端三协议（68 项：起本地假服务端，离线、零计费）
@@ -128,7 +129,7 @@ node scripts/verify-iso-pipeline.mjs  # 45° 地图编辑器数据层与导出�
 node scripts/verify-iso-gateway.mjs   # 45° 地图编辑器网关契约（64 项：23 个方法 / schema 逐键不丢 / 模块枚举 / 路由白名单 / AI 回链参数 / objectScale 透传 / isoInspect·isoRender）
 node scripts/verify-iso-client.mjs    # 45° 地图编辑器界面契约（83 项：客户端坐标函数与宿主逐点黄金对照 / 新增素材预览的菱形地格与「滑杆在图片下方」/ 按 z 绘制 / pending·have / 方法表 / AI 对话框与回链）
 
-node scripts/verify-map.mjs            # 地图编辑器几何 / 环绕 / 自动连接 / 标记点 / AI 素材按形态规整与「收口 + 无缝」/ 播放速度 / 清晰度重采样 / 循环方式 / 自动裁边 / 换向与斜接 / 整图（多格印花）的内核（239 项，含反向验证与术语黑名单）
+node scripts/verify-map.mjs            # 地图编辑器几何 / 环绕 / 自动连接 / 标记点 / AI 素材按形态规整与「收口 + 无缝」/ 播放速度 / 清晰度重采样 / 循环方式 / 自动裁边 / 换向与斜接 / 整图（多格印花）的内核（242 项，含反向验证与术语黑名单）
 node scripts/verify-map-agent.mjs      # 地图编辑器 Agent 读模型 / 检查图（35 项：inspect 逐格与预算 / dryRun+ifRevision / render 区域裁切与标记叠加 / 标记语义与 @5 导出 / iso 同链路）
 node scripts/verify-map-pipeline.mjs   # 地图编辑器数据层与流水线（429 项，含 A2 每格 4 条 op、动画循环、翻页图调色板每列一条、dropKeys、标记点 op 与撤销、老文档升级、导出逐字段与真解包的 ZIP）
 node scripts/verify-map-gateway.mjs    # 地图编辑器走真实网关（228 项，含资源路由 403 / 目录穿越 / zip 的 MIME / 并发提交 / 标记 op 的 schema 穿透 / `ai/` 白名单 / AI 素材的形态透传与 openUrl / mapInspect·mapRender·dryRun·标记语义）
@@ -207,6 +208,7 @@ Conventional Commits，中文描述：`feat(rig): …` / `docs: …` / `fix(spri
 | `0.11.1` | 2026-10-27 12:36 | **生图尺寸与抠像底色修复**（`fix(image)` / `fix(chroma)`）：生图输出尺寸统一为**全局设置**（所有模块共用，任务级旧尺寸不再覆盖），支持 `1K` / `2K` / `4K` 与精确 `宽x高`，ComfyUI 工作流没写 `width`/`height` 占位符时自动改 `Empty*` latent 节点；修复「生成的图总是同一尺寸、改了也不行」。新增 `keyColor` 抠像底色（默认 `#00FF00`，内置绿 / 蓝 / 品红 / 青 / 黄 / 红 / 白 / 黑 + 自定义），图片 / 序列帧 / 八方向 / 地图整图 / 45° 物件 / 两套 AI 生成素材入口都可选；绿色保留原判据，非绿走 RGB 距离与通用去溢色；默认生图 / 转圈 / 行走提示词与地图 AI 素材提示词跟随底色替换「绿幕 / #00FF00」，用户原文不改，老项目默认提示词自动迁移，项目可跟随全局或单独覆盖。自检：host 398 / client 362 / tools 196 / feedback 220 / pipeline 47 / custom-image 69 / map 239 / map-pipeline 431 / map-gateway 228 / map-client 478 / iso 42 / iso-pipeline 55 / iso-gateway 64 / iso-client 83。⚠️ 宿主半区改动，需重启 DSH。 |
 | `0.11.2` | 2026-10-27 12:55 | **恢复单任务尺寸**（`fix(image)`）：0.11.1 把输出尺寸收成全局，误伤了「某个任务单独配长宽」。现在全局尺寸只是默认值，图片任务新增「尺寸来源」：默认**跟随全局**（全局改任务跟着改），也可切**自定义**（只影响该任务，不随全局漂移）；`settings.sizeMode` 落盘，老任务按 `global` 兼容。只传 `size` 不传 `sizeMode` 的旧调用方，若与全局不同会自动转成自定义，避免静默忽略。ComfyUI `Empty*` latent 尺寸注入、精确 `宽x高`、抠像底色等 0.11.1 功能保留。自检：host 402 / client 362 / tools 196 / feedback 223 / pipeline 47 / custom-image 69 / map 239 / map-pipeline 431 / map-gateway 228 / map-client 478 / iso 42 / iso-pipeline 55 / iso-gateway 64 / iso-client 83。⚠️ 宿主半区改动，需重启 DSH。 |
 | `0.11.3` | 2026-11-24 14:05 | **DSH 0.2.3 兼容修复**（`fix(dsh)`）：devDependencies 对齐 `cordis 4.2.0-alpha.1` / `dsh-typert-protocol 0.2.3-alpha.2`。修复 DSH 升级后宿主半区 `apply` 失败（`cannot get property "root" without inject`）导致 `gameStudio` 服务未挂载、浏览器所有远程方法 404（面板显示 `gameStudio/listProjects failed … HTTP 404`）；`link:` 安装会优先解析插件仓库自己的旧 `node_modules`。业务代码与 wire 协议未改。自检：host 402 / client 362 / tools 196 / feedback 236 / map-gateway 228 / music-gateway 52 / i18n 9。⚠️ 宿主半区修复，需重启 DSH。 |
+| `0.12.0` | 2026-11-25 03:10 | **Seedream 5.5 原生透明幕布**（`feat(image)`）：火山方舟模型下拉新增 `doubao-seedream-5-5-261028`；设置页新增「幕布」`keyBackdrop` = `color`（纯色幕布 + 本机抠像，默认）/ `transparent`（生图请求带 `background:"transparent"` + `output_format:"png"`，直接拿带 Alpha 的 RGBA PNG，不再绿幕抠像）。透明幕布只对**生图**生效（MP4 没有透明通道，转圈 / 行走视频仍按纯色幕布）；需要 `imageProvider=ark` 且模型为 5.5，不支持时生成前**明确报错**而不是静默退回。默认生图提示词里的「纯色绿幕 / #00FF00」整句会换成「透明背景（真实 RGBA 透明通道）」并可双向切回（视频 / 转圈提示词不动）；用户手写原文一字不改。图片任务、AI 素材整理、地图整图导入都认源图自带的 alpha：`transparentFraction ≥ 2%` 时**跳过抠像**，不再按颜色找背景。透明首帧喂给视频后端前会按当前幕布色铺底（`toJpegDataUri` 支持十六进制 matte），避免透明区域被压成黑底。自检：host 402 → **418**，map 239 → **242**，feedback 236 → **239**，i18n / client / feedback / tools / pipeline / 地图与 45° 四件全部通过。⚠️ 宿主半区改动，需重启 DSH。 |
 
 ### 0.11.0 发布说明（2026-10-26）
 
@@ -268,7 +270,7 @@ Conventional Commits，中文描述：`feat(rig): …` / `docs: …` / `fix(spri
 ### 0.10.0 发布说明（2026-10-24）
 
 `package.json` 是 `0.10.0`。相对已发布的 0.9.2，这是把三段开发合并成的一次发布（内部曾按
-0.10.0 / 0.11.0 / 0.12.0 推进，0.11.0 与 0.12.0 **从未发布到 npm**，git 历史里仍能看到这两个版本号）。
+0.10.0 / 0.11.0 / 0.12.0 推进，当时那版 0.11.0 与 0.12.0 **从未发布到 npm**，git 历史里仍能看到这两个版本号；现在这张表里的 `0.12.0` 是后来重新做的版本）。
 
 #### ① 对话工具面收成单入口（破坏性）
 

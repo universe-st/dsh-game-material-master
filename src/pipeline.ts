@@ -49,7 +49,7 @@ import {
   videoBackendOf
 } from "./videogen.js";
 import { composeSheet, keyGreen, type SheetRow } from "./chroma.js";
-import { applyKeyColorToPrompt } from "./keycolor.js";
+import { applyBackdropToPromptAuto, applyKeyColorToPrompt } from "./keycolor.js";
 import { encodePng } from "./png.js";
 import { zipEntries, type ZipEntry } from "./zip.js";
 import {
@@ -215,7 +215,13 @@ async function generateOne(projectId: string, key: string, promptOverride?: stri
   assertImageProviderReady(config);
 
   const keyColor = project.settings.keyColorOverride === true ? project.settings.keyColor : config.keyColor;
-  const basePrompt = applyKeyColorToPrompt((promptOverride ?? project.prompts.images[key] ?? "").trim(), keyColor, "zh");
+  // 幕布可能是「透明」（Seedream 5.5 原生 Alpha）：默认句式要跟着换，否则会一边要求
+  // 透明通道、一边让模型画绿幕。非默认句式（用户手写的）一个字不动。
+  const basePrompt = applyBackdropToPromptAuto(
+    applyKeyColorToPrompt((promptOverride ?? project.prompts.images[key] ?? "").trim(), keyColor, "zh"),
+    config.keyBackdrop,
+    keyColor
+  );
   if (basePrompt === "") throw new Error("提示词为空，请先填写生图提示词");
   // 统一附加提示词接在每个方向的提示词后面（跨方向的共同注意事项）。
   const suffix = (project.prompts.suffix ?? "").trim();
@@ -242,7 +248,8 @@ async function generateOne(projectId: string, key: string, promptOverride?: stri
       prompt,
       images,
       size: imageSizeOf(config),
-      watermark: imageWatermarkOf(config)
+      watermark: imageWatermarkOf(config),
+      background: config.keyBackdrop === "transparent" ? "transparent" : undefined
     });
 
     const relative = `images/${key}.${result.ext}`;
@@ -422,7 +429,13 @@ async function submitTurnVideo(projectId: string): Promise<void> {
   const startedAt = Date.now();
   try {
     const jpegRel = "videos/turn-first-frame.jpg";
-    const dataUri = await toJpegDataUri(assetPath(projectId, first.file), assetPath(projectId, jpegRel), 1280, 3, videoBackendOf(config) === "toapis" ? "white" : undefined);
+    /**
+     * 透明幕布生出来的首帧是 RGBA PNG，而 MP4 没有透明通道：不铺底色的话 ffmpeg
+     * 会把透明区域压成黑色，视频模型拿到的就是「黑底角色」。这里按当前幕布色铺底，
+     * 后续抽帧 / 抠像仍然按同一套纯色参数走。
+     */
+    const matte = videoBackendOf(config) === "toapis" ? "white" : config.keyBackdrop === "transparent" ? keyColor : undefined;
+    const dataUri = await toJpegDataUri(assetPath(projectId, first.file), assetPath(projectId, jpegRel), 1280, 3, matte);
     const submitted = await submitVideoTask(config, {
       prompt,
       firstFrameImage: dataUri,
@@ -1038,8 +1051,9 @@ export function startVideos(projectId: string, keys?: string[]): { started: bool
 
       try {
         const jpegRel = `videos/${key}-first-frame.jpg`;
-        const dataUri = await toJpegDataUri(assetPath(projectId, image.file), assetPath(projectId, jpegRel), 1280, 3, videoBackendOf(config) === "toapis" ? "white" : undefined);
         const keyColor = fresh.settings.keyColorOverride === true ? fresh.settings.keyColor : config.keyColor;
+        const matte = videoBackendOf(config) === "toapis" ? "white" : config.keyBackdrop === "transparent" ? keyColor : undefined;
+        const dataUri = await toJpegDataUri(assetPath(projectId, image.file), assetPath(projectId, jpegRel), 1280, 3, matte);
         const prompt = applyKeyColorToPrompt((fresh.prompts.videoPerDirection?.[key] ?? fresh.prompts.video).trim(), keyColor, "zh");
         const submitted = await submitVideoTask(config, {
           prompt,

@@ -9,7 +9,7 @@ import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_ROW_ORDER } from "./directions.js";
-import { DEFAULT_KEY_COLOR, normalizeKeyColor } from "./keycolor.js";
+import { DEFAULT_KEY_COLOR, normalizeBackdropMode, normalizeKeyColor, type BackdropMode } from "./keycolor.js";
 import { STUDIO_MODULES } from "./links.js";
 import { MUSIC_DEFAULT_MODEL } from "./musicmodels.js";
 import {
@@ -320,6 +320,13 @@ export interface Config {
 
   /** 抠像底色（`#RRGGBB`，默认纯绿 #00FF00）。角色穿绿衣服时改成蓝 / 品红等。 */
   keyColor: string;
+  /**
+   * 幕布类型：`color`（纯色幕布 + 本机抠像，默认）或 `transparent`
+   * （Seedream 5.5 直接输出带 Alpha 的 PNG，不需要抠像）。
+   *
+   * 透明幕布只对**生图**生效；视频（MP4）没有透明通道，仍按纯色幕布。
+   */
+  keyBackdrop: BackdropMode;
   /** 抠像阈值：绿色优势值（或与 keyColor 的 RGB 距离）低于 keyLow 视为前景，高于 keyHigh 视为背景。 */
   keyLow: number;
   keyHigh: number;
@@ -499,6 +506,7 @@ export const DEFAULT_CONFIG: Config = {
   cropInset: 0,
 
   keyColor: DEFAULT_KEY_COLOR,
+  keyBackdrop: "color",
   keyLow: 14,
   keyHigh: 80,
   despill: 0.65,
@@ -512,6 +520,10 @@ export const DEFAULT_CONFIG: Config = {
 };
 
 export const ARK_MODEL_PRESETS = [
+  // Seedream 5.5 是第一个原生支持透明通道（RGBA）的 Seedream：`background:"transparent"`
+  // + `output_format:"png"` 直接出带 Alpha 的 PNG，再走「设置 → 幕布 = 透明背景」就
+  // 不需要绿幕抠像。它排在第一位，但默认模型仍是 5.0 Flash（成本与行为都不变）。
+  { id: "doubao-seedream-5-5-261028", label: "Seedream 5.5（原生透明背景 · 最新）" },
   // 地图地块模块对几何很敏感：4.0 会把 2:1 等距菱形画成近正方形（实测比例 1.058），
   // 所以它排在最后并明确标注不适合。见 DEFAULT_CONFIG.arkModel 的注释。
   { id: "doubao-seedream-5-0-flash-260915", label: "Seedream 5.0 Flash（默认 · 快且几何准）" },
@@ -690,6 +702,7 @@ export function normalizeConfig(input: unknown): Config {
     cropInset: asNumber(raw.cropInset, DEFAULT_CONFIG.cropInset, 0, 0.2),
 
     keyColor: normalizeKeyColor(raw.keyColor, DEFAULT_CONFIG.keyColor),
+    keyBackdrop: normalizeBackdropMode(raw.keyBackdrop),
     keyLow,
     keyHigh,
     despill: asNumber(raw.despill, DEFAULT_CONFIG.despill, 0, 1),

@@ -321,6 +321,110 @@ async function main() {
   check("改回绿色后提示词还原", /纯色绿幕/.test(colorView.prompts.images.front), colorView.prompts.images.front.slice(0, 80));
   await studio.deleteProject({ projectId: colorProject.projectId });
 
+  // ── 2b-2. Seedream 5.5 透明幕布 ────────────────────────────────────────
+  // 透明幕布是「模型原生输出 Alpha」：配置能存、默认提示词能跟着换、Ark 请求
+  // 真的带上 background/output_format，且不支持的模型会被提前拦下。
+  const viewWithModels = await studio.getConfig();
+  check(
+    "生图模型下拉包含 Seedream 5.5",
+    (viewWithModels.arkModels ?? []).some((model) => model.id === "doubao-seedream-5-5-261028"),
+    JSON.stringify((viewWithModels.arkModels ?? []).map((model) => model.id))
+  );
+
+  const backdropSaved = await studio.saveConfig({ arkModel: "doubao-seedream-5-5-261028", keyBackdrop: "transparent" });
+  check("幕布类型已保存为透明", backdropSaved.keyBackdrop === "transparent", String(backdropSaved.keyBackdrop));
+  check("5.5 + 火山方舟时透明幕布就绪", backdropSaved.transparentBackdropReady === true);
+
+  const transparentProject = await studio.createProject({ name: "透明幕布测试角色" });
+  let transparentView = await studio.getProject({ projectId: transparentProject.projectId, lang: "zh" });
+  check(
+    "透明幕布下默认生图提示词要求真实透明通道",
+    /透明背景/.test(transparentView.prompts.images.front) && /RGBA/.test(transparentView.prompts.images.front) && !/#00FF00/.test(transparentView.prompts.images.front) && !/纯色绿幕/.test(transparentView.prompts.images.front),
+    transparentView.prompts.images.front.slice(-160)
+  );
+  check(
+    "透明幕布下不再出现「绿幕」要求",
+    !/纯色绿幕/.test(transparentView.prompts.images.front) && !/整幅背景颜色/.test(transparentView.prompts.images.front),
+    transparentView.prompts.images.front.slice(-160)
+  );
+  check(
+    "视频提示词仍按纯色幕布（MP4 没有透明通道）",
+    /绿幕/.test(transparentView.prompts.video) && /绿幕/.test(transparentView.prompts.turn)
+  );
+
+  const { defaultPrompts } = await import("../lib/directions.js");
+  const enTransparent = defaultPrompts("en", "#00FF00", "transparent");
+  check(
+    "英文透明提示词没有 green screen",
+    /Transparent background/.test(enTransparent.images.front) && !/Solid green screen/i.test(enTransparent.images.front),
+    enTransparent.images.front.slice(-180)
+  );
+  check("英文视频提示词仍保留 green screen", /green screen/i.test(enTransparent.video));
+
+  const blueTransparent = defaultPrompts("zh", "#0000FF", "transparent");
+  check(
+    "透明幕布 + 蓝幕底色时不再残留蓝幕 / 色值",
+    !/蓝幕|#0000FF/.test(blueTransparent.images.front) && /透明背景/.test(blueTransparent.images.front),
+    blueTransparent.images.front.slice(-160)
+  );
+
+  const backToColor = await studio.saveConfig({ keyBackdrop: "color" });
+  check("幕布类型能切回纯色", backToColor.keyBackdrop === "color");
+  transparentView = await studio.getProject({ projectId: transparentProject.projectId, lang: "zh" });
+  check(
+    "切回纯色后默认提示词还原成绿幕",
+    /纯色绿幕/.test(transparentView.prompts.images.front) && !/透明背景/.test(transparentView.prompts.images.front),
+    transparentView.prompts.images.front.slice(-160)
+  );
+  await studio.deleteProject({ projectId: transparentProject.projectId });
+
+  // Ark 请求体：透明背景必须配 output_format=png。
+  {
+    const { generateImage } = await import("../lib/ark.js");
+    const realFetch = globalThis.fetch;
+    let captured;
+    globalThis.fetch = async (url, init) => {
+      if (String(url).endsWith("/images/generations")) {
+        captured = JSON.parse(init.body);
+        return new Response(JSON.stringify({ data: [{ b64_json: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString("base64") }] }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        });
+      }
+      throw new Error(`意外请求：${url}`);
+    };
+    try {
+      await generateImage({
+        baseUrl: "https://ark.example/api/v3",
+        apiKey: "test-key",
+        model: "doubao-seedream-5-5-261028",
+        prompt: "透明背景的角色",
+        images: [],
+        size: "2K",
+        watermark: false,
+        timeoutMs: 10000,
+        background: "transparent"
+      });
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+    check("5.5 透明请求带 background=transparent", captured?.background === "transparent", JSON.stringify(captured ?? null));
+    check("5.5 透明请求强制 output_format=png", captured?.output_format === "png", String(captured?.output_format));
+  }
+
+  // 不支持的模型：分发层要给出可操作的原因，而不是发出去换 400。
+  {
+    const { normalizeConfig } = await import("../lib/config.js");
+    const { transparentBackdropBlocker } = await import("../lib/imageprovider.js");
+    const blocker55 = transparentBackdropBlocker(normalizeConfig({ keyBackdrop: "transparent", arkModel: "doubao-seedream-5-0-flash-260915" }));
+    check("非 5.5 模型拦下透明幕布并指路", typeof blocker55 === "string" && /Seedream 5\.5/.test(blocker55), String(blocker55));
+    const blockerCustom = transparentBackdropBlocker(normalizeConfig({ keyBackdrop: "transparent", imageProvider: "custom" }));
+    check("自定义生图后端拦下透明幕布", typeof blockerCustom === "string" && /火山方舟/.test(blockerCustom), String(blockerCustom));
+    const blockerColor = transparentBackdropBlocker(normalizeConfig({ keyBackdrop: "color", arkModel: "doubao-seedream-5-0-flash-260915" }));
+    check("纯色幕布不拦任何后端", blockerColor === undefined, String(blockerColor));
+  }
+  await studio.saveConfig({ arkModel: "doubao-seedream-5-0-flash-260915", keyBackdrop: "color" });
+
   // 行序迁移只做一次：没有版本号的旧配置才迁移，之后显式设置一律尊重。
   // loadConfig 有进程内缓存，走 API 测不出来，所以直接测纯函数。
   const { normalizeConfig, ROW_ORDER_VERSION } = await import("../lib/config.js");

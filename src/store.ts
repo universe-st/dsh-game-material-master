@@ -484,7 +484,7 @@ export async function createProject(name: string): Promise<Project> {
   const id = `p${Date.now().toString(36)}${randomUUID().slice(0, 6)}`;
   const now = Date.now();
   const settings = settingsFromConfig(config);
-  const defaults = defaultPrompts("zh", config.keyColor);
+  const defaults = defaultPrompts("zh", config.keyColor, config.keyBackdrop);
   const project: Project = {
     id,
     name: name.trim() === "" ? "未命名项目" : name.trim(),

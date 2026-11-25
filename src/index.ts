@@ -27,12 +27,13 @@ import {
   directionOf,
   localizePrompts,
   applyKeyColorToPrompts,
+  applyBackdropToImagePrompts,
   normalizePromptLang
 } from "./directions.js";
-import { DEFAULT_KEY_COLOR, normalizeKeyColor } from "./keycolor.js";
+import { DEFAULT_KEY_COLOR, normalizeBackdropMode, normalizeKeyColor } from "./keycolor.js";
 import { checkFfmpeg } from "./media.js";
 import { testArk } from "./ark.js";
-import { customImageBlocker, imageModelOf, imageSizeOf, imageProviderBlocker, imageProviderSummary, testCustomImage } from "./imageprovider.js";
+import { customImageBlocker, imageModelOf, imageSizeOf, imageProviderBlocker, imageProviderSummary, testCustomImage, transparentBackdropReady } from "./imageprovider.js";
 import {
   detectComfyBindings,
   fetchComfyObjectInfo,
@@ -296,6 +297,8 @@ export class GameStudioGateway extends TypertRemoteService {
       imageProviderSummary: imageProviderSummary(config),
       /** 当前生效的生图模型（模块里那个只读展示位用它，比 summary 短）。 */
       imageModel: imageModelOf(config),
+      /** 透明幕布当前是否可用（生图后端 = 火山方舟 且模型 = Seedream 5.5）。 */
+      transparentBackdropReady: transparentBackdropReady(config),
       imageProviderSize: imageSizeOf(config),
       videoProviderBackend: videoBackendOf(config),
       videoProviderModel: videoBackendOf(config) === "toapis" ? config.toapisVideoModel : config.minimaxModel,
@@ -358,6 +361,7 @@ export class GameStudioGateway extends TypertRemoteService {
   */
   async saveConfig(payload) {
     const input = asRecord(payload);
+    const before = await loadConfig();
     const patch: any = {};
     const directKeys = [
       "toapisBaseUrl",
@@ -434,6 +438,7 @@ export class GameStudioGateway extends TypertRemoteService {
       "bottomMargin",
       "cropInset",
       "keyColor",
+      "keyBackdrop",
       "keyLow",
       "keyHigh",
       "despill",
@@ -480,6 +485,27 @@ export class GameStudioGateway extends TypertRemoteService {
     if (input.clearComfyCookies === true)
       patch.comfyCookies = "";
     const saved = await saveConfig(patch);
+    /**
+     * 幕布类型变了就把所有项目的**默认句式**同步过去（用户手写的一字不动）。
+     *
+     * 只靠 getProject 懒同步不行：设置页改完回到精灵模块时，项目视图可能还没重新拉，
+     * 用户会看到「设置说透明、提示词还写着绿幕」。这里顺手刷一遍，提示词与生成口径一致。
+     */
+    if (patch.keyBackdrop !== undefined && normalizeBackdropMode(saved.keyBackdrop) !== normalizeBackdropMode(before.keyBackdrop)) {
+      const mode = normalizeBackdropMode(saved.keyBackdrop);
+      for (const summary of await listProjects()) {
+        try {
+          await patchProject(summary.id, (project) => {
+            const color = project.settings.keyColorOverride === true ? project.settings.keyColor : saved.keyColor;
+            project.settings.keyColor = color;
+            applyKeyColorToPrompts(project.prompts, color);
+            applyBackdropToImagePrompts(project.prompts, mode, color);
+          });
+        } catch {
+          /* 单个项目坏了不该让设置保存失败 */
+        }
+      }
+    }
     this.ffmpegCache = undefined;
     // 谱曲依赖路径可能变了；下一次 getConfig / testMusicScore 重新探测。
     clearScoreDepsCache();
@@ -652,15 +678,19 @@ export class GameStudioGateway extends TypertRemoteService {
     const effectiveKeyColor = project.settings.keyColorOverride === true ? project.settings.keyColor : config.keyColor;
     const effectiveChanged = project.settings.keyColor !== effectiveKeyColor;
     if (effectiveChanged) project.settings.keyColor = effectiveKeyColor;
-    // 读项目时把「仍是默认句式」的提示词同步到它的底色，这样老项目 / 刚改过底色的
-    // 项目在界面上看到的就是生成时会用的那一版。
+    // 幕布类型是全局的（透明只有 Seedream 5.5 能出），没在项目里单独存。
+    const backdrop = normalizeBackdropMode(config.keyBackdrop);
+    // 读项目时把「仍是默认句式」的提示词同步到它的底色 / 幕布，这样老项目 / 刚改过
+    // 设置的项目在界面上看到的就是生成时会用的那一版。
     const colorChanged = applyKeyColorToPrompts(project.prompts, effectiveKeyColor);
-    const localized = lang !== undefined ? localizePrompts(project.prompts, lang, effectiveKeyColor) : false;
-    if (colorChanged || localized || effectiveChanged) {
+    const backdropChanged = applyBackdropToImagePrompts(project.prompts, backdrop, effectiveKeyColor);
+    const localized = lang !== undefined ? localizePrompts(project.prompts, lang, effectiveKeyColor, backdrop) : false;
+    if (colorChanged || backdropChanged || localized || effectiveChanged) {
       project = await patchProject(projectId, (draft) => {
         draft.settings.keyColor = effectiveKeyColor;
         applyKeyColorToPrompts(draft.prompts, effectiveKeyColor);
-        if (lang !== undefined) localizePrompts(draft.prompts, lang, effectiveKeyColor);
+        applyBackdropToImagePrompts(draft.prompts, backdrop, effectiveKeyColor);
+        if (lang !== undefined) localizePrompts(draft.prompts, lang, effectiveKeyColor, backdrop);
         return draft;
       });
     }
@@ -759,7 +789,11 @@ export class GameStudioGateway extends TypertRemoteService {
     const effectiveKeyColor = projectForColor?.settings?.keyColorOverride === true
       ? projectForColor.settings.keyColor
       : configured.keyColor;
-    const defaults = defaultPrompts(normalizePromptLang(input.lang), effectiveKeyColor);
+    const defaults = defaultPrompts(
+      normalizePromptLang(input.lang),
+      effectiveKeyColor,
+      normalizeBackdropMode(configured.keyBackdrop)
+    );
     await patchProject(projectId, (project) => {
       // 提示词模板升级后（例如这次把方位语义改对），老项目要能一键重新套用默认值。
       if (resetImages)

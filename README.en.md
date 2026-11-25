@@ -12,7 +12,17 @@ third-party service.
 [![npm](https://img.shields.io/npm/v/dsh-game-material-master?color=blue)](https://www.npmjs.com/package/dsh-game-material-master)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-> **🆕 0.11.3 update**: DSH 0.2.3 compatibility — dev dependencies now match `cordis 4.2.0-alpha.1` /
+> **🆕 0.12.0 update**: **Seedream 5.5 native transparent backdrop** — the model list gains
+> `doubao-seedream-5-5-261028`, and Settings → Keying now has a **Backdrop** choice. With
+> "Transparent background" the image request sends `background:"transparent"` + `output_format:"png"` and
+> returns a real RGBA PNG, so **chroma keying is no longer needed**. Default image prompts swap the whole
+> "solid green screen / #00FF00" sentence for "transparent background (real RGBA alpha channel)" and switch
+> back cleanly; video (MP4) has no alpha, so turn / walk videos still use a solid-color backdrop. Image jobs,
+> AI-asset assembly and map stamp import skip keying when the source already carries alpha. The transparent
+> backdrop requires **backend = Volcengine Ark** and **Seedream 5.5**; otherwise generation fails with a clear
+> message instead of silently falling back.
+>
+> **0.11.3 update**: DSH 0.2.3 compatibility — dev dependencies now match `cordis 4.2.0-alpha.1` /
 > `dsh-typert-protocol 0.2.3-alpha.2`. Fixes the host half failing to mount after a DSH upgrade, which surfaced as
 > `gameStudio/listProjects … HTTP 404` in the panel (with `link:` installs the old protocol read `ctx.root`, which
 > cordis 4.2 rejects, leaving the whole `gameStudio` service unregistered). No business-code or data-format changes;
@@ -416,7 +426,7 @@ dsh plugin --profile web add /path/to/dsh-game-material-master
 ```
 
 The package is published to npm: [dsh-game-material-master](https://www.npmjs.com/package/dsh-game-material-master)
-(currently `0.11.3`, `latest`). It has no runtime dependencies, so `dsh plugin add` is all you need.
+(currently `0.12.0`, `latest`). It has no runtime dependencies, so `dsh plugin add` is all you need.
 
 **DSH version**: `>=0.2.0-rc.2 <0.3.0` (the `engines.dsh` field; since DSH 0.2.1 the plugin manager checks it first).
 When a Web deployment uses `--public-url https://host/prefix/`, deep links and asset URLs include that path prefix.
@@ -446,7 +456,8 @@ installation tree.
 |---|---|
 | Image backend | Pick **Volcengine Ark Seedream** (default) or a **custom image model**; switching here redirects every image-generating module |
 | Volcengine Ark API Key | "Test connection" really generates a 1K thumbnail (a small charge) and validates both the key and the model |
-| Image model | Defaults to `doubao-seedream-5-0-flash-260915`; switchable to 5.0 Pro / Lite / 4.5 |
+| Image model | Defaults to `doubao-seedream-5-0-flash-260915`; switchable to **5.5** (native transparency) / 5.0 Pro / Lite / 4.5 |
+| Backdrop | `Solid color` (default, keyed locally) or `Transparent` (Seedream 5.5 returns a real RGBA PNG, no keying; videos still use a solid-color backdrop) |
 | Custom protocol | One of `OpenAI API` / `ComfyUI API` / `Stable Diffusion WebUI API`; just give the host root URL |
 | Custom parameters | Model name, output size (width x height), negative prompt, steps / CFG / sampler, img2img denoising, seed, timeout |
 | ComfyUI workflow | Paste the whole JSON from "Export (API)"; placeholders `{{prompt}}` `{{width}}` `{{seed}}` `{{image}}` and friends are supported, and a workflow with none runs as-is |
@@ -454,7 +465,7 @@ installation tree.
 | Video model | Defaults to `MiniMax-H3` (v2 protocol); Hailuo / I2V use v1; the UCloud version of H3 is selected explicitly |
 | Base URL | Host root, without `/v1` or `/v2`. `api.minimax.cn` in mainland China, `api.minimaxi.com` internationally |
 | Output size | Default for every image-generating module; accepts `1K` / `2K` / `4K` or `width x height`. An image task can switch its size source to Custom to affect only that task; tasks that follow the global value update with this setting |
-| Key background color | Pure green `#00FF00` by default; switch to magenta / blue / white / black when the character wears green. "Green screen / #00FF00" in generated prompts is replaced accordingly, and every keying entry can pick its own color |
+| Key background color | Used by the solid-color backdrop; pure green `#00FF00` by default; switch to magenta / blue / white / black when the character wears green. "Green screen / #00FF00" in generated prompts is replaced accordingly, and every keying entry can pick its own color |
 | Default parameters | Cell width and height, frame count, pixel block size, keying threshold, and so on |
 | Local ComfyUI (image-to-video) | Routes image-to-video through a local **ComfyUI** instead of MiniMax; "Test connection" is read-only and free |
 | Music generation (Puyue AI) | Puyue AI API key, base URL, default music model and timeouts; "Test connection" reads one page of history and does not generate anything (no generation credits). Generation is billed by platform credits; the plugin does not collect payment |

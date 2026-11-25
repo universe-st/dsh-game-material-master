@@ -1380,6 +1380,16 @@ section("功能管理（隐藏模块）");
     check("缺 Key 时给出「还不能开跑」的提示，而不是静默", textOf(settings).includes("还不能开跑"));
     check("火山方舟那一组标注了当前使用", textOf(settings).includes("当前使用"));
 
+    // 幕布：纯色（默认）/ 透明（Seedream 5.5 原生 Alpha）。选了就要写回宿主。
+    const backdropSelect = collect(settings, (node) => node.props?.["data-testid"] === "cfg-key-backdrop")[0];
+    check("设置页有「幕布」选择器", backdropSelect !== undefined);
+    check(
+      "幕布选项含纯色与透明",
+      JSON.stringify(collect(backdropSelect, (node) => node.type === "option").map((node) => node.props.value)) === JSON.stringify(["color", "transparent"])
+    );
+    backdropSelect.props.onChange({ target: { value: "transparent" } });
+    check("选透明幕布后写回宿主", JSON.stringify(saved.at(-1)) === JSON.stringify({ keyBackdrop: "transparent" }), JSON.stringify(saved.at(-1)));
+
     // 默认协议是 openai：协议下拉、地址、模型名、尺寸、测试按钮都要在。
     check("自定义那一组有协议下拉（三种协议由宿主给）", collect(settings, (node) => node.props?.["data-testid"] === "cfg-custom-protocol").length === 1);
     check("自定义那一组有 Base URL 与模型名输入框", collect(settings, (node) => node.props?.["data-testid"] === "cfg-custom-base-url").length === 1 && collect(settings, (node) => node.props?.["data-testid"] === "cfg-custom-model").length === 1);

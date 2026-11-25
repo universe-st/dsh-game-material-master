@@ -22,7 +22,8 @@ import { decodeToRgba, mimeOf, toDataUri } from "./media.js";
 import { keyGreen } from "./chroma.js";
 import { encodePng } from "./png.js";
 import { appendJobLog, messageOf, readJson, writeJsonAtomic, type JobLogEntry } from "./jsonio.js";
-import { normalizeKeyColor } from "./keycolor.js";
+import { applyBackdropToPromptAuto, normalizeKeyColor } from "./keycolor.js";
+import { transparentFraction } from "./bitmap.js";
 
 export type ItemStatus = "empty" | "running" | "ready" | "error";
 
@@ -289,7 +290,7 @@ export async function generateImageItem(jobId: string, index: number): Promise<v
   const job = await readImageJob(jobId);
   if (job === undefined) throw new Error(`任务不存在：${jobId}`);
   const config = await loadConfig();
-  const prompt = buildPrompt(job);
+  const prompt = applyBackdropToPromptAuto(buildPrompt(job), config.keyBackdrop, config.keyColor);
   if (prompt === "") throw new Error("提示词为空，请先填写");
   assertImageProviderReady(config);
 
@@ -317,7 +318,9 @@ export async function generateImageItem(jobId: string, index: number): Promise<v
       size: job.settings.size || imageSizeOf(config),
       // 水印是火山方舟特有的参数（自定义后端忽略它）。任务上那份是旧版本留下的
       // 覆盖位，仍然尊重；与全局设置取或，两种写法都不会让水印「突然消失」。
-      watermark: imageWatermarkOf(config) || job.settings.watermark === true
+      watermark: imageWatermarkOf(config) || job.settings.watermark === true,
+      // 透明幕布 = 直接要带 Alpha 的 PNG；不支持的模型/后端会在分发层报错。
+      background: config.keyBackdrop === "transparent" ? "transparent" : undefined
     });
 
     const relative = `out/img-${String(index).padStart(2, "0")}.${result.ext}`;
@@ -358,6 +361,19 @@ export async function keyItem(job: ImageJob, index: number): Promise<void> {
   if (item?.file === undefined) return;
   const config = await loadConfig();
   const decoded = await decodeToRgba(imageAssetPath(job.id, item.file), 2048);
+  /**
+   * 已经是带 Alpha 的 PNG（Seedream 5.5 透明幕布 / 用户自己导的透明图）：
+   * 再跑一遍抠像只会白费 CPU，甚至把半透明发丝边缘压坏。直接原样写成 `keyed/`。
+   */
+  const alpha = transparentFraction(decoded);
+  if (alpha >= 0.02) {
+    const relative = `keyed/img-${String(index).padStart(2, "0")}.png`;
+    await writeFile(imageAssetPath(job.id, relative), encodePng(decoded.rgba, decoded.width, decoded.height));
+    item.keyedFile = relative;
+    item.backgroundFraction = undefined;
+    appendJobLog(job.log, "info", `第 ${index + 1} 张自带透明通道（${Math.round(alpha * 100)}% 像素透明），跳过抠像`);
+    return;
+  }
   const result = keyGreen(decoded.rgba, decoded.width, decoded.height, {
     keyColor: job.keying.keyColor || config.keyColor,
     keyLow: job.keying.keyLow,

@@ -186,7 +186,8 @@ function configText(options: GuideOptions): string {
     "配置方法通过 `game_material({action:\"call\", method:\"…\", payload:{…}})` 调用：",
     "- `getConfig()` 读取当前配置；`saveConfig(payload)` 保存。",
     "- `testArk()` / `testCustomImage()` / `testMinimax()` / `testComfy()` / `testMusic()` / `testMusicScore()` / `testSfx()` 测试连接。",
-    "- 生图后端：`imageProvider` = `ark`（火山方舟 Seedream，默认）或 `custom`（用户自己的服务）。",
+    "- 生图后端：`imageProvider` = `ark`（火山方舟 Seedream，默认）/ `custom`（用户自己的服务）/ `toapis`。",
+    "- 幕布：`keyBackdrop` = `color`（纯色幕布 + 本机抠像，默认）或 `transparent`（Seedream 5.5 原生 Alpha PNG，不需要抠像；要求 `imageProvider=ark` 且 `arkModel` 是 Seedream 5.5）。",
     "  - `customProtocol`：`openai` / `comfyui` / `sdwebui`；",
     "  - `customBaseUrl` / `customModel` / `customApiKey` / `customWorkflow` 等按协议填写。",
     "  - 换后端只改 `imageProvider` 一个字段，八方向图 / 图片生成 / 骨骼动画全都跟着走（45°地图编辑器全本地，不走生图后端）。",
@@ -498,6 +499,7 @@ const AI_ASSET_TEXT = [
   "- 细节不能小于一格的 1/4；砖块这类重复单元一格最多排 3/4/5 排；一格 ≤32px 时直接劝用户改用 64px 网格再生成。",
   "- 普通 / 拼块 / 整格：内容铺满、不留边、不要纯色背景、不要自己抠像；",
   "- 整图：当前抠像底色（默认 #00FF00 饱和纯绿、一整片、不要渐变 / 阴影 / 纹理），只画本体，不要地面 / 草地 / 道路 / 天空；背景由 `composeMapAsset` 抠，**不要**为了抠图再跑一次 keyImageJob。",
+  "- 如果配置里 `keyBackdrop = transparent`（Seedream 5.5 原生透明），提示词要写「背景完全透明（真实 RGBA 透明通道）」；`composeMapAsset` / `composeIsoAsset` **不要传 keyColor**，宿主检测到 alpha 会跳过抠像。",
   "",
   "## 审核",
   "auto 模式：自己核对；失败只重跑失败的那一步。manual 模式：每步产出后贴 `openUrl` 并停下等用户说「通过」。"

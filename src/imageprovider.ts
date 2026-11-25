@@ -13,7 +13,7 @@
  */
 
 import { assertToapisReady, generateToapisImage } from "./toapis.js";
-import { generateImage, type ArkResult } from "./ark.js";
+import { generateImage, supportsTransparentBackground, type ArkResult } from "./ark.js";
 import { CUSTOM_PROTOCOL_DEFAULTS, loadConfig, type Config } from "./config.js";
 import { CustomImageError, generateCustomImage } from "./customimage.js";
 
@@ -26,6 +26,11 @@ export interface ProviderImageRequest {
   /** 覆盖模型（部件重绘会用单独的模型）。省略 = 用配置里的当前模型。 */
   model?: string;
   timeoutMs?: number;
+  /**
+   * 请求原生透明背景（RGBA PNG）。只有「生图 + Seedream 5.5」支持；
+   * 不支持的组合会**提前报错**，不会悄悄退回纯色幕布让结果与提示词对不上。
+   */
+  background?: "transparent";
 }
 
 export type ProviderImageResult = ArkResult;
@@ -62,6 +67,29 @@ export function imageSizeOf(config: Config): string {
 export function imageWatermarkOf(config: Config): boolean {
   if (config.imageProvider === "toapis") return false;
   return isCustomProvider(config) ? false : config.arkWatermark;
+}
+
+/**
+ * 当前配置能不能直接生成透明 PNG。
+ *
+ * 只看「生图后端 = 火山方舟」且「模型 = Seedream 5.5」；自定义 / ToAPIs 的透明
+ * 通道语义各家不同，不在这里承诺。
+ */
+export function transparentBackdropReady(config: Config, model?: string): boolean {
+  return config.imageProvider === "ark" && supportsTransparentBackground(model?.trim() || config.arkModel);
+}
+
+/** 透明幕布开不了时的原因（写给用户看，带下一步动作）。 */
+export function transparentBackdropBlocker(config: Config, model?: string): string | undefined {
+  if (config.keyBackdrop !== "transparent") return undefined;
+  const current = model?.trim() || imageModelOf(config);
+  if (config.imageProvider !== "ark") {
+    return `透明幕布只支持火山方舟 Seedream 5.5，当前生图后端是「${imageProviderSummary(config)}」。请切回火山方舟并选 Seedream 5.5，或把幕布改回纯色。`;
+  }
+  if (!supportsTransparentBackground(current)) {
+    return `透明幕布需要 Seedream 5.5（当前模型：${current}）。请在「设置 → 游戏素材大师 → 火山方舟（生图）」里切到 5.5，或把幕布改回纯色。`;
+  }
+  return undefined;
 }
 
 /** 当前请求超时。 */
@@ -120,6 +148,10 @@ export function imageProviderSummary(config: Config): string {
 export async function generateImageWithProvider(request: ProviderImageRequest, signal?: AbortSignal): Promise<ProviderImageResult> {
   const config = await loadConfig();
   assertImageProviderReady(config);
+  if (request.background === "transparent") {
+    const blocker = transparentBackdropBlocker(config, request.model);
+    if (blocker !== undefined) throw new Error(blocker);
+  }
   if (config.imageProvider === "toapis") return generateToapisImage(config, request, signal);
   if (isCustomProvider(config)) {
     return generateCustomImage(
@@ -152,7 +184,8 @@ export async function generateImageWithProvider(request: ProviderImageRequest, s
       images: request.images,
       size: request.size,
       watermark: request.watermark,
-      timeoutMs: request.timeoutMs ?? config.arkTimeoutMs
+      timeoutMs: request.timeoutMs ?? config.arkTimeoutMs,
+      background: request.background === "transparent" ? "transparent" : undefined
     },
     signal
   );

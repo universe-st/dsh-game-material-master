@@ -26,7 +26,14 @@
  *   5. left / right           ← front + back
  */
 
-import { DEFAULT_KEY_COLOR, applyKeyColorToPrompt, type KeyColorLang } from "./keycolor.js";
+import {
+  DEFAULT_KEY_COLOR,
+  applyBackdropToPrompt,
+  applyKeyColorToPrompt,
+  normalizeBackdropMode,
+  type BackdropMode,
+  type KeyColorLang
+} from "./keycolor.js";
 
 export type Compass = "N" | "NE" | "E" | "SE" | "S" | "SW" | "W" | "NW";
 
@@ -336,16 +343,26 @@ export interface PromptBundle {
  *
  * 默认值不止界面要显示，它还真的会发给生图 / 视频模型，所以语言必须跟着 DSH 走：
  * 英文界面下把中文提示词发出去，模型照样能画，但用户读不懂自己在调什么。
+ *
  * @param lang - 目标语言；省略按中文。
+ * @param keyColor - 纯色幕布的颜色。
+ * @param backdrop - `transparent` = 让 Seedream 5.5 直接输出透明 PNG（只作用于
+ *   **生图**提示词；视频提示词仍按纯色幕布，因为 MP4 没有透明通道）。
  */
-export function defaultPrompts(lang: PromptLang = "zh", keyColor: string = DEFAULT_KEY_COLOR): PromptBundle {
+export function defaultPrompts(
+  lang: PromptLang = "zh",
+  keyColor: string = DEFAULT_KEY_COLOR,
+  backdrop: BackdropMode = "color"
+): PromptBundle {
   const template = TEMPLATES[lang] ?? TEMPLATES.zh;
   const colorLang: KeyColorLang = lang === "en" ? "en" : "zh";
+  const mode = normalizeBackdropMode(backdrop);
   const images: Record<string, string> = {};
   for (const direction of DIRECTIONS) {
     const facing = lang === "en" ? direction.facingEn : direction.facing;
     const visibility = lang === "en" ? direction.visibilityEn : direction.visibility;
-    images[direction.key] = applyKeyColorToPrompt(fillImagePrompt(template.image, facing, visibility), keyColor, colorLang);
+    const colored = applyKeyColorToPrompt(fillImagePrompt(template.image, facing, visibility), keyColor, colorLang);
+    images[direction.key] = applyBackdropToPrompt(colored, mode, keyColor, colorLang);
   }
   return {
     images,
@@ -355,8 +372,12 @@ export function defaultPrompts(lang: PromptLang = "zh", keyColor: string = DEFAU
 }
 
 /** 把八方向默认提示词装配成一张表（每个方向一份，可单独编辑）。 */
-export function defaultImagePrompts(lang: PromptLang = "zh", keyColor: string = DEFAULT_KEY_COLOR): Record<string, string> {
-  return defaultPrompts(lang, keyColor).images;
+export function defaultImagePrompts(
+  lang: PromptLang = "zh",
+  keyColor: string = DEFAULT_KEY_COLOR,
+  backdrop: BackdropMode = "color"
+): Record<string, string> {
+  return defaultPrompts(lang, keyColor, backdrop).images;
 }
 
 /** `localizePrompts` 关心的字段（store 的 `prompts` 是它的超集）。 */
@@ -376,9 +397,14 @@ export interface LocalizablePrompts {
  *
  * @returns 是否真的改了——没改就别写盘。
  */
-export function localizePrompts(prompts: LocalizablePrompts, lang: PromptLang, keyColor: string = DEFAULT_KEY_COLOR): boolean {
-  const target = defaultPrompts(lang, keyColor);
-  const other = defaultPrompts(lang === "en" ? "zh" : "en", keyColor);
+export function localizePrompts(
+  prompts: LocalizablePrompts,
+  lang: PromptLang,
+  keyColor: string = DEFAULT_KEY_COLOR,
+  backdrop: BackdropMode = "color"
+): boolean {
+  const target = defaultPrompts(lang, keyColor, backdrop);
+  const other = defaultPrompts(lang === "en" ? "zh" : "en", keyColor, backdrop);
   let changed = false;
   for (const key of DIRECTION_KEYS) {
     const current = prompts.images?.[key];
@@ -459,6 +485,33 @@ export function applyKeyColorToPrompts(prompts: LocalizablePrompts, keyColor: st
         prompts.videoPerDirection[key] = next;
         changed = true;
       }
+    }
+  }
+  return changed;
+}
+
+/**
+ * 把**生图**提示词里的背景描述同步到目标幕布（颜色 / 透明）。
+ *
+ * 只动 `images`：视频提示词（`video` / `turn`）保持纯色幕布 —— MP4 没有透明通道，
+ * 把「绿幕」改成「透明背景」只会让视频模型画出没法抠的东西。
+ * 判定与 `applyKeyColorToPrompts` 同一套：只换内置默认句式，用户手写的一个字不动。
+ */
+export function applyBackdropToImagePrompts(
+  prompts: LocalizablePrompts,
+  backdrop: BackdropMode,
+  keyColor: string = DEFAULT_KEY_COLOR
+): boolean {
+  const mode = normalizeBackdropMode(backdrop);
+  if (prompts.images === undefined) return false;
+  let changed = false;
+  for (const key of DIRECTION_KEYS) {
+    const current = prompts.images[key];
+    if (typeof current !== "string") continue;
+    const next = applyBackdropToPrompt(applyBackdropToPrompt(current, mode, keyColor, "zh"), mode, keyColor, "en");
+    if (next !== current) {
+      prompts.images[key] = next;
+      changed = true;
     }
   }
   return changed;

@@ -10,7 +10,14 @@
 [![npm](https://img.shields.io/npm/v/dsh-game-material-master?color=blue)](https://www.npmjs.com/package/dsh-game-material-master)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-> **🆕 0.11.3 更新**：适配 **DSH 0.2.3** —— 开发依赖对齐到 `cordis 4.2.0-alpha.1` / `dsh-typert-protocol 0.2.3-alpha.2`。
+> **🆕 0.12.0 更新**：支持 **Seedream 5.5 原生透明幕布** —— 模型下拉新增 `doubao-seedream-5-5-261028`；
+> 设置页「抠像」里新增「**幕布**」：选「透明背景」时生图请求带 `background:"transparent"` + `output_format:"png"`，
+> 直接拿带 Alpha 的 RGBA PNG，**不再需要绿幕抠像**。默认生图提示词里的「纯色绿幕 / #00FF00」会整句换成
+> 「透明背景（真实 RGBA 透明通道）」，切回纯色也能还原；视频（MP4）没有透明通道，转圈 / 行走视频仍按纯色幕布。
+> 图片任务 / AI 素材整理 / 地图整图导入检测到源图已带 alpha 时会自动跳过抠像。透明幕布要求
+> **生图后端 = 火山方舟** 且模型为 **Seedream 5.5**，不满足时会在生成前明确报错。
+>
+> **0.11.3 更新**：适配 **DSH 0.2.3** —— 开发依赖对齐到 `cordis 4.2.0-alpha.1` / `dsh-typert-protocol 0.2.3-alpha.2`。
 > 修复升级 DSH 后插件宿主半区未挂载、面板报 `gameStudio/listProjects … HTTP 404` 的问题（`link:` 安装时旧 protocol 会读 `ctx.root`，
 > 新 cordis 直接拒绝，导致整个 `gameStudio` 服务没注册）。业务代码与数据格式无变化；升级后重启 DSH 即可。
 >
@@ -347,7 +354,7 @@ dsh plugin --profile web add /path/to/dsh-game-material-master
 ```
 
 包已发布到 npm：[dsh-game-material-master](https://www.npmjs.com/package/dsh-game-material-master)
-（当前 `0.11.3`，`latest`）。本包没有运行时依赖，`dsh plugin add` 拉下来即可用。
+（当前 `0.12.0`，`latest`）。本包没有运行时依赖，`dsh plugin add` 拉下来即可用。
 
 **DSH 版本**：`>=0.2.0-rc.2 <0.3.0`（`package.json` 的 `engines.dsh`；DSH 0.2.1 起插件管理器优先按它判断兼容性）。
 Web 部署用 `--public-url https://host/prefix/` 时，深链接与产物地址会跟着补路径前缀。
@@ -373,7 +380,8 @@ Windows 注册表里的同名变量 → WinGet / Scoop / Chocolatey 与 `C:\ffmp
 |---|---|
 | 生图后端 | 选**火山方舟 Seedream**（默认）或**自定义生图模型**；换后端只改这一处，所有生图模块都跟着走 |
 | 火山方舟 API Key | 「测试连接」会真实生成一张 1K 小图（少量费用），同时验证 Key 与模型 |
-| 生图模型 | 默认 `doubao-seedream-5-0-flash-260915`，可切 5.0 Pro / Lite / 4.5 |
+| 生图模型 | 默认 `doubao-seedream-5-0-flash-260915`，可切 **5.5**（原生透明背景）/ 5.0 Pro / Lite / 4.5 |
+| 幕布 | `纯色幕布`（默认，本机抠像）或 `透明背景`（Seedream 5.5 直接出 RGBA PNG，不需要抠像；视频仍按纯色幕布） |
 | 自定义生图协议 | `OpenAI API` / `ComfyUI API` / `Stable Diffusion WebUI API` 三选一，填主机根地址即可 |
 | 自定义生图参数 | 模型名、输出尺寸（宽x高）、负面提示词、采样步数 / CFG / 采样器、图生图重绘强度、种子、超时 |
 | ComfyUI 工作流 | 整段粘贴「导出（API）」的 JSON；支持 `{{prompt}}` `{{width}}` `{{seed}}` `{{image}}` 等占位符，不写占位符就原样跑 |
@@ -381,7 +389,7 @@ Windows 注册表里的同名变量 → WinGet / Scoop / Chocolatey 与 `C:\ffmp
 | 视频模型 | 默认 `MiniMax-H3`（v2 协议）；Hailuo / I2V 走 v1；优云智算版 H3 显式选择 |
 | Base URL | 主机根，不含 `/v1` `/v2`。国内 `api.minimax.cn`，国际 `api.minimaxi.com` |
 | 输出尺寸 | 所有生图模块的**默认值**；支持 `1K` / `2K` / `4K` 或 `宽x高`。图片任务可单独把「尺寸来源」切成「自定义」，只影响那一个任务；跟随全局的任务会随这里变化 |
-| 抠像背景色 | 默认纯绿 `#00FF00`；角色穿绿衣服时改成品红 / 蓝 / 白 / 黑等。生成提示词里的「绿幕 / #00FF00」会跟着替换，所有抠像入口都能单独选 |
+| 抠像背景色 | 纯色幕布用；默认纯绿 `#00FF00`；角色穿绿衣服时改成品红 / 蓝 / 白 / 黑等。生成提示词里的「绿幕 / #00FF00」会跟着替换，所有抠像入口都能单独选 |
 | 默认参数 | 单格宽高、抽帧张数、像素块边长、抠像阈值等 |
 | 本地 ComfyUI（图生视频） | 勾选后图生视频改走**本机 ComfyUI**，替代 MiniMax；「测试连接」只读状态、免费 |
 | 音乐生成（谱乐 AI） | 填谱乐 AI API Key、Base URL、默认音乐模型与超时；「测试连接」读一页历史，不产生生成费用。生成按平台积分计费，插件不代收 |

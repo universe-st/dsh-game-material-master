@@ -1009,6 +1009,33 @@ section("12) 客户端静态约束（文本检查）");
   );
 }
 
+// ── 13) 已带透明通道的整图：不要按颜色再抠一遍 ──────────────────────────
+{
+  section("13) 透明通道整图（Seedream 5.5 / 自备透明 PNG）");
+  const transparent = { width: 8, height: 8, rgba: Buffer.alloc(8 * 8 * 4, 0) };
+  for (let i = 0; i < 16; i++) {
+    const p = i * 4;
+    transparent.rgba[p] = 240;
+    transparent.rgba[p + 1] = 240;
+    transparent.rgba[p + 2] = 240;
+    transparent.rgba[p + 3] = 255;
+  }
+  let called = 0;
+  const skipped = tiles.keyStampBackground(transparent, () => {
+    called++;
+    return { rgba: transparent.rgba, backgroundFraction: 1 };
+  });
+  check("已带 alpha 的整图跳过绿幕抠像", skipped.alpha === true && called === 0 && skipped.keyed === 0);
+  check("跳过抠像时原图字节原样保留", skipped.bitmap === transparent);
+  const opaque = { width: 8, height: 8, rgba: Buffer.alloc(8 * 8 * 4, 255) };
+  let opaqueCalled = 0;
+  const keyed = tiles.keyStampBackground(opaque, () => {
+    opaqueCalled++;
+    return { rgba: opaque.rgba, backgroundFraction: 0.5 };
+  });
+  check("没有 alpha 的整图仍然按颜色抠", opaqueCalled === 1 && keyed.keyed === 0.5 && keyed.alpha !== true);
+}
+
 console.log(`\n${failures.length === 0 ? "全部通过" : "有失败"}：${passed} 项通过${failures.length > 0 ? `，${failures.length} 项失败` : ""}`);
 if (failures.length > 0) {
   for (const failure of failures) console.log(`  ✗ ${failure}`);

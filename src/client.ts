@@ -2074,11 +2074,33 @@
       "抠掉背景色（只留建筑本体）": "Key out the background color (keep only the object)",
       "抠掉背景色": "Key out the background color",
       "抠像背景色（全局默认）": "Key background color (global default)",
+      "幕布": "Backdrop",
+      "纯色幕布（生成后抠像）": "Solid-color backdrop (key it out afterwards)",
+      "透明背景（Seedream 5.5 原生通道）": "Transparent background (Seedream 5.5 native alpha)",
+      "透明幕布已就绪：生图会直接返回带 Alpha 的 PNG，不需要抠像；默认生图提示词也会改成「透明背景」。视频（MP4）没有透明通道，转圈 / 行走视频仍按纯色幕布处理。": "Transparent backdrop is ready: images come back as PNGs with a real alpha channel, so no chroma keying is needed, and the default image prompts switch to \"transparent background\". Video (MP4) has no alpha channel, so the turn / walk videos still use a solid-color backdrop.",
+      "透明幕布需要「生图后端 = 火山方舟」且模型为 Seedream 5.5：请在「火山方舟（生图）」里切到 5.5，或把幕布改回纯色。": "A transparent backdrop needs \"Image backend = Volcengine Ark\" and the Seedream 5.5 model: switch to 5.5 under \"Volcengine Ark (image)\", or set the backdrop back to a solid color.",
+      "纯色幕布：模型画一块纯绿 / 蓝幕等背景，生成后在本机抠掉。想直接拿到透明 PNG，把幕布改成「透明背景」并使用 Seedream 5.5。": "Solid-color backdrop: the model paints a flat green / blue screen and the plugin keys it out locally. To get a transparent PNG directly, set the backdrop to \"Transparent background\" and use Seedream 5.5.",
+      "    ⚠️ **背景必须完全透明**（真实 RGBA 透明通道，一整片、不要渐变 / 阴影 / 纹理 / 反光）：": "    WARNING: **the background must be fully transparent** (a real RGBA alpha channel, one flat area - no gradient, shadow, texture or reflections):",
+      "      · 建筑之外完全透明；插件会直接使用 alpha 通道，所以你**不用**自己抠图，也不要做半透明边缘；": "      - everything outside the building is fully transparent; the plugin uses the alpha channel directly, so you do **not** need to cut it out yourself and must not paint semi-transparent edges;",
+      "      · 边缘要干净（不要描边、不要外发光），细枝条 / 旗绳这类细长得单独成线的部分尽量少画。": "      - edges must be clean (no outline, no glow), and keep thin single-line details such as twigs and flag ropes to a minimum.",
+      "画法要求：**只画物件本体、背景完全透明**（上面整图那段写了）—— 插件会直接使用透明通道，剩下的部分要铺满、不留白边。": "Painting rules: **only the object itself on a fully transparent background** (see the stamp section above) - the plugin uses the alpha channel directly; what remains must fill the frame with no white margins.",
+      "  ⚠️ 整图**不要**自己去抠像（别为了抠图再跑一次 image 模块的 keyImageJob）：`composeMapAsset` 会直接使用透明通道、再按占格切片。生成完直接把原图路径交给它。": "  WARNING: for stamps do **not** run keying yourself (do not call the image module's keyImageJob just to cut it out): `composeMapAsset` uses the alpha channel directly and then slices by the cell span. Hand it the generated image paths directly.",
+      "第四步 · 整理并回链：game_material({action:'call', method:'composeMapAsset', payload:{projectId:'{n0}', name:'{n1}', files:[<上面那些绝对路径，按顺序>], shape:'<你选的形态：plain|corner16|a2quad|stamp>'}})": "Step 4 - Assemble and post the link: game_material({action:'call', method:'composeMapAsset', payload:{projectId:'{n0}', name:'{n1}', files:[<those absolute paths, in order>], shape:'<the shape you chose: plain|corner16|a2quad|stamp>'}})",
+      "  源图已带透明通道：**不要**给 composeMapAsset 传 keyColor —— 宿主检测到 alpha 会直接跳过抠像。": "  The source images already have an alpha channel: do **not** pass keyColor to composeMapAsset - the host detects alpha and skips keying.",
+      "    帧数 = {n3}：帧数 1 就是静态一张；大于 1 时**每帧都是一整张画**（动作的每一帧都完整画出这栋建筑，不要只画局部），每帧的背景也都保持完全透明。": "    Frames = {n3}: one frame means a single static picture; with more, **every frame is a whole picture** (draw the entire building in each frame, not a fragment), and every frame keeps a fully transparent background.",
+      "    菱形外面**完全透明**（真实 RGBA 透明通道，一整片、不要渐变 / 阴影 / 纹理）；菱形里面才是地表材质。": "    Outside the diamond must be **fully transparent** (a real RGBA alpha channel, one flat area - no gradient, shadow or texture); only the diamond contains the ground material.",
+      "    背景必须**完全透明**（真实 RGBA 透明通道，一整片、不要渐变 / 阴影 / 纹理）；只画本体，不要画草地 / 道路 / 天空。": "    The background must be **fully transparent** (a real RGBA alpha channel, one flat area - no gradient, shadow or texture); draw only the object, no grass / road / sky.",
+      "    多帧时每帧都是一整张物件（动作的每一帧都完整画出），背景也保持完全透明。": "    For multiple frames, each frame is a complete object (draw the whole object every frame), and the background stays fully transparent.",
+      "画法要求：内容要铺满该有的范围、不要留白边；不要自己抠图 —— `composeIsoAsset` 会直接使用透明通道、裁边并缩进菱形 / 占格。": "Rendering requirements: fill the intended area with no white margins; do not cut it out yourself - `composeIsoAsset` uses the alpha channel directly, crops the edges and fits it into the diamond / footprint.",
+      "第四步 · 整理并回链：game_material({action:'call', method:'composeIsoAsset', payload:{projectId:'{n0}', name:'{n1}', files:[<上面那些绝对路径，按顺序>], kind:'<ground 或 object>', footprint:<物件时给 {{cols:{n2},rows:{n3}}}>}})": "Step 4 - assemble and post the link: game_material({action:'call', method:'composeIsoAsset', payload:{projectId:'{n0}', name:'{n1}', files:[<those absolute paths, in order>], kind:'<ground or object>', footprint:<for objects: {{cols:{n2},rows:{n3}}}>}})",
+      "  源图已带透明通道：**不要**给 composeIsoAsset 传 keyColor —— 宿主检测到 alpha 会直接跳过抠像。": "  The source images already have an alpha channel: do **not** pass keyColor to composeIsoAsset - the host detects alpha and skips keying.",
+      "⚠️ 如果 composeIsoAsset 的 notes 说比例不是 2:1，**不要**自动重跑（重跑要花真钱）：照常贴链接，并在回答里原样告诉用户。": "WARNING: if composeIsoAsset's notes say the ratio is not 2:1, do NOT re-run automatically (a re-run costs real money): post the link as usual and quote that line to the user.",
       "第四步 · 整理并回链：game_material({action:'call', method:'composeMapAsset', payload:{projectId:'{n0}', name:'{n1}', files:[<上面那些绝对路径，按顺序>], shape:'<你选的形态：plain|corner16|a2quad|stamp>', keyColor:'{n2}'}})": "Step 4 - Assemble and post the link: game_material({action:'call', method:'composeMapAsset', payload:{projectId:'{n0}', name:'{n1}', files:[<those absolute paths, in order>], shape:'<the shape you chose: plain|corner16|a2quad|stamp>', keyColor:'{n2}'}})",
       "  抠像底色是 {n0}：composeMapAsset 必须带上 keyColor:'{n0}'，与提示词里的背景色一致。": "  The key color is {n0}: composeMapAsset must pass keyColor:'{n0}' so keying matches the prompt background.",
       "第四步 · 整理并回链：game_material({action:'call', method:'composeIsoAsset', payload:{projectId:'{n0}', name:'{n1}', files:[<上面那些绝对路径，按顺序>], kind:'<ground 或 object>', footprint:<物件时给 {{cols:{n2},rows:{n3}}}>, keyColor:'{n4}'}})": "Step 4 - assemble and post the link: game_material({action:'call', method:'composeIsoAsset', payload:{projectId:'{n0}', name:'{n1}', files:[<those absolute paths, in order>], kind:'<ground or object>', footprint:<for objects: {{cols:{n2},rows:{n3}}}>, keyColor:'{n4}'}})",
       "  抠像底色是 {n0}：composeIsoAsset 必须带上 keyColor:'{n0}'，与提示词里的背景色一致。": "  The key color is {n0}: composeIsoAsset must pass keyColor:'{n0}' so keying matches the prompt background.",
-      "1K / 2K / 4K 由模型决定像素；要固定尺寸请直接填 宽x高": "1K / 2K / 4K are model-defined pixel sizes; enter width x height to pin exact dimensions",
+      "Seedream 5.5 支持原生透明通道：想让生图直接输出带 Alpha 的 PNG（不用绿幕抠像），把「抠像 → 幕布」改成「透明背景」。": "Seedream 5.5 supports a native alpha channel: to have images come back as RGBA PNGs (no chroma keying), set \"Keying → Backdrop\" to \"Transparent background\".",
+      "1K / 2K / 4K 由模型决定像素；Seedream 5.5 支持 1K / 1.5K / 2K，要固定尺寸请直接填 宽x高": "1K / 2K / 4K are model-defined pixel sizes; Seedream 5.5 supports 1K / 1.5K / 2K. Enter width x height to pin exact dimensions",
       "尺寸来源": "Size source",
       "跟随全局（{n0}）": "Follow global ({n0})",
       "任务尺寸": "Task size",
@@ -2410,6 +2432,57 @@
       }
       return "#00FF00";
     }
+    /**
+     * 透明幕布：把模板里的绿幕说法换成透明说法。
+     *
+     * 只用于**拼给模型看的模板行**（调用方保证用户原文那一行原样跳过）；
+     * 不碰单个颜色字，避免把「绿色史莱姆」改成「透明史莱姆」。
+     */
+    function applyTransparentText(text) {
+      if (typeof text !== "string") return text;
+      let out = text;
+      const pairs = [
+        ["不要用绿幕背景", "不要画任何背景"],
+        ["不要用绿幕", "不要画任何背景"],
+        ["#00FF00 那种饱和纯绿", "真实 RGBA 透明通道"],
+        ["纯绿幕（#00FF00", "完全透明（真实 RGBA 透明通道"],
+        ["建筑之外全是绿幕，绿幕会由插件自动抠成透明", "建筑之外完全透明，插件会直接使用 alpha 通道"],
+        ["绿幕会由插件自动抠成透明", "插件会直接使用 alpha 通道"],
+        ["同一片绿", "同一片透明"],
+        ["绿色描边", "描边"],
+        ["绿色外发光", "外发光"],
+        ["纯绿幕", "完全透明"],
+        ["绿幕背景", "透明背景"],
+        ["绿幕", "透明背景"],
+        ["#00FF00", "透明"],
+        ["no green-screen background", "no background at all"],
+        ["green screen background", "transparent background"],
+        ["pure green screen", "fully transparent background"],
+        ["the same green", "the same transparent background"],
+        ["green outline", "outline"],
+        ["green glow", "glow"],
+        ["green screen", "transparent background"],
+        ["#00FF00", "transparent"]
+      ];
+      for (const [from, to] of pairs) out = out.split(from).join(to);
+      // 其它底色（蓝幕 / 品红幕…）也可能出现在模板里，同样换成透明说法。
+      for (const screen of ["蓝幕", "品红幕", "青幕", "黄幕", "红幕", "白幕", "黑幕"]) {
+        out = out.split(`纯${screen}`).join("完全透明");
+        out = out.split(`${screen}背景`).join("透明背景");
+        out = out.split(screen).join("透明背景");
+      }
+      for (const screen of ["blue screen", "magenta screen", "cyan screen", "yellow screen", "red screen", "white screen", "black screen"]) {
+        out = out.split(`pure ${screen}`).join("fully transparent background");
+        out = out.split(`${screen} background`).join("transparent background");
+        out = out.split(screen).join("transparent background");
+      }
+      return out;
+    }
+    /** 拼提示词时的统一入口：透明度优先，其余仍走换色逻辑。 */
+    function applyBackdropText(text, backdrop, value) {
+      const colored = applyKeyColorText(text, value);
+      return backdrop === "transparent" ? applyTransparentText(colored) : colored;
+    }
     /** 把内置默认提示词里的「绿幕」换成当前底色；绿色保持原样（逐字兼容旧提示词）。 */
     function applyKeyColorText(text, value) {
       const color = normalizeKeyColorHex(value);
@@ -2469,8 +2542,11 @@
       stampRows?: number;
       /** 抠像底色；提示词里的「绿幕 / #00FF00」按它替换。 */
       keyColor?: string;
+      /** `transparent` = Seedream 5.5 直接出透明 PNG，模板里的绿幕要求要换成透明要求。 */
+      backdrop?: string;
     }): string {
       const shape = ASSET_SHAPES.includes(input.shape) ? input.shape : "auto";
+      const transparent = input.backdrop === "transparent";
       const fixed = shape !== "auto";
       const keyColorHex = normalizeKeyColorHex(input.keyColor);
       /** 整图需要「占几格」：用户指定了就按指定的，没指定就按 3×3 的常见尺寸让 agent 用。 */
@@ -2559,12 +2635,20 @@
         lines.push(
           T("  【整图】只画**一整张**完整的画（整张图就是这栋建筑 / 这座雕像本身，**不要**分格、**不要**画成 N×N 的格子拼图、不要裁成小块）："),
           T("    它会被切成 {n0}×{n1} 格贴到地图上（一共 {n2} 格），所以构图要按「整张画」来；四边不留白边、也不要在画外再留一圈背景。", { n0: String(stampCols), n1: String(stampRows), n2: String(stampCols * stampRows) }),
-          T("    ⚠️ **背景必须是纯绿幕**（#00FF00 那种饱和纯绿，一整片、不要渐变 / 阴影 / 纹理 / 反光）："),
+          transparent
+            ? T("    ⚠️ **背景必须完全透明**（真实 RGBA 透明通道，一整片、不要渐变 / 阴影 / 纹理 / 反光）：")
+            : T("    ⚠️ **背景必须是纯绿幕**（#00FF00 那种饱和纯绿，一整片、不要渐变 / 阴影 / 纹理 / 反光）："),
           T("      · 只画建筑本体（墙、门、屋顶、旗子这类实体），**不要画地面 / 草地 / 泥土 / 道路 / 天空** —— 地图上已经有地砖了，画进去就会多出一块方形地面；"),
-          T("      · 建筑之外全是绿幕，绿幕会由插件自动抠成透明，所以你**不用**自己抠图，也不要做半透明边缘；"),
-          T("      · 抠出来的边缘要干净（不要绿色描边、不要绿色外发光），细枝条 / 旗绳这类细长得单独成线的部分尽量少画。"),
+          transparent
+            ? T("      · 建筑之外完全透明；插件会直接使用 alpha 通道，所以你**不用**自己抠图，也不要做半透明边缘；")
+            : T("      · 建筑之外全是绿幕，绿幕会由插件自动抠成透明，所以你**不用**自己抠图，也不要做半透明边缘；"),
+          transparent
+            ? T("      · 边缘要干净（不要描边、不要外发光），细枝条 / 旗绳这类细长得单独成线的部分尽量少画。")
+            : T("      · 抠出来的边缘要干净（不要绿色描边、不要绿色外发光），细枝条 / 旗绳这类细长得单独成线的部分尽量少画。"),
           T("    视角按常见的 2D 俯视建筑来：正面能看出是什么、底座贴着画面下沿，人物会从它前面或后面走过（哪些格能走会在导入时由用户点选，你不用猜）。"),
-          T("    帧数 = {n3}：帧数 1 就是静态一张；大于 1 时**每帧都是一整张画**（动作的每一帧都完整画出这栋建筑，不要只画局部），每帧的背景也都是同一片绿。", { n3: String(frames) })
+          transparent
+            ? T("    帧数 = {n3}：帧数 1 就是静态一张；大于 1 时**每帧都是一整张画**（动作的每一帧都完整画出这栋建筑，不要只画局部），每帧的背景也都保持完全透明。", { n3: String(frames) })
+            : T("    帧数 = {n3}：帧数 1 就是静态一张；大于 1 时**每帧都是一整张画**（动作的每一帧都完整画出这栋建筑，不要只画局部），每帧的背景也都是同一片绿。", { n3: String(frames) })
         );
       }
       if (shape === "a2quad" || !fixed) {
@@ -2578,7 +2662,9 @@
       lines.push(
         "",
         shape === "stamp"
-          ? T("画法要求：**只画物件本体、背景是纯绿幕**（上面整图那段写了）—— 插件会把绿抠成透明，剩下的部分要铺满、不留白边。")
+          ? transparent
+            ? T("画法要求：**只画物件本体、背景完全透明**（上面整图那段写了）—— 插件会直接使用透明通道，剩下的部分要铺满、不留白边。")
+            : T("画法要求：**只画物件本体、背景是纯绿幕**（上面整图那段写了）—— 插件会把绿抠成透明，剩下的部分要铺满、不留白边。")
           : T("画法要求：内容要铺满、不要留边；不要用绿幕背景、也不要做抠像 —— 地图素材要的是不透明的方块。")
       );
       /**
@@ -2623,14 +2709,23 @@
       lines.push(
         "",
         shape === "stamp" || !fixed
-          ? T("  ⚠️ 整图**不要**自己去抠像（别为了抠图再跑一次 image 模块的 keyImageJob）：`composeMapAsset` 会先抠绿幕、再按占格切片。生成完直接把原图路径交给它。")
+          ? transparent
+            ? T("  ⚠️ 整图**不要**自己去抠像（别为了抠图再跑一次 image 模块的 keyImageJob）：`composeMapAsset` 会直接使用透明通道、再按占格切片。生成完直接把原图路径交给它。")
+            : T("  ⚠️ 整图**不要**自己去抠像（别为了抠图再跑一次 image 模块的 keyImageJob）：`composeMapAsset` 会先抠绿幕、再按占格切片。生成完直接把原图路径交给它。")
           : null,
-        T("第四步 · 整理并回链：game_material({action:'call', method:'composeMapAsset', payload:{projectId:'{n0}', name:'{n1}', files:[<上面那些绝对路径，按顺序>], shape:'<你选的形态：plain|corner16|a2quad|stamp>', keyColor:'{n2}'}})", {
-          n0: input.projectId,
-          n1: input.name,
-          n2: keyColorHex
-        }),
-        T("  抠像底色是 {n0}：composeMapAsset 必须带上 keyColor:'{n0}'，与提示词里的背景色一致。", { n0: keyColorHex }),
+        transparent
+          ? T("第四步 · 整理并回链：game_material({action:'call', method:'composeMapAsset', payload:{projectId:'{n0}', name:'{n1}', files:[<上面那些绝对路径，按顺序>], shape:'<你选的形态：plain|corner16|a2quad|stamp>'}})", {
+              n0: input.projectId,
+              n1: input.name
+            })
+          : T("第四步 · 整理并回链：game_material({action:'call', method:'composeMapAsset', payload:{projectId:'{n0}', name:'{n1}', files:[<上面那些绝对路径，按顺序>], shape:'<你选的形态：plain|corner16|a2quad|stamp>', keyColor:'{n2}'}})", {
+              n0: input.projectId,
+              n1: input.name,
+              n2: keyColorHex
+            }),
+        transparent
+          ? T("  源图已带透明通道：**不要**给 composeMapAsset 传 keyColor —— 宿主检测到 alpha 会直接跳过抠像。")
+          : T("  抠像底色是 {n0}：composeMapAsset 必须带上 keyColor:'{n0}'，与提示词里的背景色一致。", { n0: keyColorHex }),
         shape === "stamp" || !fixed
           ? T("  整图还要多给「占几格」：shape:'stamp', stampCols:{n0}, stampRows:{n1}（每张源图 = 一帧的整张画；区域留给用户在导入时点）。", { n0: String(stampCols), n1: String(stampRows) })
           : null,
@@ -2646,7 +2741,7 @@
       // 否则「绿色史莱姆」会被蓝幕配置改成「蓝色史莱姆」。
       const userLine = input.prompt.trim();
       return lines
-        .map((line) => (line === userLine ? line : applyKeyColorText(line, input.keyColor)))
+        .map((line) => (line === userLine ? line : applyBackdropText(line, input.backdrop, input.keyColor)))
         .join("\n");
     }
 
@@ -2669,9 +2764,12 @@
       footprint: { cols: number; rows: number };
       /** 抠像底色；提示词里的「绿幕 / #00FF00」按它替换。 */
       keyColor?: string;
+      /** `transparent` = Seedream 5.5 直接出透明 PNG，模板里的绿幕要求要换成透明要求。 */
+      backdrop?: string;
     }): string {
       const kind = input.kind === "ground" || input.kind === "object" ? input.kind : "auto";
       const fixed = kind !== "auto";
+      const transparent = input.backdrop === "transparent";
       const keyColorHex = normalizeKeyColorHex(input.keyColor);
       const frames = Math.min(ASSET_FRAMES_MAX, Math.max(ASSET_FRAMES_MIN, Math.round(input.frames)));
       const animated = frames > 1;
@@ -2715,7 +2813,9 @@
       if (kind === "ground" || !fixed) {
         lines.push(
           T("  【地面】每张图只画**一块 2:1 菱形**（宽 = {n0}，高 = 宽的一半），不要画成一排 / 网格 / 多块：", { n0: String(input.cell.width) }),
-          T("    菱形外面是**纯绿幕**（#00FF00 那种饱和纯绿，一整片、不要渐变 / 阴影 / 纹理）；菱形里面才是地表材质。"),
+          transparent
+            ? T("    菱形外面**完全透明**（真实 RGBA 透明通道，一整片、不要渐变 / 阴影 / 纹理）；菱形里面才是地表材质。")
+            : T("    菱形外面是**纯绿幕**（#00FF00 那种饱和纯绿，一整片、不要渐变 / 阴影 / 纹理）；菱形里面才是地表材质。"),
           T("    材质要铺满整块菱形，不要描边、不要暗边、不要网格线；菱形四条边都要能和同一张图相接 —— 相邻两格拼起来不能出现深色缝。"),
           T("    多帧时每张都是一整块菱形的一帧；帧之间除该动的部分外保持同构图 / 同色调。")
         );
@@ -2723,14 +2823,20 @@
       if (kind === "object" || !fixed) {
         lines.push(
           T("  【物件】每张图只画**一个完整物件**（不要分格、不要画成一排、不要画地面）："),
-          T("    背景必须是**纯绿幕**（#00FF00 那种饱和纯绿，一整片、不要渐变 / 阴影 / 纹理）；只画本体，不要画草地 / 道路 / 天空。"),
+          transparent
+            ? T("    背景必须**完全透明**（真实 RGBA 透明通道，一整片、不要渐变 / 阴影 / 纹理）；只画本体，不要画草地 / 道路 / 天空。")
+            : T("    背景必须是**纯绿幕**（#00FF00 那种饱和纯绿，一整片、不要渐变 / 阴影 / 纹理）；只画本体，不要画草地 / 道路 / 天空。"),
           T("    底座贴着画面下沿，正面 / 3/4 视角；物件会被按「占 {n0}×{n1} 格」缩放，构图要完整、不要被裁掉。", { n0: String(footprint.cols), n1: String(footprint.rows) }),
-          T("    多帧时每帧都是一整张物件（动作的每一帧都完整画出），背景也是同一片绿。")
+          transparent
+            ? T("    多帧时每帧都是一整张物件（动作的每一帧都完整画出），背景也保持完全透明。")
+            : T("    多帧时每帧都是一整张物件（动作的每一帧都完整画出），背景也是同一片绿。")
         );
       }
       lines.push(
         "",
-        T("画法要求：内容要铺满该有的范围、不要留白边；不要自己抠图 —— `composeIsoAsset` 会抠绿、裁边并缩进菱形 / 占格。"),
+        transparent
+          ? T("画法要求：内容要铺满该有的范围、不要留白边；不要自己抠图 —— `composeIsoAsset` 会直接使用透明通道、裁边并缩进菱形 / 占格。")
+          : T("画法要求：内容要铺满该有的范围、不要留白边；不要自己抠图 —— `composeIsoAsset` 会抠绿、裁边并缩进菱形 / 占格。"),
         T("一格只有 {n0}px：任何细节不能小于一格的 1/4（约 {n1}px）；比这更细的纹理缩到格子上会糊成色雾。", { n0: String(input.cell.width), n1: String(Math.max(3, Math.round(input.cell.width / 4))) }),
         "",
         T("第三步 · 生成："),
@@ -2741,19 +2847,25 @@
           ? T("② 再让它动起来并抽帧：createSequenceJob({name}) → game_material({action:'upload', module:'sequence', id, kind:'firstFrame', path:<首帧绝对路径>}) → runSequenceVideo({jobId}) → game_material({action:'wait'}) → runSequenceFrames({jobId, count:{n0}}) → game_material({action:'wait'})；然后 getSequenceJob({jobId}) 取 dir 与 frames.files，按顺序取前 {n0} 帧的绝对路径 = dir + '/' + file。", { n0: String(frames) })
           : T("然后 getImageJob({jobId}) 取 dir 与 items[]，按顺序取前 {n0} 张的绝对路径 = dir + '/' + file。", { n0: String(frames) }),
         "",
-        T("第四步 · 整理并回链：game_material({action:'call', method:'composeIsoAsset', payload:{projectId:'{n0}', name:'{n1}', files:[<上面那些绝对路径，按顺序>], kind:'<ground 或 object>', footprint:<物件时给 {{cols:{n2},rows:{n3}}}>, keyColor:'{n4}'}})", { n0: input.projectId, n1: input.name, n2: String(footprint.cols), n3: String(footprint.rows), n4: keyColorHex }),
-        T("  抠像底色是 {n0}：composeIsoAsset 必须带上 keyColor:'{n0}'，与提示词里的背景色一致。", { n0: keyColorHex }),
+        transparent
+          ? T("第四步 · 整理并回链：game_material({action:'call', method:'composeIsoAsset', payload:{projectId:'{n0}', name:'{n1}', files:[<上面那些绝对路径，按顺序>], kind:'<ground 或 object>', footprint:<物件时给 {{cols:{n2},rows:{n3}}}>}})", { n0: input.projectId, n1: input.name, n2: String(footprint.cols), n3: String(footprint.rows) })
+          : T("第四步 · 整理并回链：game_material({action:'call', method:'composeIsoAsset', payload:{projectId:'{n0}', name:'{n1}', files:[<上面那些绝对路径，按顺序>], kind:'<ground 或 object>', footprint:<物件时给 {{cols:{n2},rows:{n3}}}>, keyColor:'{n4}'}})", { n0: input.projectId, n1: input.name, n2: String(footprint.cols), n3: String(footprint.rows), n4: keyColorHex }),
+        transparent
+          ? T("  源图已带透明通道：**不要**给 composeIsoAsset 传 keyColor —— 宿主检测到 alpha 会直接跳过抠像。")
+          : T("  抠像底色是 {n0}：composeIsoAsset 必须带上 keyColor:'{n0}'，与提示词里的背景色一致。", { n0: keyColorHex }),
         T("  `kind` 必须和这次实际画的一致；不要传 `auto`。物件必须给 footprint；地面不需要。"),
         T("  把这次调用返回的 openUrl **原样**贴成 Markdown 链接（例如 [回到 45° 地图编辑器](…)）：点开就回到项目、素材窗口展开、"),
         T("「新增素材」里这张图与用途 / 帧数 / 占格都已经预选好，用户点「确定」才真的导入。"),
-        T("⚠️ 如果 composeIsoAsset 的 notes 说比例不是 2:1 或没检测到绿幕，**不要**自动重跑（重跑要花真钱）：照常贴链接，并在回答里原样告诉用户。"),
+        transparent
+          ? T("⚠️ 如果 composeIsoAsset 的 notes 说比例不是 2:1，**不要**自动重跑（重跑要花真钱）：照常贴链接，并在回答里原样告诉用户。")
+          : T("⚠️ 如果 composeIsoAsset 的 notes 说比例不是 2:1 或没检测到绿幕，**不要**自动重跑（重跑要花真钱）：照常贴链接，并在回答里原样告诉用户。"),
         "",
         T("审核模式按自动：你自己核对结果，有问题自己重跑，不要停下来等我确认。全程不要问任何问题。")
       );
       const userLine = input.prompt.trim();
       return lines
         .filter((line) => line !== null)
-        .map((line) => (line === userLine ? line : applyKeyColorText(line, input.keyColor)))
+        .map((line) => (line === userLine ? line : applyBackdropText(line, input.backdrop, input.keyColor)))
         .join("\n");
     }
 
@@ -10606,6 +10718,7 @@
             mode,
             shape,
             keyColor: draft.keyColor || cfg?.keyColor,
+            backdrop: cfg?.keyBackdrop,
             ...(shape === "stamp" ? { stampCols, stampRows } : {})
           });
           await openAssetChat(text);
@@ -15106,7 +15219,8 @@
             mode,
             kind,
             footprint,
-            keyColor: draft.keyColor || cfg?.keyColor
+            keyColor: draft.keyColor || cfg?.keyColor,
+            backdrop: cfg?.keyBackdrop
           });
           await openIsoAssetChat(text);
           setAiDraft(null);
@@ -20792,6 +20906,9 @@
                 )
               )
             ),
+            String(config.arkModel ?? "").includes("seedream-5-5")
+              ? h("p", { className: "SPR_hint" }, T("Seedream 5.5 支持原生透明通道：想让生图直接输出带 Alpha 的 PNG（不用绿幕抠像），把「抠像 → 幕布」改成「透明背景」。"))
+              : null,
             h(
               "label",
               { className: "SPR_field" },
@@ -20801,7 +20918,7 @@
                 value: config.arkSize,
                 onChange: (event) => void patch({ arkSize: event.target.value })
               }),
-              h("span", { className: "SPR_fieldLabel" }, T("1K / 2K / 4K 由模型决定像素；要固定尺寸请直接填 宽x高"))
+              h("span", { className: "SPR_fieldLabel" }, T("1K / 2K / 4K 由模型决定像素；Seedream 5.5 支持 1K / 1.5K / 2K，要固定尺寸请直接填 宽x高"))
             ),
             h(
               "label",
@@ -21616,6 +21733,31 @@
               h(
                 "div",
                 { className: "SPR_fields" },
+                h(
+                  "label",
+                  { className: "SPR_field" },
+                  h("span", { className: "SPR_fieldLabel" }, T("幕布")),
+                  h(
+                    "select",
+                    {
+                      className: "SPR_input",
+                      "data-testid": "cfg-key-backdrop",
+                      value: config.keyBackdrop === "transparent" ? "transparent" : "color",
+                      onChange: (event) => void patch({ keyBackdrop: event.target.value })
+                    },
+                    h("option", { value: "color" }, T("纯色幕布（生成后抠像）")),
+                    h("option", { value: "transparent" }, T("透明背景（Seedream 5.5 原生通道）"))
+                  )
+                ),
+                config.keyBackdrop === "transparent"
+                  ? h(
+                      "div",
+                      { className: "SPR_note", "data-kind": config.transparentBackdropReady === true ? "ok" : "error" },
+                      config.transparentBackdropReady === true
+                        ? T("透明幕布已就绪：生图会直接返回带 Alpha 的 PNG，不需要抠像；默认生图提示词也会改成「透明背景」。视频（MP4）没有透明通道，转圈 / 行走视频仍按纯色幕布处理。")
+                        : T("透明幕布需要「生图后端 = 火山方舟」且模型为 Seedream 5.5：请在「火山方舟（生图）」里切到 5.5，或把幕布改回纯色。")
+                    )
+                  : h("p", { className: "SPR_hint" }, T("纯色幕布：模型画一块纯绿 / 蓝幕等背景，生成后在本机抠掉。想直接拿到透明 PNG，把幕布改成「透明背景」并使用 Seedream 5.5。")),
                 h(KeyColorField, { label: T("抠像背景色（全局默认）"), value: config.keyColor, onChange: (value) => void patch({ keyColor: value }) }),
                 h(NumField, {
                   label: T("抠像下限"),

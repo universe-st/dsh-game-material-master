@@ -16,6 +16,13 @@ export interface ArkRequest {
   size: string;
   watermark: boolean;
   timeoutMs: number;
+  /**
+   * `transparent` = 让模型直接输出带 Alpha 通道的 RGBA PNG。
+   *
+   * 只有 Seedream 5.5 支持；调用方（`imageprovider`）负责在模型不支持时提前报错，
+   * 不能把参数丢给服务端换回一个 400。5.5 还要求 `output_format` 必须是 png。
+   */
+  background?: "transparent";
 }
 
 export interface ArkResult {
@@ -40,7 +47,18 @@ export class ArkError extends Error {
 }
 
 function isFiveSeries(model: string): boolean {
-  return /seedream-5-0/i.test(model);
+  return /seedream-5-(?:0|5)/i.test(model);
+}
+
+/**
+ * 这个模型能不能原生输出透明背景。
+ *
+ * 目前只有火山方舟 Seedream 5.5（`doubao-seedream-5-5-261028`）。5.0 pro / flash
+ * 在部分场景也能出透明图，但输入限制不同，我们只承诺 5.5 这一档；
+ * 其它模型一律走纯色幕布 + 本机抠像。
+ */
+export function supportsTransparentBackground(model: string): boolean {
+  return /seedream-5-5/i.test(model);
 }
 
 export function sniffExt(bytes: Buffer): string {
@@ -81,8 +99,16 @@ export async function generateImage(request: ArkRequest, signal?: AbortSignal): 
   };
   if (request.images.length === 1) body.image = request.images[0];
   else if (request.images.length > 1) body.image = request.images;
-  // output_format 只有 5.0 系列接受；4.x 传了会 400。
+  // output_format 只有 5.x 系列接受；4.x 传了会 400。
   if (isFiveSeries(request.model)) body.output_format = "png";
+  // `background:"transparent"` 只有 5.5 认；透明背景必须配 png（jpeg 会直接报错）。
+  if (request.background === "transparent") {
+    if (!supportsTransparentBackground(request.model)) {
+      throw new ArkError(`模型 ${request.model} 不支持透明背景（需要 Seedream 5.5）`);
+    }
+    body.background = "transparent";
+    body.output_format = "png";
+  }
 
   const timeout = AbortSignal.timeout(Math.max(10000, request.timeoutMs));
   const composed = signal === undefined ? timeout : AbortSignal.any([signal, timeout]);
